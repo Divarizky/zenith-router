@@ -11,6 +11,10 @@ import {
   applyConnectionAuth,
   markConnectionCooldown,
 } from "../services/auth.js";
+import {
+  needsTokenRefresh,
+  refreshOAuthToken,
+} from "../services/tokenRefresh.js";
 
 /**
  * Handle POST /v1/chat/completions (OpenAI client format)
@@ -78,8 +82,17 @@ export async function handleChat(c) {
   }
 
   // Pick connection from local DB if available
-  const connection = getActiveConnection(provider.id);
+  let connection = getActiveConnection(provider.id);
   if (connection) {
+    // Proactive token refresh if near expiry
+    if (needsTokenRefresh(connection)) {
+      try {
+        const refreshed = await refreshOAuthToken(connection);
+        if (refreshed) connection = refreshed;
+      } catch (err) {
+        console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
+      }
+    }
     applyConnectionAuth(upstreamHeaders, connection);
   }
 
@@ -90,13 +103,37 @@ export async function handleChat(c) {
   if (xApiKey) upstreamHeaders["x-api-key"] = xApiKey;
 
   try {
-    const upstreamRes = await executor.execute({
+    let upstreamRes = await executor.execute({
       url: upstreamUrl,
       method: "POST",
       headers: upstreamHeaders,
       body: JSON.stringify(upstreamPayload),
       signal: c.req.raw.signal,
     });
+
+    // Reactive 401/403 token refresh and retry once
+    if (
+      (upstreamRes.status === 401 || upstreamRes.status === 403) &&
+      connection?.auth_type === "oauth" &&
+      connection.credentials?.refresh_token
+    ) {
+      try {
+        const refreshed = await refreshOAuthToken(connection);
+        if (refreshed) {
+          connection = refreshed;
+          applyConnectionAuth(upstreamHeaders, connection);
+          upstreamRes = await executor.execute({
+            url: upstreamUrl,
+            method: "POST",
+            headers: upstreamHeaders,
+            body: JSON.stringify(upstreamPayload),
+            signal: c.req.raw.signal,
+          });
+        }
+      } catch (err) {
+        console.error(`[zenroute] Reactive refresh error for ${connection.id}:`, err.message);
+      }
+    }
 
     // Handle rate-limit cooldown
     if (upstreamRes.status === 429 && connection?.id) {

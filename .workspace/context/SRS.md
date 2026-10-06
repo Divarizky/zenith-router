@@ -16,7 +16,7 @@ Single-writer konten requirement: `to-requirements`.
 |---|---|---|---|
 | F-01 | Base Gateway & Core Translator | approved | 2026-10-06 |
 | F-02 | Provider Connections & OAuth | approved | 2026-10-06 |
-| F-03 | Usage Tracking & Quota Sync | draft | 2026-10-06 |
+| F-03 | Usage Tracking & Quota Sync | approved | 2026-10-06 |
 | F-04 | Token Saver Engine | draft | 2026-10-06 |
 | F-05 | Minimal Dashboard UI | draft | 2026-10-06 |
 
@@ -44,3 +44,14 @@ Single-writer konten requirement: `to-requirements`.
 - **REQ-15 (Account Management):** WHEN connection didaftarkan atau diupdate THEN sistem SHALL memvalidasi parameter dan menyimpannya ke tabel SQLite. (Ref: AC-07)
 - **REQ-16 (Background Refresher):** WHILE background refresh loop aktif THEN sistem SHALL memindai dan memperbarui token OAuth yang mendekati kedaluwarsa (<5 menit). (Ref: AC-08)
 - **Verification:** Integration tests menggunakan `:memory:` database untuk query CRUD koneksi, mock OAuth token refresh, dan simulasi penanganan 429/401.
+
+### F-03 — Usage Tracking & Quota Sync
+- **Scope:** Ekstraksi metrik token (in/out/total/duration) per request chat, penulisan ke tabel SQLite `usage_history`, live quota/balance sync untuk provider yang didukung, dan endpoint agregasi `/api/usage` & `/api/quota`.
+- **REQ-17 (Non-Streaming Usage):** WHEN non-streaming chat request selesai THEN sistem SHALL mengekstrak metrik token dari respons dan menyimpannya ke tabel `usage_history`. (Ref: AC-01)
+- **REQ-18 (Streaming Usage Tap):** WHILE streaming SSE berlangsung THEN sistem SHALL menangkap event usage tanpa memblokir transfer data ke client dan menyimpan total token ke `usage_history` saat stream selesai. (Ref: AC-02)
+- **REQ-19 (Usage Analytics API):** WHEN client meminta `GET /api/usage` THEN sistem SHALL mengembalikan agregasi data token yang dapat difilter berdasarkan rentang waktu atau provider. (Ref: AC-03)
+- **REQ-20 (Quota Status API):** WHEN client meminta `GET /api/quota` THEN sistem SHALL mengembalikan status sisa kuota dan saldo akun dari cache. (Ref: AC-04)
+- **REQ-21 (Live Quota Sync):** IF provider mendukung endpoint saldo/kuota THEN sistem SHALL menyinkronkan data sisa kuota live ke cache status koneksi. (Ref: AC-05)
+- **REQ-22 (Non-Blocking Failure):** IF persistensi usage mengalami error THEN sistem SHALL tidak menggagalkan respons utama chat ke client. (Ref: AC-06)
+- **REQ-23 (Exhausted Account Exclusion):** WHEN kuota akun terdeteksi 0 atau habis THEN sistem SHALL mengabaikan akun tersebut dari pemilihan rute aktif. (Ref: AC-07)
+- **Verification:** Unit tests penulisan `usage_history` via SQLite `:memory:`, streaming SSE usage tap test, dan endpoint testing `/api/usage`.

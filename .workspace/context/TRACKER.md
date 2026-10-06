@@ -2,12 +2,12 @@
 tracker: local
 features:
   - id: F-01
-    status: open
+    status: closed
     source: to-requirements
     created: 2026-10-06
     updated: 2026-10-06
     task_count: 4
-    task_done: 3
+    task_done: 4
   - id: F-02
     status: open
     source: to-requirements

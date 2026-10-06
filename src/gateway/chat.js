@@ -1,8 +1,14 @@
 import { resolveModel } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
+import {
+  translateRequest,
+  translateResponse,
+  createTransformStream,
+  FORMATS,
+} from "../translator/index.js";
 
 /**
- * Handle POST /v1/chat/completions
+ * Handle POST /v1/chat/completions (OpenAI client format)
  */
 export async function handleChat(c) {
   let body;
@@ -52,11 +58,8 @@ export async function handleChat(c) {
   const { provider, targetModel } = resolved;
   const executor = getExecutor(provider);
 
-  // Prepare outgoing payload
-  const upstreamPayload = {
-    ...body,
-    model: targetModel,
-  };
+  const targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
+  const upstreamPayload = translateRequest(FORMATS.OPENAI, targetFormat, body, targetModel);
 
   const upstreamUrl = provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
   const upstreamHeaders = {
@@ -64,11 +67,16 @@ export async function handleChat(c) {
     ...(provider.transport?.headers || {}),
   };
 
-  // Pass incoming authorization if present
-  const authHeader = c.req.header("authorization");
-  if (authHeader) {
-    upstreamHeaders["Authorization"] = authHeader;
+  // If upstream is Claude, set Anthropic version header
+  if (targetFormat === FORMATS.CLAUDE && !upstreamHeaders["Anthropic-Version"]) {
+    upstreamHeaders["Anthropic-Version"] = "2023-06-01";
   }
+
+  // Pass incoming authorization or api-key
+  const authHeader = c.req.header("authorization");
+  const xApiKey = c.req.header("x-api-key");
+  if (authHeader) upstreamHeaders["Authorization"] = authHeader;
+  if (xApiKey) upstreamHeaders["x-api-key"] = xApiKey;
 
   try {
     const upstreamRes = await executor.execute({
@@ -99,7 +107,14 @@ export async function handleChat(c) {
 
     // Handle streaming response
     if (body.stream) {
-      return new Response(upstreamRes.body, {
+      let responseStream = upstreamRes.body;
+      if (targetFormat !== FORMATS.OPENAI) {
+        responseStream = responseStream.pipeThrough(
+          createTransformStream(targetFormat, FORMATS.OPENAI, targetModel)
+        );
+      }
+
+      return new Response(responseStream, {
         status: 200,
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
@@ -111,8 +126,9 @@ export async function handleChat(c) {
     }
 
     // Handle non-streaming response
-    const resData = await upstreamRes.json();
-    return c.json(resData, 200);
+    const rawResData = await upstreamRes.json();
+    const finalData = translateResponse(targetFormat, FORMATS.OPENAI, rawResData, targetModel);
+    return c.json(finalData, 200);
   } catch (err) {
     return c.json(
       {

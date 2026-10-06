@@ -15,7 +15,7 @@ Single-writer konten requirement: `to-requirements`.
 | ID | Feature | Status | Updated |
 |---|---|---|---|
 | F-01 | Base Gateway & Core Translator | approved | 2026-10-06 |
-| F-02 | Provider Connections & OAuth | draft | 2026-10-06 |
+| F-02 | Provider Connections & OAuth | approved | 2026-10-06 |
 | F-03 | Usage Tracking & Quota Sync | draft | 2026-10-06 |
 | F-04 | Token Saver Engine | draft | 2026-10-06 |
 | F-05 | Minimal Dashboard UI | draft | 2026-10-06 |
@@ -32,3 +32,15 @@ Single-writer konten requirement: `to-requirements`.
 - **REQ-07 (Transport Failure):** IF provider upstream gagal sebelum byte respons pertama dikirim THEN sistem SHALL mengembalikan status HTTP error yang tepat tanpa membiarkan koneksi menggantung. (Ref: AC-07)
 - **REQ-08 (Warmup Intercept):** WHERE request terdeteksi sebagai prompt warmup atau model naming Claude Code THEN sistem SHALL mengembalikan respons instan sintetis tanpa memanggil provider upstream. (Ref: AC-08)
 - **Verification:** Unit tests untuk translator roundtrip (OpenAI ↔ Claude ↔ Gemini) dan integration tests untuk endpoint HTTP `/v1/chat/completions` dan `/v1/messages`.
+
+### F-02 — Provider Connections & OAuth
+- **Scope:** Penyimpanan akun kredensial ke SQLite (`connections`), OAuth token lifecycle (refresh, expiry), failover cooldown saat limit rate (429), dan konfigurasi proxy per koneksi.
+- **REQ-09 (SQLite Schema):** WHEN sistem diinisialisasi THEN database SQLite `data/zenroute.db` SHALL dibuat dengan tabel `connections` dan indeks yang sesuai bila belum ada. (Ref: AC-01)
+- **REQ-10 (Credential Selection):** WHEN request dialihkan ke suatu provider THEN sistem SHALL memilih connection aktif yang tidak dalam masa cooldown menggunakan strategi rotasi/prioritas. (Ref: AC-02)
+- **REQ-11 (Proactive Refresh):** IF access token suatu connection telah kedaluwarsa THEN sistem SHALL memperbarui token secara otomatis sebelum request diteruskan ke upstream. (Ref: AC-03)
+- **REQ-12 (Reactive Refresh 401):** IF upstream mengembalikan status HTTP 401 atau 403 THEN sistem SHALL me-refresh token sekali dan mengulang eksekusi request ke upstream. (Ref: AC-04)
+- **REQ-13 (Cooldown 429):** IF upstream mengembalikan status HTTP 429 THEN sistem SHALL menandai connection dengan cooldown sementara (`cooldown_until`). (Ref: AC-05)
+- **REQ-14 (Proxy Routing):** WHERE connection memiliki konfigurasi `proxy_url` THEN sistem SHALL merutekan HTTP request melalui proxy yang dikonfigurasi. (Ref: AC-06)
+- **REQ-15 (Account Management):** WHEN connection didaftarkan atau diupdate THEN sistem SHALL memvalidasi parameter dan menyimpannya ke tabel SQLite. (Ref: AC-07)
+- **REQ-16 (Background Refresher):** WHILE background refresh loop aktif THEN sistem SHALL memindai dan memperbarui token OAuth yang mendekati kedaluwarsa (<5 menit). (Ref: AC-08)
+- **Verification:** Integration tests menggunakan `:memory:` database untuk query CRUD koneksi, mock OAuth token refresh, dan simulasi penanganan 429/401.

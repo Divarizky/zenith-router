@@ -1,5 +1,10 @@
 import { resolveModel } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
+import {
+  getActiveConnection,
+  applyConnectionAuth,
+  markConnectionCooldown,
+} from "../services/auth.js";
 
 function isWarmupOrNamingRequest(body, userAgent = "") {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
@@ -165,7 +170,13 @@ export async function handleMessages(c) {
     ...(provider.transport?.headers || {}),
   };
 
-  // Pass incoming authorization or api-key
+  // Pick connection from local DB if available
+  const connection = getActiveConnection(provider.id);
+  if (connection) {
+    applyConnectionAuth(upstreamHeaders, connection);
+  }
+
+  // Pass incoming authorization or api-key as override
   const authHeader = c.req.header("authorization");
   const xApiKey = c.req.header("x-api-key");
   if (xApiKey) upstreamHeaders["x-api-key"] = xApiKey;
@@ -179,6 +190,11 @@ export async function handleMessages(c) {
       body: JSON.stringify(upstreamPayload),
       signal: c.req.raw.signal,
     });
+
+    // Handle rate-limit cooldown
+    if (upstreamRes.status === 429 && connection?.id) {
+      markConnectionCooldown(connection.id, 60000);
+    }
 
     if (!upstreamRes.ok) {
       const errText = await upstreamRes.text();

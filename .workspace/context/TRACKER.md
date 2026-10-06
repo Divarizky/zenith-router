@@ -14,7 +14,7 @@ features:
     created: 2026-10-06
     updated: 2026-10-06
     task_count: 4
-    task_done: 1
+    task_done: 2
   - id: F-03
     status: open
     source: to-requirements

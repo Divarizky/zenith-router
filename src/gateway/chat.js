@@ -6,6 +6,11 @@ import {
   createTransformStream,
   FORMATS,
 } from "../translator/index.js";
+import {
+  getActiveConnection,
+  applyConnectionAuth,
+  markConnectionCooldown,
+} from "../services/auth.js";
 
 /**
  * Handle POST /v1/chat/completions (OpenAI client format)
@@ -72,7 +77,13 @@ export async function handleChat(c) {
     upstreamHeaders["Anthropic-Version"] = "2023-06-01";
   }
 
-  // Pass incoming authorization or api-key
+  // Pick connection from local DB if available
+  const connection = getActiveConnection(provider.id);
+  if (connection) {
+    applyConnectionAuth(upstreamHeaders, connection);
+  }
+
+  // Pass incoming authorization or api-key as override if client supplied one
   const authHeader = c.req.header("authorization");
   const xApiKey = c.req.header("x-api-key");
   if (authHeader) upstreamHeaders["Authorization"] = authHeader;
@@ -86,6 +97,11 @@ export async function handleChat(c) {
       body: JSON.stringify(upstreamPayload),
       signal: c.req.raw.signal,
     });
+
+    // Handle rate-limit cooldown
+    if (upstreamRes.status === 429 && connection?.id) {
+      markConnectionCooldown(connection.id, 60000);
+    }
 
     // Handle upstream error response
     if (!upstreamRes.ok) {

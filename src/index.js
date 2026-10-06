@@ -1,13 +1,34 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
+import { fileURLToPath } from "node:url";
+import { handleListModels } from "./gateway/models.js";
 
-const app = new Hono();
+export const app = new Hono();
 const PORT = Number(process.env.PORT || 20128);
+
+// Explicit CORS middleware for all endpoints
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["*"],
+  })
+);
+
+// Fallback OPTIONS handler to guarantee CORS headers on any raw OPTIONS preflight
+app.options("*", (c) => {
+  c.header("Access-Control-Allow-Origin", "*");
+  c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  c.header("Access-Control-Allow-Headers", "*");
+  return c.text("", 204);
+});
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", service: "zenroute", timestamp: Date.now() }));
 
-// Info
+// Home status
 app.get("/", (c) => {
   return c.html(`
     <!DOCTYPE html>
@@ -35,16 +56,15 @@ app.get("/", (c) => {
   `);
 });
 
-// v1 Models placeholder
-app.get("/v1/models", (c) => {
-  return c.json({
-    object: "list",
-    data: []
-  });
-});
+// Models Discovery
+app.get("/v1/models", handleListModels);
 
-console.log(`[zenroute] Starting on http://localhost:${PORT}`);
-serve({
-  fetch: app.fetch,
-  port: PORT,
-});
+// Start server ONLY when executed directly as entrypoint (not when imported in tests)
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  console.log(`[zenroute] Starting on http://localhost:${PORT}`);
+  serve({
+    fetch: app.fetch,
+    port: PORT,
+  });
+}

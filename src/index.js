@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { fileURLToPath } from "node:url";
 import { handleListModels } from "./gateway/models.js";
+import { handleChat } from "./gateway/chat.js";
 
 export const app = new Hono();
 const PORT = Number(process.env.PORT || 20128);
@@ -58,6 +59,9 @@ app.get("/", (c) => {
 
 // Models Discovery
 app.get("/v1/models", handleListModels);
+
+// Chat Completions
+app.post("/v1/chat/completions", handleChat);
 
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

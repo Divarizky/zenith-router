@@ -1,0 +1,128 @@
+import { resolveModel } from "../providers/index.js";
+import { getExecutor } from "../executors/base.js";
+
+/**
+ * Handle POST /v1/chat/completions
+ */
+export async function handleChat(c) {
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (err) {
+    return c.json(
+      {
+        error: {
+          message: "Invalid JSON in request body",
+          type: "invalid_request_error",
+          code: "bad_request",
+        },
+      },
+      400
+    );
+  }
+
+  if (!body || !body.model || !Array.isArray(body.messages)) {
+    return c.json(
+      {
+        error: {
+          message: "Missing or invalid 'model' or 'messages' parameter",
+          type: "invalid_request_error",
+          code: "bad_request",
+        },
+      },
+      400
+    );
+  }
+
+  // Resolve target provider and model
+  const resolved = resolveModel(body.model);
+  if (!resolved || !resolved.provider) {
+    return c.json(
+      {
+        error: {
+          message: `Model '${body.model}' not found in registry`,
+          type: "invalid_request_error",
+          code: "model_not_found",
+        },
+      },
+      404
+    );
+  }
+
+  const { provider, targetModel } = resolved;
+  const executor = getExecutor(provider);
+
+  // Prepare outgoing payload
+  const upstreamPayload = {
+    ...body,
+    model: targetModel,
+  };
+
+  const upstreamUrl = provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
+  const upstreamHeaders = {
+    "Content-Type": "application/json",
+    ...(provider.transport?.headers || {}),
+  };
+
+  // Pass incoming authorization if present
+  const authHeader = c.req.header("authorization");
+  if (authHeader) {
+    upstreamHeaders["Authorization"] = authHeader;
+  }
+
+  try {
+    const upstreamRes = await executor.execute({
+      url: upstreamUrl,
+      method: "POST",
+      headers: upstreamHeaders,
+      body: JSON.stringify(upstreamPayload),
+      signal: c.req.raw.signal,
+    });
+
+    // Handle upstream error response
+    if (!upstreamRes.ok) {
+      const errText = await upstreamRes.text();
+      let errJson;
+      try {
+        errJson = JSON.parse(errText);
+      } catch {
+        errJson = {
+          error: {
+            message: errText || `Upstream returned HTTP ${upstreamRes.status}`,
+            type: "upstream_error",
+            code: `http_${upstreamRes.status}`,
+          },
+        };
+      }
+      return c.json(errJson, upstreamRes.status);
+    }
+
+    // Handle streaming response
+    if (body.stream) {
+      return new Response(upstreamRes.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+
+    // Handle non-streaming response
+    const resData = await upstreamRes.json();
+    return c.json(resData, 200);
+  } catch (err) {
+    return c.json(
+      {
+        error: {
+          message: `Internal gateway error: ${err.message}`,
+          type: "gateway_error",
+          code: "internal_error",
+        },
+      },
+      500
+    );
+  }
+}

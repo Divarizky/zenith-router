@@ -1,0 +1,226 @@
+import { resolveModel } from "../providers/index.js";
+import { getExecutor } from "../executors/base.js";
+
+function isWarmupOrNamingRequest(body, userAgent = "") {
+  if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
+
+  const firstMsg = body.messages[0];
+  const firstContent = typeof firstMsg.content === "string"
+    ? firstMsg.content
+    : (Array.isArray(firstMsg.content) ? firstMsg.content.map((c) => c.text || "").join(" ") : "");
+
+  if (firstContent.trim() === "Warmup" || firstContent.trim().toLowerCase() === "warmup") {
+    return true;
+  }
+
+  // Claude Code naming requests
+  if (typeof body.system === "string" && body.system.includes("isNewTopic")) {
+    return true;
+  }
+  if (Array.isArray(body.system)) {
+    const sysText = body.system.map((s) => s.text || "").join(" ");
+    if (sysText.includes("isNewTopic")) return true;
+  }
+
+  return false;
+}
+
+function createSyntheticWarmupStream(model) {
+  const events = [
+    `event: message_start\ndata: ${JSON.stringify({
+      type: "message_start",
+      message: {
+        id: "msg_warmup",
+        type: "message",
+        role: "assistant",
+        content: [],
+        model: model || "claude-3-5-sonnet",
+        stop_reason: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    })}\n\n`,
+    `event: content_block_start\ndata: ${JSON.stringify({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    })}\n\n`,
+    `event: content_block_delta\ndata: ${JSON.stringify({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "Warmup OK" },
+    })}\n\n`,
+    `event: content_block_stop\ndata: ${JSON.stringify({
+      type: "content_block_stop",
+      index: 0,
+    })}\n\n`,
+    `event: message_delta\ndata: ${JSON.stringify({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: 2 },
+    })}\n\n`,
+    `event: message_stop\ndata: ${JSON.stringify({
+      type: "message_stop",
+    })}\n\n`,
+  ];
+
+  return new ReadableStream({
+    start(controller) {
+      for (const ev of events) {
+        controller.enqueue(new TextEncoder().encode(ev));
+      }
+      controller.close();
+    },
+  });
+}
+
+/**
+ * Handle POST /v1/messages (Anthropic Claude format)
+ */
+export async function handleMessages(c) {
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (err) {
+    return c.json(
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message: "Invalid JSON in request body",
+        },
+      },
+      400
+    );
+  }
+
+  if (!body || !body.model || !Array.isArray(body.messages)) {
+    return c.json(
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message: "Missing required 'model' or 'messages' field",
+        },
+      },
+      400
+    );
+  }
+
+  const userAgent = c.req.header("user-agent") || "";
+
+  // Intercept Claude Code warmup or naming request
+  if (isWarmupOrNamingRequest(body, userAgent)) {
+    if (body.stream) {
+      return new Response(createSyntheticWarmupStream(body.model), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        },
+      });
+    }
+
+    return c.json(
+      {
+        id: "msg_synthetic_warmup",
+        type: "message",
+        role: "assistant",
+        model: body.model,
+        content: [{ type: "text", text: "Warmup OK" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      200
+    );
+  }
+
+  // Resolve target provider and model
+  const resolved = resolveModel(body.model);
+  if (!resolved || !resolved.provider) {
+    return c.json(
+      {
+        type: "error",
+        error: {
+          type: "not_found_error",
+          message: `Model '${body.model}' not found in registry`,
+        },
+      },
+      404
+    );
+  }
+
+  const { provider, targetModel } = resolved;
+  const executor = getExecutor(provider);
+
+  const upstreamPayload = {
+    ...body,
+    model: targetModel,
+  };
+
+  const upstreamUrl = provider.transport?.baseUrl || "https://api.anthropic.com/v1/messages";
+  const upstreamHeaders = {
+    "Content-Type": "application/json",
+    "Anthropic-Version": "2023-06-01",
+    ...(provider.transport?.headers || {}),
+  };
+
+  // Pass incoming authorization or api-key
+  const authHeader = c.req.header("authorization");
+  const xApiKey = c.req.header("x-api-key");
+  if (xApiKey) upstreamHeaders["x-api-key"] = xApiKey;
+  if (authHeader) upstreamHeaders["Authorization"] = authHeader;
+
+  try {
+    const upstreamRes = await executor.execute({
+      url: upstreamUrl,
+      method: "POST",
+      headers: upstreamHeaders,
+      body: JSON.stringify(upstreamPayload),
+      signal: c.req.raw.signal,
+    });
+
+    if (!upstreamRes.ok) {
+      const errText = await upstreamRes.text();
+      let errJson;
+      try {
+        errJson = JSON.parse(errText);
+      } catch {
+        errJson = {
+          type: "error",
+          error: {
+            type: "upstream_error",
+            message: errText || `Upstream returned HTTP ${upstreamRes.status}`,
+          },
+        };
+      }
+      return c.json(errJson, upstreamRes.status);
+    }
+
+    if (body.stream) {
+      return new Response(upstreamRes.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+
+    const resData = await upstreamRes.json();
+    return c.json(resData, 200);
+  } catch (err) {
+    return c.json(
+      {
+        type: "error",
+        error: {
+          type: "api_error",
+          message: `Internal gateway error: ${err.message}`,
+        },
+      },
+      500
+    );
+  }
+}

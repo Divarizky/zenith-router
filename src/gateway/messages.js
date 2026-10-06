@@ -201,6 +201,7 @@ export async function handleMessages(c) {
       headers: upstreamHeaders,
       body: JSON.stringify(upstreamPayload),
       signal: c.req.raw.signal,
+      proxyUrl: connection?.proxy_url,
     });
 
     // Reactive 401/403 token refresh and retry once
@@ -220,6 +221,7 @@ export async function handleMessages(c) {
             headers: upstreamHeaders,
             body: JSON.stringify(upstreamPayload),
             signal: c.req.raw.signal,
+            proxyUrl: connection?.proxy_url,
           });
         }
       } catch (err) {

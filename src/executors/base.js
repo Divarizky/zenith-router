@@ -1,3 +1,5 @@
+import { proxyFetch } from "./proxy.js";
+
 let customExecutor = null;
 
 /**
@@ -19,7 +21,7 @@ export class BaseExecutor {
   /**
    * Execute an HTTP request
    */
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl }) {
     const effectiveTimeout = timeoutMs || this.timeoutMs;
     const timeoutSignal = AbortSignal.timeout(effectiveTimeout);
     const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
@@ -30,6 +32,19 @@ export class BaseExecutor {
     }
 
     try {
+      if (proxyUrl) {
+        return await proxyFetch(
+          url,
+          {
+            method,
+            headers: requestHeaders,
+            body,
+            signal: combinedSignal,
+          },
+          proxyUrl
+        );
+      }
+
       const response = await this.fetchFn(url, {
         method,
         headers: requestHeaders,

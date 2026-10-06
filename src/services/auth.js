@@ -4,6 +4,7 @@ import {
   updateConnectionLastUsed,
 } from "../db/index.js";
 import { getProvider } from "../providers/index.js";
+import { isConnectionExhausted } from "./quota.js";
 
 /**
  * Check if a connection is currently locked under cooldown
@@ -30,9 +31,9 @@ export function getActiveConnection(providerId) {
 
   const connections = getConnections(providerId);
 
-  // Filter out inactive or cooldown accounts
+  // Filter out inactive, cooldown, or exhausted accounts
   const available = connections.filter(
-    (c) => c.is_active === 1 && !isConnectionInCooldown(c)
+    (c) => c.is_active === 1 && !isConnectionInCooldown(c) && !isConnectionExhausted(c)
   );
 
   if (available.length > 0) {

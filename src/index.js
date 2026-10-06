@@ -6,6 +6,7 @@ import { handleListModels } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
 import { handleGetUsage } from "./services/usage.js";
+import { handleGetQuota } from "./services/quota.js";
 
 export const app = new Hono();
 const PORT = Number(process.env.PORT || 20128);
@@ -70,6 +71,7 @@ app.post("/v1/messages", handleMessages);
 
 // Analytics & Usage
 app.get("/api/usage", handleGetUsage);
+app.get("/api/quota", handleGetQuota);
 
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

@@ -1,0 +1,38 @@
+# Feature execution progress. See `.workspace/context/SRS.md` for requirement lifecycle.
+tracker: local
+features:
+  - id: F-01
+    status: open
+    source: to-requirements
+    created: 2026-10-06
+    updated: 2026-10-06
+    task_count: 0
+    task_done: 0
+  - id: F-02
+    status: open
+    source: to-requirements
+    created: 2026-10-06
+    updated: 2026-10-06
+    task_count: 0
+    task_done: 0
+  - id: F-03
+    status: open
+    source: to-requirements
+    created: 2026-10-06
+    updated: 2026-10-06
+    task_count: 0
+    task_done: 0
+  - id: F-04
+    status: open
+    source: to-requirements
+    created: 2026-10-06
+    updated: 2026-10-06
+    task_count: 0
+    task_done: 0
+  - id: F-05
+    status: open
+    source: to-requirements
+    created: 2026-10-06
+    updated: 2026-10-06
+    task_count: 0
+    task_done: 0

@@ -9,6 +9,10 @@ import {
   needsTokenRefresh,
   refreshOAuthToken,
 } from "../services/tokenRefresh.js";
+import {
+  recordUsage,
+  createUsageTapStream,
+} from "../services/usage.js";
 
 function isWarmupOrNamingRequest(body, userAgent = "") {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
@@ -160,6 +164,7 @@ export async function handleMessages(c) {
   }
 
   const { provider, targetModel } = resolved;
+  const startTime = Date.now();
   const executor = getExecutor(provider);
 
   const upstreamPayload = {
@@ -252,7 +257,15 @@ export async function handleMessages(c) {
     }
 
     if (body.stream) {
-      return new Response(upstreamRes.body, {
+      const responseStream = upstreamRes.body.pipeThrough(
+        createUsageTapStream({
+          connectionId: connection?.id,
+          model: targetModel,
+          startTime,
+        })
+      );
+
+      return new Response(responseStream, {
         status: 200,
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
@@ -264,6 +277,19 @@ export async function handleMessages(c) {
     }
 
     const resData = await upstreamRes.json();
+    const durationMs = Date.now() - startTime;
+    const inputTokens = resData.usage?.input_tokens || 0;
+    const outputTokens = resData.usage?.output_tokens || 0;
+    queueMicrotask(() => {
+      recordUsage({
+        connectionId: connection?.id,
+        model: targetModel,
+        inputTokens,
+        outputTokens,
+        durationMs,
+      });
+    });
+
     return c.json(resData, 200);
   } catch (err) {
     return c.json(

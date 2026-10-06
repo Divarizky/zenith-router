@@ -15,6 +15,10 @@ import {
   needsTokenRefresh,
   refreshOAuthToken,
 } from "../services/tokenRefresh.js";
+import {
+  recordUsage,
+  createUsageTapStream,
+} from "../services/usage.js";
 
 /**
  * Handle POST /v1/chat/completions (OpenAI client format)
@@ -65,6 +69,7 @@ export async function handleChat(c) {
   }
 
   const { provider, targetModel } = resolved;
+  const startTime = Date.now();
   const executor = getExecutor(provider);
 
   const targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
@@ -169,6 +174,14 @@ export async function handleChat(c) {
         );
       }
 
+      responseStream = responseStream.pipeThrough(
+        createUsageTapStream({
+          connectionId: connection?.id,
+          model: targetModel,
+          startTime,
+        })
+      );
+
       return new Response(responseStream, {
         status: 200,
         headers: {
@@ -183,6 +196,21 @@ export async function handleChat(c) {
     // Handle non-streaming response
     const rawResData = await upstreamRes.json();
     const finalData = translateResponse(targetFormat, FORMATS.OPENAI, rawResData, targetModel);
+
+    // Record non-streaming usage asynchronously
+    const durationMs = Date.now() - startTime;
+    const inputTokens = finalData.usage?.prompt_tokens || finalData.usage?.input_tokens || 0;
+    const outputTokens = finalData.usage?.completion_tokens || finalData.usage?.output_tokens || 0;
+    queueMicrotask(() => {
+      recordUsage({
+        connectionId: connection?.id,
+        model: targetModel,
+        inputTokens,
+        outputTokens,
+        durationMs,
+      });
+    });
+
     return c.json(finalData, 200);
   } catch (err) {
     return c.json(

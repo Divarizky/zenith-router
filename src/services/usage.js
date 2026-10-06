@@ -43,6 +43,69 @@ export function recordUsage({
 }
 
 /**
+ * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
+ */
+export function createUsageTapStream({ connectionId, model, startTime = Date.now() }) {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let buffer = "";
+  const textDecoder = new TextDecoder();
+
+  return new TransformStream({
+    transform(chunk, controller) {
+      // Immediate passthrough to ensure zero latency for the client
+      controller.enqueue(chunk);
+
+      try {
+        buffer += textDecoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data:")) {
+            const dataStr = trimmed.slice(5).trim();
+            if (dataStr && dataStr !== "[DONE]") {
+              try {
+                const parsed = JSON.parse(dataStr);
+                // OpenAI usage chunk
+                if (parsed.usage) {
+                  if (typeof parsed.usage.prompt_tokens === "number") inputTokens = parsed.usage.prompt_tokens;
+                  if (typeof parsed.usage.completion_tokens === "number") outputTokens = parsed.usage.completion_tokens;
+                }
+                // Claude usage chunk (message_start & message_delta)
+                if (parsed.message?.usage) {
+                  if (typeof parsed.message.usage.input_tokens === "number") {
+                    inputTokens = parsed.message.usage.input_tokens;
+                  }
+                }
+                if (parsed.usage?.output_tokens) {
+                  outputTokens = parsed.usage.output_tokens;
+                }
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+    },
+
+    flush() {
+      const durationMs = Date.now() - startTime;
+      // Record usage asynchronously to avoid blocking stream closure
+      queueMicrotask(() => {
+        recordUsage({
+          connectionId,
+          model,
+          inputTokens,
+          outputTokens,
+          durationMs,
+        });
+      });
+    },
+  });
+}
+
+/**
  * Get aggregated token usage statistics
  */
 export function getUsageStats(options = {}) {

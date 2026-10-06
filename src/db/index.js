@@ -51,17 +51,26 @@ CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id,
 /**
  * Initialize SQLite database and create schema
  */
-export function initDb(dbPath = "data/zenroute.db") {
-  if (dbPath !== ":memory:") {
-    const dir = dirname(dbPath);
+export function initDb(dbPath = null) {
+  const effectivePath = dbPath || (process.env.NODE_ENV === "test" ? ":memory:" : "data/zenroute.db");
+
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch {}
+    dbInstance = null;
+  }
+
+  if (effectivePath !== ":memory:") {
+    const dir = dirname(effectivePath);
     try {
       mkdirSync(dir, { recursive: true });
     } catch {}
   }
 
-  dbInstance = new DatabaseSync(dbPath);
+  dbInstance = new DatabaseSync(effectivePath);
 
-  if (dbPath !== ":memory:") {
+  if (effectivePath !== ":memory:") {
     try {
       dbInstance.exec("PRAGMA journal_mode = WAL;");
     } catch {}

@@ -1,10 +1,40 @@
+function claudeContentToOpenAIFinish(content, stopReason) {
+  let text = "";
+  const toolCalls = [];
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      if (!c) continue;
+      if (c.type === "text") text += c.text || "";
+      if (c.type === "tool_use") {
+        toolCalls.push({
+          id: c.id,
+          type: "function",
+          function: {
+            name: c.name,
+            arguments: JSON.stringify(c.input || {}),
+          },
+        });
+      }
+    }
+  } else if (typeof content === "string") {
+    text = content;
+  }
+
+  const message = { role: "assistant", content: text || null };
+  if (toolCalls.length > 0) message.tool_calls = toolCalls;
+
+  return {
+    message,
+    finish_reason: stopReason === "end_turn" || stopReason === "tool_use" ? "stop" : (stopReason || "stop"),
+    tool_calls: toolCalls,
+  };
+}
+
 /**
  * Convert Claude message JSON to OpenAI chat.completion JSON
  */
 export function claudeToOpenAIResponse(data, defaultModel = "claude") {
-  const content = Array.isArray(data.content)
-    ? data.content.map((c) => c.text || "").join("")
-    : (typeof data.content === "string" ? data.content : "");
+  const { message, finish_reason } = claudeContentToOpenAIFinish(data.content, data.stop_reason);
 
   return {
     id: data.id || `chatcmpl-${Date.now()}`,
@@ -14,11 +44,8 @@ export function claudeToOpenAIResponse(data, defaultModel = "claude") {
     choices: [
       {
         index: 0,
-        message: {
-          role: data.role || "assistant",
-          content,
-        },
-        finish_reason: data.stop_reason === "end_turn" ? "stop" : (data.stop_reason || "stop"),
+        message,
+        finish_reason,
       },
     ],
     usage: {
@@ -34,14 +61,25 @@ export function claudeToOpenAIResponse(data, defaultModel = "claude") {
  */
 export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
   const choice = data.choices?.[0] || {};
-  const contentText = choice.message?.content || "";
+  const msg = choice.message || {};
+  const content = [{ type: "text", text: typeof msg.content === "string" ? msg.content : "" }];
+  if (Array.isArray(msg.tool_calls)) {
+    for (const tc of msg.tool_calls) {
+      content.push({
+        type: "tool_use",
+        id: tc.id,
+        name: tc.function?.name,
+        input: typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments || "{}") : (tc.function?.arguments || {}),
+      });
+    }
+  }
 
   return {
     id: data.id || `msg_${Date.now()}`,
     type: "message",
-    role: choice.message?.role || "assistant",
+    role: msg.role || "assistant",
     model: data.model || defaultModel,
-    content: [{ type: "text", text: contentText }],
+    content,
     stop_reason: choice.finish_reason === "stop" ? "end_turn" : (choice.finish_reason || "end_turn"),
     usage: {
       input_tokens: data.usage?.prompt_tokens || 0,
@@ -59,6 +97,8 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
   }
 
   let buffer = "";
+  let currentEvent = null;
+  let doneSent = false;
   const chunkId = `chatcmpl-${Date.now()}`;
   const textDecoder = new TextDecoder();
   const textEncoder = new TextEncoder();
@@ -70,12 +110,9 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
       // Keep unfinished line in buffer
       buffer = lines.pop() || "";
 
-      let currentEvent = null;
-
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) {
-          currentEvent = null;
           continue;
         }
 
@@ -89,78 +126,97 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
 
           // Translation from Claude SSE to OpenAI SSE
           if (sourceFormat === "claude" && targetFormat === "openai") {
-            if (currentEvent === "content_block_delta") {
-              try {
-                const parsed = JSON.parse(dataStr);
-                const text = parsed.delta?.text || "";
-                if (text) {
+            if (dataStr === "[DONE]") {
+              if (!doneSent) {
+                controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+                doneSent = true;
+              }
+              continue;
+            }
+
+            if (currentEvent === "ping") continue;
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (currentEvent === "content_block_delta") {
+                const delta = parsed.delta || {};
+                if (delta.text) {
                   const openAIChunk = {
                     id: chunkId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
                     model: model || "claude",
-                    choices: [
-                      {
-                        index: 0,
-                        delta: { content: text },
-                        finish_reason: null,
-                      },
-                    ],
+                    choices: [{ index: 0, delta: { content: delta.text }, finish_reason: null }],
                   };
                   controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
                 }
-              } catch {}
-            } else if (currentEvent === "message_stop") {
-              const finishChunk = {
-                id: chunkId,
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: model || "claude",
-                choices: [
-                  {
-                    index: 0,
-                    delta: {},
-                    finish_reason: "stop",
-                  },
-                ],
-              };
-              controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(finishChunk)}\n\n`));
-              controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
-            }
+              } else if (currentEvent === "message_stop" || currentEvent === "content_block_stop") {
+                if (currentEvent === "message_stop" && !doneSent) {
+                  const finishChunk = {
+                    id: chunkId,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: model || "claude",
+                    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                  };
+                  controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(finishChunk)}\n\n`));
+                  controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+                  doneSent = true;
+                }
+              } else if (currentEvent === "message_delta") {
+                const stopReason = parsed.delta?.stop_reason;
+                if (stopReason) {
+                  const finishChunk = {
+                    id: chunkId,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: model || "claude",
+                    choices: [{ index: 0, delta: {}, finish_reason: stopReason === "tool_use" ? "tool_calls" : "stop" }],
+                  };
+                  controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(finishChunk)}\n\n`));
+                }
+              }
+            } catch {}
           }
 
           // Translation from OpenAI SSE to Claude SSE
           else if (sourceFormat === "openai" && targetFormat === "claude") {
             if (dataStr === "[DONE]") {
-              controller.enqueue(
-                textEncoder.encode(
-                  `event: message_delta\ndata: ${JSON.stringify({
-                    type: "message_delta",
-                    delta: { stop_reason: "end_turn", stop_sequence: null },
-                  })}\n\n`
-                )
-              );
-              controller.enqueue(
-                textEncoder.encode(`event: message_stop\ndata: {"type":"message_stop"}\n\n`)
-              );
-            } else {
-              try {
-                const parsed = JSON.parse(dataStr);
-                const deltaText = parsed.choices?.[0]?.delta?.content;
-                if (deltaText) {
-                  const claudeEvent = {
-                    type: "content_block_delta",
-                    index: 0,
-                    delta: { type: "text_delta", text: deltaText },
-                  };
-                  controller.enqueue(
-                    textEncoder.encode(
-                      `event: content_block_delta\ndata: ${JSON.stringify(claudeEvent)}\n\n`
-                    )
-                  );
-                }
-              } catch {}
+              if (!doneSent) {
+                controller.enqueue(
+                  textEncoder.encode(
+                    `event: message_delta\ndata: ${JSON.stringify({
+                      type: "message_delta",
+                      delta: { stop_reason: "end_turn", stop_sequence: null },
+                    })}\n\n`
+                  )
+                );
+                controller.enqueue(
+                  textEncoder.encode(`event: message_stop\ndata: {"type":"message_stop"}\n\n`)
+                );
+                doneSent = true;
+              }
+              continue;
             }
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              const choice = parsed.choices?.[0] || {};
+              const delta = choice.delta || {};
+              const deltaText = delta.content;
+              if (deltaText) {
+                const claudeEvent = {
+                  type: "content_block_delta",
+                  index: 0,
+                  delta: { type: "text_delta", text: deltaText },
+                };
+                controller.enqueue(
+                  textEncoder.encode(
+                    `event: content_block_delta\ndata: ${JSON.stringify(claudeEvent)}\n\n`
+                  )
+                );
+              }
+            } catch {}
           }
         }
       }
@@ -168,7 +224,10 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
 
     flush(controller) {
       if (sourceFormat === "claude" && targetFormat === "openai") {
-        controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+        if (!doneSent) {
+          controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+          doneSent = true;
+        }
       }
     },
   });

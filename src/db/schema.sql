@@ -41,3 +41,14 @@ CREATE TABLE IF NOT EXISTS usage_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id, timestamp);
+
+-- Gateway API keys: only the SHA-256 hash is stored; the plaintext key is shown once on creation.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER DEFAULT 0
+);

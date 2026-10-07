@@ -1,8 +1,23 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let dbInstance = null;
+
+const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+// node --test sets NODE_TEST_CONTEXT in every test process; without this check,
+// tests that never call initDb(":memory:") would write into the real database.
+function isTestRun() {
+  return process.env.NODE_ENV === "test" || Boolean(process.env.NODE_TEST_CONTEXT);
+}
+
+function defaultDbPath() {
+  if (process.env.ZENROUTE_DB_PATH) return process.env.ZENROUTE_DB_PATH;
+  if (isTestRun()) return ":memory:";
+  return join(PROJECT_ROOT, "data", "zenroute.db");
+}
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS connections (
@@ -46,13 +61,23 @@ CREATE TABLE IF NOT EXISTS usage_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER DEFAULT 0
+);
 `;
 
 /**
  * Initialize SQLite database and create schema
  */
 export function initDb(dbPath = null) {
-  const effectivePath = dbPath || (process.env.NODE_ENV === "test" ? ":memory:" : "data/zenroute.db");
+  const effectivePath = dbPath || defaultDbPath();
 
   if (dbInstance) {
     try {

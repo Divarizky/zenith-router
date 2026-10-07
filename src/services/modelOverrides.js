@@ -62,9 +62,45 @@ export function disableModel(provider, model_id) {
   db.prepare(`INSERT OR IGNORE INTO disabled_models (provider, model_id) VALUES (?, ?)`).run(provider, model_id);
 }
 
+export function disableModels(provider, modelIds) {
+  if (!Array.isArray(modelIds) || modelIds.length === 0) return 0;
+  const db = getDb();
+  const stmt = db.prepare(`INSERT OR IGNORE INTO disabled_models (provider, model_id) VALUES (?, ?)`);
+  let count = 0;
+  db.exec("BEGIN");
+  try {
+    for (const id of modelIds) {
+      count += Number(stmt.run(provider, String(id)).changes);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  return count;
+}
+
 export function enableModel(provider, model_id) {
   const db = getDb();
   db.prepare(`DELETE FROM disabled_models WHERE provider = ? AND model_id = ?`).run(provider, model_id);
+}
+
+export function enableModels(provider, modelIds) {
+  if (!Array.isArray(modelIds) || modelIds.length === 0) return 0;
+  const db = getDb();
+  const stmt = db.prepare(`DELETE FROM disabled_models WHERE provider = ? AND model_id = ?`);
+  let count = 0;
+  db.exec("BEGIN");
+  try {
+    for (const id of modelIds) {
+      count += Number(stmt.run(provider, String(id)).changes);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  return count;
 }
 
 export function getDisabledModels() {

@@ -14,6 +14,7 @@ import openrouter from "./registry/openrouter.js";
 import llm7 from "./registry/llm7.js";
 import bazaarlink from "./registry/bazaarlink.js";
 import together from "./registry/together.js";
+import freebuff from "./registry/freebuff.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
 
 const REGISTRY = [
@@ -33,6 +34,7 @@ const REGISTRY = [
   llm7,
   bazaarlink,
   together,
+  freebuff,
 ];
 
 const providerMap = new Map();

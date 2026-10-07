@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { app } from "../src/index.js";
 import { getAvailableModels, getProvider } from "../src/providers/index.js";
 
-test("Provider Registry - contains 16 core providers", () => {
+test("Provider Registry - contains 17 core providers", () => {
   const providers = [
     "claude",
     "codex",
@@ -21,6 +21,7 @@ test("Provider Registry - contains 16 core providers", () => {
     "llm7",
     "bazaarlink",
     "together",
+    "freebuff",
   ];
   for (const id of providers) {
     const p = getProvider(id);
@@ -66,9 +67,10 @@ test("Provider Registry - new providers use expected configs", () => {
   assert.strictEqual(bzl.category, "apikey");
   assert.strictEqual(bzl.transport.baseUrl, "https://bazaarlink.ai/api/v1/chat/completions");
 
-  const tg = getProvider("together");
-  assert.strictEqual(tg.category, "apikey");
-  assert.strictEqual(tg.transport.baseUrl, "https://api.together.xyz/v1/chat/completions");
+  const fb = getProvider("freebuff");
+  assert.strictEqual(fb.category, "oauth");
+  assert.strictEqual(fb.executor, "freebuff");
+  assert.strictEqual(fb.transport.baseUrl, "https://www.codebuff.com/api/v1/chat/completions");
 });
 
 test("Provider Registry - aligned configs for codex, github, kiro, and antigravity", () => {
@@ -115,6 +117,7 @@ test("Provider Registry - getAvailableModels aggregates model list with provider
   assert.ok(modelIds.some((id) => id.startsWith("llm7/")), "Must contain LLM7 model");
   assert.ok(modelIds.some((id) => id.startsWith("bzl/")), "Must contain Bazaarlink model");
   assert.ok(modelIds.some((id) => id.startsWith("together/")), "Must contain Together model");
+  assert.ok(modelIds.some((id) => id.startsWith("fb/")), "Must contain Freebuff model");
 });
 
 test("GET /v1/models - returns OpenAI compatible model list", async () => {

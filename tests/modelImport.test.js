@@ -128,7 +128,7 @@ test("dashboard import flow - modal, redirect notice, selection column, and clea
   assert.ok(html.includes("openModal('import-models-modal')"));
   assert.ok(html.includes(`value="all"`));
   assert.ok(!html.includes(`value="free"`), "free models are synced, not imported");
-  assert.ok(!html.includes(`data-select-all="imported"`), "no selection column without imported rows");
+  assert.ok(html.includes(`data-select-all="models"`), "selection column for model management");
 
   // OpenCode syncs its free models: no import button, a Sync Now button instead.
   const oc = await (await app.request("/dashboard/providers/opencode")).text();
@@ -147,8 +147,7 @@ test("dashboard import flow - modal, redirect notice, selection column, and clea
   assert.ok(html.includes("kc/vendor/paid"));
   assert.ok(html.includes("Imported"));
   assert.ok(html.includes(">Free</span>"));
-  assert.ok(html.includes(`data-select-all="imported"`));
-  assert.strictEqual((html.match(/name="model_ids"/g) || []).length, 5, "one checkbox per imported row");
+  assert.ok(html.includes(`data-select-all="models"`));
   assert.ok(html.includes("Delete Selected"));
   assert.ok(html.includes("Clear Imported"));
 

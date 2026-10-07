@@ -1,6 +1,7 @@
 import { proxyFetch } from "./proxy.js";
 
 let customExecutor = null;
+const EXECUTORS = new Map();
 
 // Non-streaming LLM calls only return headers after the full generation, so the headers wait must be generous.
 const DEFAULT_HEADERS_TIMEOUT_MS = Number(process.env.ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS) || 300000;
@@ -144,9 +145,22 @@ export class BaseExecutor {
 const defaultExecutorInstance = new BaseExecutor();
 
 /**
+ * Register a custom provider executor
+ */
+export function registerExecutor(id, executor) {
+  EXECUTORS.set(id, executor);
+}
+
+/**
  * Get active executor for a provider
  */
 export function getExecutor(provider) {
   if (customExecutor) return customExecutor;
+  if (provider?.executor && EXECUTORS.has(provider.executor)) {
+    return EXECUTORS.get(provider.executor);
+  }
+  if (provider?.id && EXECUTORS.has(provider.id)) {
+    return EXECUTORS.get(provider.id);
+  }
   return defaultExecutorInstance;
 }

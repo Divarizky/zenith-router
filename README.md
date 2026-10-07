@@ -21,7 +21,7 @@ Sudah berfungsi:
 - Manajemen **Providers**: halaman terpadu untuk akun dan model per provider (OAuth, Free Tier, API Key) dengan toggle enable/disable dan penambahan model custom.
 - **Sinkronisasi Model Gratis Otomatis**: OpenCode dan Kilo Code otomatis menyinkronkan katalog model gratis saat startup dan berkala (default tiap 6 jam), dilengkapi tombol *Sync Now*.
 - **Import Model Live**: Import daftar model dari upstream (OpenCode, Kilo Code, GLM, GitHub, Claude) dengan pilihan filter model gratis/semua dan fitur *Delete Selected* berbasis checkbox.
-- Registry 16 provider (codex, github, kiro, antigravity, glm, claude, opencode, kilocode, nvidia, cline, pollinations, cloudflare-ai, openrouter, llm7, bazaarlink, together) disinkronkan dengan 9router & OmniRoute.
+- Registry 17 provider (codex, github, kiro, antigravity, glm, claude, opencode, kilocode, nvidia, cline, pollinations, cloudflare-ai, openrouter, llm7, bazaarlink, together, freebuff) disinkronkan dengan 9router & OmniRoute.
 - API key gateway (`zr_...`) yang disimpan sebagai hash, akses dashboard hanya dari localhost, proteksi CSRF, DNS rebinding, dan header `Cache-Control: no-store` untuk mencegah stale state.
 - Usage tracking untuk streaming (`stream_options.include_usage` + fallback estimasi) dan non-streaming, status kuota, RTK, Caveman (opt-in), dan halaman terpisah **Token Saver**.
 
@@ -67,7 +67,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:20120/v1/chat/completions" -Method Post
   -ContentType "application/json" -Headers @{ Authorization = "Bearer $key" } -Body $body
 ```
 
-Prefix menentukan provider (`cc`, `cx`, `gh`, `kr`, `ag`, `glm`, `oc`, `kc`, `nv`, `cl`, `pol`, `cf`, `or`, `llm7`, `bzl`, `together`, atau id provider). Nama model setelah `/` diteruskan apa adanya.
+Prefix menentukan provider (`cc`, `cx`, `gh`, `kr`, `ag`, `glm`, `oc`, `kc`, `nv`, `cl`, `pol`, `cf`, `or`, `llm7`, `bzl`, `together`, `fb`, atau id provider). Nama model setelah `/` diteruskan apa adanya.
 
 Key zenroute hanya membuka akses ke gateway dan tidak pernah diteruskan ke provider. Kredensial provider selalu diambil dari database lokal; tanpa connection aktif (kecuali provider no-auth/free), gateway membalas 503.
 
@@ -110,8 +110,8 @@ zenroute/
 │   ├── db/               # node:sqlite repository dan skema database
 │   ├── gateway/          # Handlers: chat.js, messages.js, responses.js, models.js
 │   ├── translator/       # Translasi bidirectional OpenAI <-> Claude (schema & tool calling)
-│   ├── providers/        # Registry 16 provider & model routing resolution
-│   ├── executors/        # base.js (header & idle timeout), proxy.js
+│   ├── providers/        # Registry 17 provider & model routing resolution
+│   ├── executors/        # base.js (header & idle timeout), proxy.js, freebuff.js
 │   ├── config/           # freeTierCatalog.js
 │   ├── services/         # apiKeys, auth, tokenRefresh, usage, quota, modelOverrides,
 │   │                     # modelImport, modelSync, tokenSaver, rtk, caveman, settings

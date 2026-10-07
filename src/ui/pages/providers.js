@@ -7,7 +7,9 @@ import {
   addCustomModel,
   deleteCustomModel,
   disableModel,
+  disableModels,
   enableModel,
+  enableModels,
   isModelDisabled,
   listImportedModels,
   clearImportedModels,
@@ -51,8 +53,14 @@ function importNotice(query = {}) {
   if (query.notice === "account_deleted") return { ok: true, text: "Akun berhasil dihapus." };
   if (query.notice === "custom_added") return { ok: true, text: "Custom model berhasil ditambahkan." };
   if (query.notice === "custom_deleted") return { ok: true, text: "Custom model berhasil dihapus." };
-  if (query.notice === "model_disabled") return { ok: true, text: "Model dinonaktifkan." };
-  if (query.notice === "model_enabled") return { ok: true, text: "Model diaktifkan kembali." };
+  if (query.notice === "model_disabled") {
+    const count = Number.parseInt(query.count, 10);
+    return { ok: true, text: count > 1 ? `${count} model dinonaktifkan.` : "Model dinonaktifkan." };
+  }
+  if (query.notice === "model_enabled") {
+    const count = Number.parseInt(query.count, 10);
+    return { ok: true, text: count > 1 ? `${count} model diaktifkan kembali.` : "Model diaktifkan kembali." };
+  }
 
   const count = Number.parseInt(query.count, 10) || 0;
   const status = Number.parseInt(query.status, 10);
@@ -293,13 +301,14 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     const custom = source === "custom";
     const disabled = isModelDisabled(p.id, modelId);
     const toggleAction = disabled ? "enable" : "disable";
-    const selectCell =
-      source === "imported"
-        ? `<input type="checkbox" name="model_ids" value="${escapeHtml(modelId)}" form="delete-imported-form" data-select-group="imported" autocomplete="off" aria-label="Pilih ${escapeHtml(modelId)}" />`
-        : "";
+    const selectCell = `<input type="checkbox" name="model_ids" value="${escapeHtml(
+      modelId
+    )}" form="models-bulk-form" data-select-group="models" autocomplete="off" aria-label="Pilih ${escapeHtml(
+      modelId
+    )}" />`;
     return `
         <tr${disabled ? ` class="muted"` : ""}>
-          ${hasImported ? `<td class="select-cell">${selectCell}</td>` : ""}
+          <td class="select-cell">${selectCell}</td>
           <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code></td>
           <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Free</span>` : ""}</td>
           <td>${SOURCE_CELL[source]}</td>
@@ -399,9 +408,11 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       <div class="card-head">
         <h3>Models (${totalModels})</h3>
         <div class="btn-row">
+          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Disable Selected (<span data-selected-count="models">0</span>)</button>
+          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Enable Selected (<span data-selected-count="models">0</span>)</button>
           ${
             hasImported
-              ? `<button type="submit" class="btn btn-danger btn-sm" form="delete-imported-form" data-requires-selection="imported" disabled>Delete Selected (<span data-selected-count="imported">0</span>)</button>
+              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled onclick="return confirmSelected(document.getElementById('models-bulk-form'), 'model_ids', 'model hasil import')">Delete Selected (<span data-selected-count="models">0</span>)</button>
           <form action="/dashboard/providers/models/import/clear" method="POST" onsubmit="return confirm('Hapus semua model hasil import?')">
             <input type="hidden" name="provider" value="${id}" />
             <button type="submit" class="btn btn-danger btn-sm">Clear Imported</button>
@@ -421,19 +432,11 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         </div>
       </div>
       ${p.freeModelSync ? syncSummary(p) : ""}
-      ${
-        hasImported
-          ? `<form id="delete-imported-form" action="/dashboard/providers/models/import/delete" method="POST" onsubmit="return confirmSelected(this, 'model_ids', 'model hasil import')">
+      <form id="models-bulk-form" method="POST">
         <input type="hidden" name="provider" value="${id}" />
-      </form>`
-          : ""
-      }
+      </form>
       <table>
-        <thead><tr>${
-          hasImported
-            ? `<th class="select-cell"><input type="checkbox" data-select-all="imported" autocomplete="off" aria-label="Pilih semua model hasil import" title="Pilih semua model hasil import" /></th>`
-            : ""
-        }<th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th class="select-cell"><input type="checkbox" data-select-all="models" autocomplete="off" aria-label="Pilih semua model" title="Pilih semua model" /></th><th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
         <tbody>${modelRows}</tbody>
       </table>
     </div>
@@ -587,15 +590,23 @@ export async function handleClearImported(c) {
 }
 
 export async function handleDisableModel(c) {
-  const body = await c.req.parseBody();
-  const provider = getProvider(String(body.provider || ""));
-  if (provider && body.model_id) disableModel(provider.id, String(body.model_id));
-  return c.redirect(`${backTo(body.provider)}?notice=model_disabled`);
+  const body = await c.req.parseBody({ all: true });
+  const provider = getProvider(String([].concat(body.provider || "")[0]));
+  if (!provider) return c.redirect("/dashboard/providers");
+
+  const ids = [].concat(body.model_ids || body.model_id || []).map((v) => String(v)).filter(Boolean);
+  const count = ids.length > 0 ? disableModels(provider.id, ids) : 0;
+  const countParam = ids.length > 1 ? `&count=${ids.length}` : "";
+  return c.redirect(`${backTo(provider.id)}?notice=model_disabled${countParam}`);
 }
 
 export async function handleEnableModel(c) {
-  const body = await c.req.parseBody();
-  const provider = getProvider(String(body.provider || ""));
-  if (provider && body.model_id) enableModel(provider.id, String(body.model_id));
-  return c.redirect(`${backTo(body.provider)}?notice=model_enabled`);
+  const body = await c.req.parseBody({ all: true });
+  const provider = getProvider(String([].concat(body.provider || "")[0]));
+  if (!provider) return c.redirect("/dashboard/providers");
+
+  const ids = [].concat(body.model_ids || body.model_id || []).map((v) => String(v)).filter(Boolean);
+  const count = ids.length > 0 ? enableModels(provider.id, ids) : 0;
+  const countParam = ids.length > 1 ? `&count=${ids.length}` : "";
+  return c.redirect(`${backTo(provider.id)}?notice=model_enabled${countParam}`);
 }

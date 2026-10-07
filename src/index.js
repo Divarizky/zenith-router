@@ -84,8 +84,7 @@ app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
 
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
+export function startServer() {
   const hostname = getBindHost();
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
   console.log(`[zenroute] Starting on http://${displayHost}:${PORT}`);
@@ -94,9 +93,14 @@ if (isMain) {
       "[zenroute] Bound to a non-loopback address: zenroute API keys are required on /v1 and the dashboard stays localhost-only."
     );
   }
-  serve({
+  return serve({
     fetch: app.fetch,
     port: PORT,
     hostname,
   });
+}
+
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  startServer();
 }

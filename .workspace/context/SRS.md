@@ -18,7 +18,7 @@ Single-writer konten requirement: `to-requirements`.
 | F-02 | Provider Connections & OAuth | approved | 2026-10-06 |
 | F-03 | Usage Tracking & Quota Sync | approved | 2026-10-06 |
 | F-04 | Token Saver Engine | approved | 2026-10-06 |
-| F-05 | Minimal Dashboard UI | draft | 2026-10-06 |
+| F-05 | Minimal Dashboard UI | approved | 2026-10-06 |
 
 ## Feature Requirements
 ### F-01 — Base Gateway & Core Translator
@@ -66,3 +66,14 @@ Single-writer konten requirement: `to-requirements`.
 - **REQ-29 (Per-Request Override):** WHEN request menyertakan header `x-zenroute-token-saver: false` THEN sistem SHALL melewati pipeline pemadatan. (Ref: AC-06)
 - **REQ-30 (Savings Metrics):** WHEN pemadatan selesai THEN sistem SHALL menghitung estimasi karakter/token yang dihemat untuk keperluan monitoring audit. (Ref: AC-07)
 - **Verification:** Unit tests pemadatan log berulang (RTK), verifikasi penyisipan Caveman pada format OpenAI & Anthropic, dan simulasi fail-open.
+
+### F-05 — Minimal Dashboard UI
+- **Scope:** Antarmuka web server-side rendered (SSR) via Hono untuk navigasi Overview, manajemen akun Connections, analitik Usage & Quota, dan konfigurasi Settings.
+- **REQ-31 (Overview Page):** WHEN pengguna mengakses `GET /` atau `GET /dashboard` THEN sistem SHALL merender halaman Overview dengan status gateway dan ringkasan metrik. (Ref: AC-01)
+- **REQ-32 (Connections Page):** WHEN pengguna mengakses tab Connections THEN sistem SHALL menampilkan daftar akun terdaftar dengan tombol tindakan dan status kuota. (Ref: AC-02)
+- **REQ-33 (Connection Form):** WHEN form penambahan akun dikirim (`POST /dashboard/connections`) THEN sistem SHALL memvalidasi dan menyimpan akun baru ke SQLite. (Ref: AC-03)
+- **REQ-34 (Usage Page):** WHEN pengguna mengakses tab Usage THEN sistem SHALL menyajikan tabel riwayat dan agregasi token per model. (Ref: AC-04)
+- **REQ-35 (Settings Page):** WHEN pengguna mengakses tab Settings THEN sistem SHALL menampilkan form pengaturan global dari SQLite. (Ref: AC-05)
+- **REQ-36 (Settings Form):** WHEN form pengaturan dikirim (`POST /dashboard/settings`) THEN sistem SHALL menyimpan nilai baru ke tabel `settings`. (Ref: AC-06)
+- **REQ-37 (Zero Bundler SSR):** WHILE dashboard web dirender THEN sistem SHALL menggunakan HTML/JSX bawaan Hono tanpa memerlukan build step frontend (ukuran <50 KB). (Ref: AC-07)
+- **Verification:** Integration tests rendering halaman `/dashboard` dan `/dashboard/connections`, serta form POST testing via `app.request`.

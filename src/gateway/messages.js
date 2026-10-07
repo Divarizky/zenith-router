@@ -1,20 +1,15 @@
 import { resolveModel } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
-import {
-  getActiveConnection,
-  applyConnectionAuth,
-  markConnectionCooldown,
-} from "../services/auth.js";
-import {
-  needsTokenRefresh,
-  refreshOAuthToken,
-} from "../services/tokenRefresh.js";
-import {
-  recordUsage,
-  createUsageTapStream,
-} from "../services/usage.js";
+import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
 import { getAllSettings } from "../services/settings.js";
+import { executeWithFallback } from "../services/fallback.js";
+import {
+  translateRequest,
+  translateResponse,
+  createTransformStream,
+  FORMATS,
+} from "../translator/index.js";
 
 function isWarmupOrNamingRequest(body, userAgent = "") {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
@@ -169,113 +164,64 @@ export async function handleMessages(c) {
   const startTime = Date.now();
   const executor = getExecutor(provider);
 
-  const basePayload = {
-    ...body,
-    model: targetModel,
-  };
+  const targetFormat = provider.format || provider.transport?.format || FORMATS.CLAUDE;
+  const translatedPayload = translateRequest(FORMATS.CLAUDE, targetFormat, body, targetModel);
 
   // Apply in-process Token Saver (RTK + Caveman) with fail-open, as configured in Settings
   const upstreamPayload = applyTokenSaver(
-    basePayload,
-    "claude",
+    translatedPayload,
+    targetFormat,
     tokenSaverOptions(getAllSettings(), c.req.header("x-zenroute-token-saver"))
   );
 
-  const upstreamUrl = provider.transport?.baseUrl || "https://api.anthropic.com/v1/messages";
-  const upstreamHeaders = {
+  const upstreamUrl = targetFormat === FORMATS.OPENAI
+    ? (provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions")
+    : (provider.transport?.messagesUrl || provider.transport?.baseUrl || "https://api.anthropic.com/v1/messages");
+  const baseHeaders = {
     "Content-Type": "application/json",
-    "Anthropic-Version": "2023-06-01",
     ...(provider.transport?.headers || {}),
   };
 
-  // Upstream credentials always come from a stored connection; client auth headers are never forwarded
-  let connection = getActiveConnection(provider.id);
-  if (!connection) {
-    return c.json(
-      {
-        type: "error",
-        error: {
-          type: "overloaded_error",
-          message: `No available connection for provider '${provider.id}'. Add or re-enable one in the dashboard.`,
-        },
-      },
-      503
-    );
+  if (targetFormat === FORMATS.CLAUDE && !baseHeaders["Anthropic-Version"]) {
+    baseHeaders["Anthropic-Version"] = "2023-06-01";
   }
 
-  if (needsTokenRefresh(connection)) {
-    try {
-      const refreshed = await refreshOAuthToken(connection);
-      if (refreshed) connection = refreshed;
-    } catch (err) {
-      console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
-    }
+  const anthropicBeta = c.req.header("anthropic-beta");
+  if (anthropicBeta) {
+    baseHeaders["anthropic-beta"] = anthropicBeta;
   }
-  applyConnectionAuth(upstreamHeaders, connection);
 
   try {
-    let upstreamRes = await executor.execute({
-      url: upstreamUrl,
-      method: "POST",
-      headers: upstreamHeaders,
-      body: JSON.stringify(upstreamPayload),
+    const result = await executeWithFallback({
+      provider,
+      targetFormat,
+      upstreamPayload,
+      baseHeaders,
+      executor,
       signal: c.req.raw.signal,
-      proxyUrl: connection?.proxy_url,
+      resolveUrl: () => upstreamUrl,
     });
 
-    // Reactive 401/403 token refresh and retry once
-    if (
-      (upstreamRes.status === 401 || upstreamRes.status === 403) &&
-      connection?.auth_type === "oauth" &&
-      connection.credentials?.refresh_token
-    ) {
-      try {
-        const refreshed = await refreshOAuthToken(connection);
-        if (refreshed) {
-          connection = refreshed;
-          applyConnectionAuth(upstreamHeaders, connection);
-          upstreamRes = await executor.execute({
-            url: upstreamUrl,
-            method: "POST",
-            headers: upstreamHeaders,
-            body: JSON.stringify(upstreamPayload),
-            signal: c.req.raw.signal,
-            proxyUrl: connection?.proxy_url,
-          });
-        }
-      } catch (err) {
-        console.error(`[zenroute] Reactive refresh error for ${connection.id}:`, err.message);
-      }
+    if (!result.ok) {
+      return result.response;
     }
 
-    // Handle rate-limit cooldown
-    if (upstreamRes.status === 429 && connection?.id) {
-      markConnectionCooldown(connection.id, 60000);
-    }
-
-    if (!upstreamRes.ok) {
-      const errText = await upstreamRes.text();
-      let errJson;
-      try {
-        errJson = JSON.parse(errText);
-      } catch {
-        errJson = {
-          type: "error",
-          error: {
-            type: "upstream_error",
-            message: errText || `Upstream returned HTTP ${upstreamRes.status}`,
-          },
-        };
-      }
-      return c.json(errJson, upstreamRes.status);
-    }
+    const { upstreamRes, connection } = result;
 
     if (body.stream) {
-      const responseStream = upstreamRes.body.pipeThrough(
+      let responseStream = upstreamRes.body;
+      if (targetFormat !== FORMATS.CLAUDE) {
+        responseStream = responseStream.pipeThrough(
+          createTransformStream(targetFormat, FORMATS.CLAUDE, targetModel)
+        );
+      }
+
+      responseStream = responseStream.pipeThrough(
         createUsageTapStream({
           connectionId: connection?.id,
           model: targetModel,
           startTime,
+          estimatedInputTokens: estimateTokens(body.messages),
         })
       );
 
@@ -289,10 +235,12 @@ export async function handleMessages(c) {
       });
     }
 
-    const resData = await upstreamRes.json();
+    const rawResData = await upstreamRes.json();
+    const finalData = translateResponse(targetFormat, FORMATS.CLAUDE, rawResData, targetModel);
+
     const durationMs = Date.now() - startTime;
-    const inputTokens = resData.usage?.input_tokens || 0;
-    const outputTokens = resData.usage?.output_tokens || 0;
+    const inputTokens = finalData.usage?.input_tokens || finalData.usage?.prompt_tokens || 0;
+    const outputTokens = finalData.usage?.output_tokens || finalData.usage?.completion_tokens || 0;
     queueMicrotask(() => {
       recordUsage({
         connectionId: connection?.id,
@@ -303,7 +251,7 @@ export async function handleMessages(c) {
       });
     });
 
-    return c.json(resData, 200);
+    return c.json(finalData, 200);
   } catch (err) {
     return c.json(
       {

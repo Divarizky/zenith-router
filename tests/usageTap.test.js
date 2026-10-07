@@ -119,3 +119,64 @@ test("POST /v1/chat/completions - streaming records token usage after stream com
 
   setCustomExecutor(null);
 });
+
+test("POST /v1/chat/completions - streaming records estimated tokens when upstream omits usage chunk", async () => {
+  initDb(":memory:");
+
+  addConnection({
+    provider: "glm",
+    name: "GLM User",
+    credentials: { api_key: "k3" },
+  });
+
+  const sseChunks = [
+    'data: {"choices":[{"delta":{"content":"Hello world of coding"}}]}\n\n',
+    "data: [DONE]\n\n",
+  ];
+
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const ch of sseChunks) {
+        controller.enqueue(new TextEncoder().encode(ch));
+      }
+      controller.close();
+    },
+  });
+
+  setCustomExecutor({
+    async execute() {
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "glm/glm-4-flash",
+      messages: [{ role: "user", content: "Tell me something nice" }],
+      stream: true,
+    }),
+  });
+
+  assert.strictEqual(res.status, 200);
+
+  const reader = res.body.getReader();
+  while (true) {
+    const { done } = await reader.read();
+    if (done) break;
+  }
+
+  await new Promise((r) => setTimeout(r, 50));
+
+  const stats = getUsageStats();
+  assert.strictEqual(stats.summary.total_requests, 1);
+  assert.ok(stats.summary.total_input_tokens > 0, "Input tokens should be estimated > 0");
+  assert.ok(stats.summary.total_output_tokens > 0, "Output tokens should be estimated > 0");
+  assert.ok(stats.summary.total_tokens > 0, "Total tokens should be > 0");
+
+  setCustomExecutor(null);
+});

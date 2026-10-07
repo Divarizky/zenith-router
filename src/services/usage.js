@@ -42,12 +42,30 @@ export function recordUsage({
   }
 }
 
+export function estimateTokens(textOrMessages) {
+  if (!textOrMessages) return 0;
+  if (typeof textOrMessages === "string") return Math.max(1, Math.ceil(textOrMessages.length / 4));
+  if (Array.isArray(textOrMessages)) {
+    let chars = 0;
+    for (const m of textOrMessages) {
+      if (!m) continue;
+      if (typeof m.content === "string") chars += m.content.length;
+      else if (Array.isArray(m.content)) {
+        for (const c of m.content) chars += (c.text?.length || (typeof c === "string" ? c.length : 0));
+      }
+    }
+    return Math.max(1, Math.ceil(chars / 4));
+  }
+  return 0;
+}
+
 /**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
-export function createUsageTapStream({ connectionId, model, startTime = Date.now() }) {
+export function createUsageTapStream({ connectionId, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
   let inputTokens = 0;
   let outputTokens = 0;
+  let streamedTextLength = 0;
   let buffer = "";
   const textDecoder = new TextDecoder();
 
@@ -82,6 +100,16 @@ export function createUsageTapStream({ connectionId, model, startTime = Date.now
                 if (parsed.usage?.output_tokens) {
                   outputTokens = parsed.usage.output_tokens;
                 }
+
+                // Heuristic text accumulator in case provider omits usage
+                const deltaContent = parsed.choices?.[0]?.delta?.content;
+                if (typeof deltaContent === "string") {
+                  streamedTextLength += deltaContent.length;
+                }
+                const claudeDeltaText = parsed.delta?.text;
+                if (typeof claudeDeltaText === "string") {
+                  streamedTextLength += claudeDeltaText.length;
+                }
               } catch {}
             }
           }
@@ -91,6 +119,13 @@ export function createUsageTapStream({ connectionId, model, startTime = Date.now
 
     flush() {
       const durationMs = Date.now() - startTime;
+      if (inputTokens === 0 && estimatedInputTokens > 0) {
+        inputTokens = estimatedInputTokens;
+      }
+      if (outputTokens === 0 && streamedTextLength > 0) {
+        outputTokens = Math.max(1, Math.ceil(streamedTextLength / 4));
+      }
+
       // Record usage asynchronously to avoid blocking stream closure
       queueMicrotask(() => {
         recordUsage({

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { handleListModels } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
+import { handleResponses } from "./gateway/responses.js";
 import { handleGetUsage } from "./services/usage.js";
 import { handleGetQuota } from "./services/quota.js";
 import { renderOverviewPage } from "./ui/pages/overview.js";
@@ -74,6 +75,9 @@ app.post("/v1/chat/completions", handleChat);
 
 // Anthropic Messages API
 app.post("/v1/messages", handleMessages);
+
+// OpenAI Responses API
+app.post("/v1/responses", handleResponses);
 
 // Analytics & Usage
 app.get("/api/usage", handleGetUsage);

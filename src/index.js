@@ -13,6 +13,11 @@ import {
   handleAddConnection,
   handleDeleteConnection,
 } from "./ui/pages/connections.js";
+import { renderUsagePage } from "./ui/pages/usage.js";
+import {
+  renderSettingsPage,
+  handleSaveSettings,
+} from "./ui/pages/settings.js";
 
 export const app = new Hono();
 const PORT = Number(process.env.PORT || 20128);
@@ -46,6 +51,11 @@ app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
 app.get("/dashboard/connections", (c) => c.html(renderConnectionsPage(PORT)));
 app.post("/dashboard/connections/add", handleAddConnection);
 app.post("/dashboard/connections/delete", handleDeleteConnection);
+
+// Dashboard Usage & Settings UI & Actions
+app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT)));
+app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT)));
+app.post("/dashboard/settings", handleSaveSettings);
 
 // Models Discovery
 app.get("/v1/models", handleListModels);

@@ -11,7 +11,6 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const settings = getAllSettings();
 
   const isRequireAuth = settings.require_api_key === "true";
-  const fallbackModel = settings.default_fallback_model || "glm/glm-4-flash";
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
   const isSaved = query.saved === "1" || query.saved === "true";
@@ -44,12 +43,6 @@ export function renderSettingsPage(port = 20120, query = {}) {
           </label>
         </div>
 
-        <div class="field">
-          <label for="default_fallback_model">Default Routing Fallback Model</label>
-          <p class="hint" style="margin-bottom: 0.4rem;">Not used by the gateway yet (reserved for failover).</p>
-          <input type="text" id="default_fallback_model" name="default_fallback_model" value="${escapeHtml(fallbackModel)}" placeholder="glm/glm-4-flash" required />
-        </div>
-
         <div style="margin-top: 1.25rem;">
           <button type="submit" class="btn btn-primary">Save Settings</button>
         </div>
@@ -72,10 +65,8 @@ export async function handleSaveSettings(c) {
   const body = await c.req.parseBody();
 
   const requireKey = body.require_api_key === "true" || body.require_api_key === "on" ? "true" : "false";
-  const fallbackModel = String(body.default_fallback_model || "glm/glm-4-flash").trim();
 
   setSetting("require_api_key", requireKey);
-  setSetting("default_fallback_model", fallbackModel);
 
   return c.redirect("/dashboard/settings?saved=1");
 }

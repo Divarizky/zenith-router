@@ -39,6 +39,11 @@ test("import modes - free-only import is dropped for providers that sync free mo
   assert.deepStrictEqual(getImportModes(getProvider("opencode")), []);
   assert.deepStrictEqual(getImportModes(getProvider("kilocode")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("glm")), ["all", "free"]);
+  assert.deepStrictEqual(getImportModes(getProvider("openrouter")), ["all", "free"]);
+  assert.deepStrictEqual(getImportModes(getProvider("together")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("bazaarlink")), ["all", "free"]);
+  assert.deepStrictEqual(getImportModes(getProvider("llm7")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("pollinations")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("kiro")), []);
 });
 

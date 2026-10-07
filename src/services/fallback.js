@@ -5,7 +5,7 @@ import {
 } from "../db/index.js";
 import { getProvider } from "../providers/index.js";
 import { isConnectionExhausted } from "./quota.js";
-import { isConnectionInCooldown } from "./auth.js";
+import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 
 export function listAvailableConnections(providerId) {
@@ -52,29 +52,6 @@ export function markProviderCooldown(providerId, durationMs = 60000) {
   for (const c of connections) {
     setConnectionCooldown(c.id, until);
   }
-}
-
-function applyConnectionAuth(headers, connection) {
-  if (!connection || !connection.credentials || connection.auth_type === "noauth") return headers;
-
-  const creds = connection.credentials;
-
-  if (connection.auth_type === "oauth") {
-    const token = creds.access_token || creds.api_key;
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    return headers;
-  }
-
-  const apiKey = creds.api_key || creds.access_token;
-  if (!apiKey) return headers;
-
-  if (connection.provider === "claude") {
-    headers["x-api-key"] = apiKey;
-  } else {
-    headers["Authorization"] = `Bearer ${apiKey}`;
-  }
-
-  return headers;
 }
 
 function buildErrorResponse(res, bodyText, targetFormat) {

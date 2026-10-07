@@ -199,7 +199,19 @@ export async function handleMessages(c) {
       baseHeaders,
       executor,
       signal: c.req.raw.signal,
-      resolveUrl: () => upstreamUrl,
+      resolveUrl: (conn) => {
+        let url = upstreamUrl;
+        if (url.includes("{accountId}") && conn?.credentials) {
+          const acc =
+            conn.credentials.account_id ||
+            conn.credentials.accountId ||
+            (typeof conn.credentials.api_key === "string" && conn.credentials.api_key.includes(":")
+              ? conn.credentials.api_key.split(":")[0]
+              : "");
+          url = url.replace("{accountId}", acc);
+        }
+        return url;
+      },
     });
 
     if (!result.ok) {

@@ -38,7 +38,6 @@ const DEFAULT_SETTINGS = {
   require_api_key: "false",
   token_saver_rtk: "true",
   token_saver_caveman: "false",
-  default_fallback_model: "glm/glm-4-flash",
 };
 
 /**

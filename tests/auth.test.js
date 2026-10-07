@@ -5,6 +5,7 @@ import {
   getActiveConnection,
   markConnectionCooldown,
   isConnectionInCooldown,
+  applyConnectionAuth,
 } from "../src/services/auth.js";
 
 test("auth service - returns virtual connection for noAuth provider only", () => {
@@ -15,8 +16,29 @@ test("auth service - returns virtual connection for noAuth provider only", () =>
   assert.strictEqual(conn.auth_type, "noauth");
   assert.strictEqual(conn.provider, "opencode");
 
+  const pol = getActiveConnection("pollinations");
+  assert.ok(pol, "Pollinations must return a virtual connection");
+  assert.strictEqual(pol.auth_type, "noauth");
+  assert.strictEqual(pol.provider, "pollinations");
+
   // Free tier but requires login: no virtual connection without a real account.
   assert.strictEqual(getActiveConnection("kiro"), null);
+});
+
+test("auth service - handles cloudflare accountId:apiToken split in applyConnectionAuth", () => {
+  const h1 = applyConnectionAuth({}, {
+    provider: "cloudflare-ai",
+    auth_type: "apikey",
+    credentials: { api_key: "acc123:tokenXYZ" },
+  });
+  assert.strictEqual(h1["Authorization"], "Bearer tokenXYZ");
+
+  const h2 = applyConnectionAuth({}, {
+    provider: "openrouter",
+    auth_type: "apikey",
+    credentials: { api_key: "sk-or-v1-abc" },
+  });
+  assert.strictEqual(h2["Authorization"], "Bearer sk-or-v1-abc");
 });
 
 test("auth service - picks available connection and rotates by least-used", () => {

@@ -61,7 +61,6 @@ test("POST /dashboard/settings - updates settings in SQLite and redirects with s
 
   const formData = new FormData();
   formData.append("require_api_key", "true");
-  formData.append("default_fallback_model", "codex/gpt-4o");
 
   const res = await app.request("/dashboard/settings", {
     method: "POST",
@@ -73,7 +72,6 @@ test("POST /dashboard/settings - updates settings in SQLite and redirects with s
 
   // Verify in SQLite
   assert.strictEqual(getSetting("require_api_key"), "true");
-  assert.strictEqual(getSetting("default_fallback_model"), "codex/gpt-4o");
 
   const html = await (await app.request(res.headers.get("location"))).text();
   assert.ok(html.includes("Pengaturan Gateway berhasil disimpan."));

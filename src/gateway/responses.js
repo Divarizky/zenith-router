@@ -136,7 +136,19 @@ export async function handleResponses(c) {
       baseHeaders,
       executor,
       signal: c.req.raw.signal,
-      resolveUrl: () => upstreamUrlBase,
+      resolveUrl: (conn) => {
+        let url = upstreamUrlBase;
+        if (url.includes("{accountId}") && conn?.credentials) {
+          const acc =
+            conn.credentials.account_id ||
+            conn.credentials.accountId ||
+            (typeof conn.credentials.api_key === "string" && conn.credentials.api_key.includes(":")
+              ? conn.credentials.api_key.split(":")[0]
+              : "");
+          url = url.replace("{accountId}", acc);
+        }
+        return url;
+      },
     });
 
     if (!result.ok) {

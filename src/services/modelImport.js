@@ -80,6 +80,32 @@ const IMPORTERS = {
         .filter((m) => /^claude-/.test(m.id))
         .map((m) => ({ id: m.id, name: m.display_name || m.id, isFree: false })),
   },
+  openrouter: {
+    url: "https://openrouter.ai/api/v1/models",
+    modes: ["all", "free"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
+  },
+  together: {
+    url: "https://api.together.xyz/v1/models",
+    modes: ["all"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.display_name || m.id, isFree: false })),
+  },
+  bazaarlink: {
+    url: "https://bazaarlink.ai/api/v1/models",
+    modes: ["all", "free"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
+  },
+  llm7: {
+    url: "https://api.llm7.io/v1/models",
+    modes: ["all"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: false })),
+  },
+  pollinations: {
+    url: "https://gen.pollinations.ai/v1/models",
+    public: true,
+    modes: ["all"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.name || m.id, name: m.description || m.name || m.id, isFree: true })),
+  },
 };
 
 export function getImporter(providerId) {

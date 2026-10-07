@@ -6,9 +6,34 @@ import antigravity from "./registry/antigravity.js";
 import glm from "./registry/glm.js";
 import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
+import nvidia from "./registry/nvidia.js";
+import cline from "./registry/cline.js";
+import pollinations from "./registry/pollinations.js";
+import cloudflareAi from "./registry/cloudflare-ai.js";
+import openrouter from "./registry/openrouter.js";
+import llm7 from "./registry/llm7.js";
+import bazaarlink from "./registry/bazaarlink.js";
+import together from "./registry/together.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
 
-const REGISTRY = [claude, codex, github, kiro, antigravity, glm, opencode, kilocode];
+const REGISTRY = [
+  claude,
+  codex,
+  github,
+  kiro,
+  antigravity,
+  glm,
+  opencode,
+  kilocode,
+  nvidia,
+  cline,
+  pollinations,
+  cloudflareAi,
+  openrouter,
+  llm7,
+  bazaarlink,
+  together,
+];
 
 const providerMap = new Map();
 const aliasMap = new Map();

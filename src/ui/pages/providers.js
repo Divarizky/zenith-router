@@ -252,6 +252,10 @@ const LOCAL_IMPORT = {
     label: "Import dari Freebuff CLI",
     hint: "Memakai login CLI dari ~/.config/manicode/credentials.json. Belum login? Jalankan npm i -g freebuff, lalu freebuff.",
   },
+  commandcode: {
+    label: "Import dari Command Code CLI",
+    hint: "Memakai API Key dari ~/.commandcode/auth.json. Belum login? Jalankan cmd login (atau cmdc login di Windows).",
+  },
 };
 
 // What the manual-paste field holds, for providers whose login normally produces it.
@@ -260,9 +264,15 @@ const MANUAL_TOKEN_LABELS = {
   glm: "API Key (Coding Plan)",
   github: "GitHub Token (gho_/ghu_)",
   freebuff: "Auth Token",
+  commandcode: "API Key (user_...)",
 };
 
 const REFRESHABLE = new Set(["claude", "codex", "antigravity", "cline", "kiro"]);
+
+const OAUTH_SCOPE_NOTICES = {
+  antigravity: "Login meminta izin <code>cloud-platform</code> penuh ke Google Cloud Platform untuk integrasi Gemini Code Assist.",
+  claude: "Login memakai token Anthropic CLI yang memiliki scope <code>user:inference</code> dan <code>org:create_api_key</code>.",
+};
 
 /** Accounts for these providers come from a login, so they are stored as oauth. */
 function usesLogin(p) {
@@ -395,6 +405,13 @@ function renderAddAccountModal(p) {
           <label for="acct-proxy">Proxy URL (Optional)</label>
           <input type="text" id="acct-proxy" placeholder="http://127.0.0.1:7890" />
         </div>
+        ${
+          OAUTH_SCOPE_NOTICES[p.id]
+            ? `<div class="notice" style="background: var(--bg-hover, #1e2029); border-left: 3px solid var(--warning, #eab308); padding: 0.5rem 0.75rem; font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.4;">
+                <span style="color: var(--text-muted, #94a3b8);">${OAUTH_SCOPE_NOTICES[p.id]}</span>
+              </div>`
+            : ""
+        }
         <div class="oauth-actions">
           ${login}
           ${importForm}

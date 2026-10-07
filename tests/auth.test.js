@@ -16,10 +16,10 @@ test("auth service - returns virtual connection for noAuth provider only", () =>
   assert.strictEqual(conn.auth_type, "noauth");
   assert.strictEqual(conn.provider, "opencode");
 
-  const pol = getActiveConnection("pollinations");
-  assert.ok(pol, "Pollinations must return a virtual connection");
-  assert.strictEqual(pol.auth_type, "noauth");
-  assert.strictEqual(pol.provider, "pollinations");
+  const ovh = getActiveConnection("ovhcloud");
+  assert.ok(ovh, "OVHcloud must return a virtual connection");
+  assert.strictEqual(ovh.auth_type, "noauth");
+  assert.strictEqual(ovh.provider, "ovhcloud");
 
   // Free tier but requires login: no virtual connection without a real account.
   assert.strictEqual(getActiveConnection("kiro"), null);

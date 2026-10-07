@@ -3,6 +3,8 @@ export default {
   name: "Zai GLM Coding",
   alias: ["glm", "zai"],
   category: "oauth",
+  // Sync needs an account; without one it reports no_account and keeps the static list.
+  freeModelSync: "merge",
   format: "openai",
   transport: {
     baseUrl: "https://api.z.ai/api/coding/paas/v4/chat/completions",

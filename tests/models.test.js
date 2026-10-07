@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { app } from "../src/index.js";
 import { getAvailableModels, getProvider } from "../src/providers/index.js";
 
-test("Provider Registry - contains 17 core providers", () => {
+test("Provider Registry - contains 21 core providers", () => {
   const providers = [
     "claude",
     "codex",
@@ -15,13 +15,17 @@ test("Provider Registry - contains 17 core providers", () => {
     "kilocode",
     "nvidia",
     "cline",
-    "pollinations",
+    "mistral",
     "cloudflare-ai",
     "openrouter",
     "llm7",
     "bazaarlink",
     "together",
     "freebuff",
+    "ollama",
+    "commandcode",
+    "ovhcloud",
+    "xkiro",
   ];
   for (const id of providers) {
     const p = getProvider(id);
@@ -46,10 +50,11 @@ test("Provider Registry - nvidia and cline use standard OpenAI transport", () =>
 });
 
 test("Provider Registry - new providers use expected configs", () => {
-  const pol = getProvider("pollinations");
-  assert.strictEqual(pol.category, "free");
-  assert.strictEqual(pol.noAuth, true);
-  assert.strictEqual(pol.transport.baseUrl, "https://gen.pollinations.ai/v1/chat/completions");
+  const mis = getProvider("mistral");
+  assert.strictEqual(mis.category, "apikey");
+  assert.strictEqual(mis.freeModelSync, "merge");
+  assert.strictEqual(mis.transport.baseUrl, "https://api.mistral.ai/v1/chat/completions");
+  assert.ok(mis.models.some((m) => m.id === "mistral-large-latest"));
 
   const cf = getProvider("cloudflare-ai");
   assert.strictEqual(cf.category, "apikey");
@@ -71,6 +76,37 @@ test("Provider Registry - new providers use expected configs", () => {
   assert.strictEqual(fb.category, "oauth");
   assert.strictEqual(fb.executor, "freebuff");
   assert.strictEqual(fb.transport.baseUrl, "https://www.codebuff.com/api/v1/chat/completions");
+
+  const ol = getProvider("ollama");
+  assert.strictEqual(ol.category, "apikey");
+  assert.strictEqual(ol.freeModelSync, "merge");
+  assert.strictEqual(ol.transport.baseUrl, "https://ollama.com/v1/chat/completions");
+
+  const cmc = getProvider("commandcode");
+  assert.strictEqual(cmc.category, "oauth");
+  assert.strictEqual(cmc.executor, "commandcode");
+  assert.strictEqual(cmc.transport.baseUrl, "https://api.commandcode.ai/alpha/generate");
+  assert.ok(cmc.models.some((m) => m.id === "deepseek/deepseek-v4-pro"));
+
+  const ovh = getProvider("ovhcloud");
+  assert.strictEqual(ovh.category, "free");
+  assert.strictEqual(ovh.noAuth, true);
+  assert.strictEqual(ovh.freeModelSync, "replace");
+  assert.strictEqual(ovh.transport.baseUrl, "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions");
+
+  const xkr = getProvider("xkiro");
+  assert.strictEqual(xkr.category, "apikey");
+  assert.strictEqual(xkr.freeModelSync, "merge");
+  assert.strictEqual(xkr.transport.baseUrl, "https://api.xkiro.com/v1/chat/completions");
+  assert.ok(xkr.models.some((m) => m.id === "qwen/qwen3-coder-plus:free"));
+  // Current catalog: GLM 5.3 Flash present; withdrawn rows gone.
+  const fbIds = new Set(fb.models.map((m) => m.id));
+  assert.ok(fbIds.has("z-ai/glm-5.3-flash"));
+  assert.ok(fbIds.has("openai/gpt-6-luna"));
+  assert.ok(fbIds.has("anthropic/claude-fable-5.1"));
+  assert.ok(!fbIds.has("deepseek/deepseek-v4-pro"), "withdrawn 2026-08-26");
+  assert.ok(!fbIds.has("openai/gpt-5.6-luna"), "paused 2026-09-24");
+  assert.ok(!fbIds.has("z-ai/glm-5.2"), "withdrawn 2026-08-31");
 });
 
 test("Provider Registry - aligned configs for codex, github, kiro, and antigravity", () => {
@@ -111,13 +147,17 @@ test("Provider Registry - getAvailableModels aggregates model list with provider
   assert.ok(modelIds.some((id) => id.startsWith("claude/") || id.startsWith("cc/")), "Must contain Claude model");
   assert.ok(modelIds.some((id) => id.startsWith("nv/")), "Must contain NVIDIA model");
   assert.ok(modelIds.some((id) => id.startsWith("cl/")), "Must contain Cline model");
-  assert.ok(modelIds.some((id) => id.startsWith("pol/")), "Must contain Pollinations model");
+  assert.ok(modelIds.some((id) => id.startsWith("mis/")), "Must contain Mistral model");
   assert.ok(modelIds.some((id) => id.startsWith("cf/")), "Must contain Cloudflare model");
   assert.ok(modelIds.some((id) => id.startsWith("or/")), "Must contain OpenRouter model");
   assert.ok(modelIds.some((id) => id.startsWith("llm7/")), "Must contain LLM7 model");
   assert.ok(modelIds.some((id) => id.startsWith("bzl/")), "Must contain Bazaarlink model");
   assert.ok(modelIds.some((id) => id.startsWith("together/")), "Must contain Together model");
   assert.ok(modelIds.some((id) => id.startsWith("fb/")), "Must contain Freebuff model");
+  assert.ok(modelIds.some((id) => id.startsWith("ol/")), "Must contain Ollama model");
+  assert.ok(modelIds.some((id) => id.startsWith("cmc/")), "Must contain CommandCode model");
+  assert.ok(modelIds.some((id) => id.startsWith("ovh/")), "Must contain OVHcloud model");
+  assert.ok(modelIds.some((id) => id.startsWith("xkr/")), "Must contain xKiro model");
 });
 
 test("GET /v1/models - returns OpenAI compatible model list", async () => {

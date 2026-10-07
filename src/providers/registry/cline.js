@@ -8,6 +8,9 @@ export default {
   name: "Cline",
   alias: ["cl", "cline"],
   category: "oauth",
+  // The free catalog is published by the public recommended-models feed,
+  // so sync works without an account (9router clinepassModels.js).
+  freeModelSync: "merge",
   format: "openai",
   transport: {
     baseUrl: "https://api.cline.bot/api/v1/chat/completions",

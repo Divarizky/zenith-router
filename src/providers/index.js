@@ -8,13 +8,17 @@ import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
 import nvidia from "./registry/nvidia.js";
 import cline from "./registry/cline.js";
-import pollinations from "./registry/pollinations.js";
+import mistral from "./registry/mistral.js";
 import cloudflareAi from "./registry/cloudflare-ai.js";
 import openrouter from "./registry/openrouter.js";
 import llm7 from "./registry/llm7.js";
 import bazaarlink from "./registry/bazaarlink.js";
 import together from "./registry/together.js";
 import freebuff from "./registry/freebuff.js";
+import ollama from "./registry/ollama.js";
+import commandcode from "./registry/commandcode.js";
+import ovhcloud from "./registry/ovhcloud.js";
+import xkiro from "./registry/xkiro.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
 
 const REGISTRY = [
@@ -28,13 +32,17 @@ const REGISTRY = [
   kilocode,
   nvidia,
   cline,
-  pollinations,
+  mistral,
   cloudflareAi,
   openrouter,
   llm7,
   bazaarlink,
   together,
   freebuff,
+  ollama,
+  commandcode,
+  ovhcloud,
+  xkiro,
 ];
 
 const providerMap = new Map();

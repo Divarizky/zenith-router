@@ -156,6 +156,7 @@ export async function handleResponses(c) {
     }
 
     const { upstreamRes, connection } = result;
+    const apiKeyId = c.get("apiKeyId") || null;
 
     if (chatBody.stream) {
       let responseStream = upstreamRes.body;
@@ -168,6 +169,7 @@ export async function handleResponses(c) {
       responseStream = responseStream.pipeThrough(
         createUsageTapStream({
           connectionId: connection?.id,
+          apiKeyId,
           model: targetModel,
           startTime,
           estimatedInputTokens: estimateTokens(chatBody.messages),
@@ -193,6 +195,7 @@ export async function handleResponses(c) {
     queueMicrotask(() => {
       recordUsage({
         connectionId: connection?.id,
+        apiKeyId,
         model: targetModel,
         inputTokens,
         outputTokens,

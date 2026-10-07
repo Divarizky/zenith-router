@@ -38,12 +38,17 @@ const KILO_LIST = {
 test("import modes - free-only import is dropped for providers that sync free models", () => {
   assert.deepStrictEqual(getImportModes(getProvider("opencode")), []);
   assert.deepStrictEqual(getImportModes(getProvider("kilocode")), ["all"]);
-  assert.deepStrictEqual(getImportModes(getProvider("glm")), ["all", "free"]);
-  assert.deepStrictEqual(getImportModes(getProvider("openrouter")), ["all", "free"]);
+  assert.deepStrictEqual(getImportModes(getProvider("cline")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("glm")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("openrouter")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("together")), ["all"]);
-  assert.deepStrictEqual(getImportModes(getProvider("bazaarlink")), ["all", "free"]);
+  assert.deepStrictEqual(getImportModes(getProvider("bazaarlink")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("llm7")), ["all"]);
-  assert.deepStrictEqual(getImportModes(getProvider("pollinations")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("mistral")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("ollama")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("ovhcloud")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("xkiro")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("commandcode")), []);
   assert.deepStrictEqual(getImportModes(getProvider("kiro")), []);
 });
 
@@ -82,10 +87,14 @@ test("glm import - needs an account, sends its key, free rule from Omni catalog"
   assert.strictEqual(calls.length, 0);
 
   addConnection({ provider: "glm", name: "GLM", credentials: { api_key: "glm-key" }, proxy_url: "http://127.0.0.1:7890" });
-  assert.deepStrictEqual(await importProviderModels("glm", "free"), { code: "imported", count: 1 });
+  assert.deepStrictEqual(await importProviderModels("glm", "all"), { code: "imported", count: 2 });
   assert.strictEqual(calls[0].headers.Authorization, "Bearer glm-key");
   assert.strictEqual(calls[0].proxyUrl, "http://127.0.0.1:7890");
-  assert.deepStrictEqual(listImportedModels("glm").map((m) => m.model_id), ["glm-4.7-flash"]);
+  const glmRows = listImportedModels("glm");
+  assert.strictEqual(glmRows.length, 2);
+  assert.strictEqual(glmRows.find((m) => m.model_id === "glm-4.7-flash").is_free, 1);
+  assert.strictEqual(glmRows.find((m) => m.model_id === "glm-5.1").is_free, 0);
+  assert.strictEqual((await importProviderModels("glm", "free")).code, "unsupported");
 });
 
 test("claude import - OAuth token gets the oauth beta header and only claude-* ids", async (t) => {

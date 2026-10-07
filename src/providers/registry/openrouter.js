@@ -3,6 +3,8 @@ export default {
   name: "OpenRouter",
   alias: ["or", "openrouter"],
   category: "apikey",
+  // /api/v1/models is public; paid models in the list need an API key.
+  freeModelSync: "merge",
   format: "openai",
   transport: {
     baseUrl: "https://openrouter.ai/api/v1/chat/completions",

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { platform, arch } from "node:os";
+import { proxyFetch } from "../../executors/proxy.js";
 
 // Login flows for OAuth providers, ported from 9router src/lib/oauth/providers/*.
 // Client ids are the public ones shipped in each vendor's own CLI/IDE.
@@ -15,7 +16,10 @@ export function setOAuthFetch(fn) {
   fetchImpl = fn || ((...args) => globalThis.fetch(...args));
 }
 
-export function oauthFetch(url, init) {
+export function oauthFetch(url, init = {}, { proxyUrl = null } = {}) {
+  if (proxyUrl) {
+    return proxyFetch(url, init, proxyUrl);
+  }
   return fetchImpl(url, init);
 }
 
@@ -132,7 +136,7 @@ export const OAUTH_CONFIG = {
 };
 
 /** Fetch a fresh Copilot API token for a GitHub OAuth token. Used at login and on refresh. */
-export async function fetchCopilotToken(githubToken) {
+export async function fetchCopilotToken(githubToken, { proxyUrl = null } = {}) {
   const cfg = OAUTH_CONFIG.github;
   const res = await oauthFetch(cfg.copilotTokenUrl, {
     headers: {
@@ -141,20 +145,20 @@ export async function fetchCopilotToken(githubToken) {
       "X-GitHub-Api-Version": cfg.apiVersion,
       "User-Agent": cfg.userAgent,
     },
-  });
+  }, { proxyUrl });
   const data = await readJson(res, "Copilot token request");
   if (!data.token) throw new Error("Copilot token response has no token (no Copilot subscription?)");
   return { token: data.token, expiresAt: Number(data.expires_at) * 1000 || Date.now() + 25 * 60 * 1000 };
 }
 
 /** Kiro Builder ID tokens carry no profileArn; requests 403 without it. */
-export async function fetchKiroProfileArn(accessToken) {
+export async function fetchKiroProfileArn(accessToken, { proxyUrl = null } = {}) {
   try {
     const res = await oauthFetch("https://codewhisperer.us-east-1.amazonaws.com/ListAvailableProfiles", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ maxResults: 10 }),
-    });
+    }, { proxyUrl });
     if (!res.ok) return null;
     const data = await res.json();
     return data.profiles?.find((p) => p.arn?.trim())?.arn?.trim() || null;
@@ -186,7 +190,7 @@ const claude = {
     });
     return `${cfg.authorizeUrl}?${params}`;
   },
-  async exchange({ code, redirectUri, codeVerifier, state }) {
+  async exchange({ code, redirectUri, codeVerifier, state, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.claude;
     // The manual-copy page shows "code#state".
     const [authCode, codeState] = String(code).split("#");
@@ -201,7 +205,7 @@ const claude = {
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
       }),
-    });
+    }, { proxyUrl });
     const t = await readJson(res, "Claude token exchange");
     return {
       access_token: t.access_token,
@@ -231,7 +235,7 @@ const codex = {
     });
     return `${cfg.authorizeUrl}?${params}`;
   },
-  async exchange({ code, redirectUri, codeVerifier }) {
+  async exchange({ code, redirectUri, codeVerifier, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.codex;
     const res = await oauthFetch(cfg.tokenUrl, {
       method: "POST",
@@ -243,7 +247,7 @@ const codex = {
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
       }),
-    });
+    }, { proxyUrl });
     const t = await readJson(res, "Codex token exchange");
     const id = decodeJwtPayload(t.id_token) || {};
     const auth = id["https://api.openai.com/auth"] || {};
@@ -276,7 +280,7 @@ const antigravity = {
     });
     return `${cfg.authorizeUrl}?${params}`;
   },
-  async exchange({ code, redirectUri }) {
+  async exchange({ code, redirectUri, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.antigravity;
     const res = await oauthFetch(cfg.tokenUrl, {
       method: "POST",
@@ -288,12 +292,12 @@ const antigravity = {
         code,
         redirect_uri: redirectUri,
       }),
-    });
+    }, { proxyUrl });
     const t = await readJson(res, "Google token exchange");
 
     const userRes = await oauthFetch(`${cfg.userInfoUrl}?alt=json`, {
       headers: { Authorization: `Bearer ${t.access_token}` },
-    });
+    }, { proxyUrl });
     const user = userRes.ok ? await userRes.json() : {};
 
     // loadCodeAssist gives the Cloud Code project every request must name.
@@ -310,7 +314,7 @@ const antigravity = {
         method: "POST",
         headers,
         body: JSON.stringify({ metadata }),
-      });
+      }, { proxyUrl });
       if (loadRes.ok) {
         const data = await loadRes.json();
         projectId = data.cloudaicompanionProject?.id || data.cloudaicompanionProject || "";
@@ -320,7 +324,7 @@ const antigravity = {
 
     // Onboarding can take a while; it must not block saving the account.
     if (projectId) {
-      oauthFetch(cfg.onboardUserUrl, { method: "POST", headers, body: JSON.stringify({ tierId, metadata }) }).catch(
+      oauthFetch(cfg.onboardUserUrl, { method: "POST", headers, body: JSON.stringify({ tierId, metadata }) }, { proxyUrl }).catch(
         () => {}
       );
     }
@@ -341,7 +345,7 @@ const cline = {
     const params = new URLSearchParams({ client_type: "extension", callback_url: redirectUri, redirect_uri: redirectUri });
     return `${OAUTH_CONFIG.cline.authorizeUrl}?${params}`;
   },
-  async exchange({ code, redirectUri }) {
+  async exchange({ code, redirectUri, proxyUrl = null }) {
     // Cline hands the token back base64-encoded in `code`; older builds need an exchange call.
     try {
       const decoded = Buffer.from(String(code), "base64").toString("utf8");
@@ -359,7 +363,7 @@ const cline = {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ grant_type: "authorization_code", code, client_type: "extension", redirect_uri: redirectUri }),
-    });
+    }, { proxyUrl });
     const body = await readJson(res, "Cline token exchange");
     const data = body.data || body;
     return {
@@ -378,13 +382,13 @@ const cline = {
 
 const github = {
   flowType: "device_code",
-  async start() {
+  async start({ proxyUrl = null } = {}) {
     const cfg = OAUTH_CONFIG.github;
     const res = await oauthFetch(cfg.deviceCodeUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams({ client_id: cfg.clientId, scope: cfg.scopes }),
-    });
+    }, { proxyUrl });
     const d = await readJson(res, "GitHub device code request");
     return {
       deviceCode: d.device_code,
@@ -394,7 +398,7 @@ const github = {
       interval: d.interval || 5,
     };
   },
-  async poll({ deviceCode }) {
+  async poll({ deviceCode, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.github;
     const res = await oauthFetch(cfg.tokenUrl, {
       method: "POST",
@@ -404,16 +408,16 @@ const github = {
         device_code: deviceCode,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       }),
-    });
+    }, { proxyUrl });
     const d = await res.json().catch(() => ({}));
     if (d.error === "authorization_pending" || d.error === "slow_down") return { pending: true };
     if (!d.access_token) return { error: d.error_description || d.error || "GitHub login failed" };
 
     // Copilot's API wants its own short-lived token, minted from the GitHub token.
-    const copilot = await fetchCopilotToken(d.access_token);
+    const copilot = await fetchCopilotToken(d.access_token, { proxyUrl });
     const userRes = await oauthFetch(cfg.userInfoUrl, {
       headers: { Authorization: `Bearer ${d.access_token}`, Accept: "application/json", "User-Agent": cfg.userAgent },
-    });
+    }, { proxyUrl });
     const user = userRes.ok ? await userRes.json() : {};
     return {
       tokens: {
@@ -429,11 +433,11 @@ const github = {
 
 const kilocode = {
   flowType: "device_code",
-  async start() {
+  async start({ proxyUrl = null } = {}) {
     const res = await oauthFetch(OAUTH_CONFIG.kilocode.initiateUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    });
+    }, { proxyUrl });
     if (res.status === 429) throw new Error("Terlalu banyak permintaan login yang menunggu. Coba lagi nanti.");
     const d = await readJson(res, "Kilo device auth");
     return {
@@ -444,9 +448,9 @@ const kilocode = {
       interval: 3,
     };
   },
-  async poll({ deviceCode }) {
+  async poll({ deviceCode, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.kilocode;
-    const res = await oauthFetch(`${cfg.initiateUrl}/${encodeURIComponent(deviceCode)}`);
+    const res = await oauthFetch(`${cfg.initiateUrl}/${encodeURIComponent(deviceCode)}`, {}, { proxyUrl });
     if (res.status === 202) return { pending: true };
     if (res.status === 403) return { error: "Login ditolak." };
     if (res.status === 410) return { error: "Kode login kedaluwarsa." };
@@ -459,7 +463,7 @@ const kilocode = {
     try {
       const profileRes = await oauthFetch(`${cfg.apiBaseUrl}/api/profile`, {
         headers: { Authorization: `Bearer ${d.token}` },
-      });
+      }, { proxyUrl });
       if (profileRes.ok) orgId = (await profileRes.json()).organizations?.[0]?.id || null;
     } catch {}
     return { tokens: { access_token: d.token, email: d.userEmail, extra: orgId ? { org_id: orgId } : {} } };
@@ -469,7 +473,7 @@ const kilocode = {
 const kiro = {
   flowType: "device_code",
   // AWS Builder ID via SSO OIDC: register a public client, then device authorization.
-  async start({ region = "us-east-1" } = {}) {
+  async start({ region = "us-east-1", proxyUrl = null } = {}) {
     if (!AWS_REGION.test(region)) throw new Error("Invalid region");
     const cfg = OAUTH_CONFIG.kiro;
     const oidc = `https://oidc.${region}.amazonaws.com`;
@@ -483,13 +487,13 @@ const kiro = {
         grantTypes: cfg.grantTypes,
         issuerUrl: cfg.issuerUrl,
       }),
-    });
+    }, { proxyUrl });
     const client = await readJson(regRes, "AWS client registration");
     const devRes = await oauthFetch(`${oidc}/device_authorization`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ clientId: client.clientId, clientSecret: client.clientSecret, startUrl: cfg.startUrl }),
-    });
+    }, { proxyUrl });
     const d = await readJson(devRes, "AWS device authorization");
     return {
       deviceCode: d.deviceCode,
@@ -500,7 +504,7 @@ const kiro = {
       state: { clientId: client.clientId, clientSecret: client.clientSecret, region },
     };
   },
-  async poll({ deviceCode, state }) {
+  async poll({ deviceCode, state, proxyUrl = null }) {
     const res = await oauthFetch(`https://oidc.${state.region}.amazonaws.com/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -510,13 +514,13 @@ const kiro = {
         deviceCode,
         grantType: "urn:ietf:params:oauth:grant-type:device_code",
       }),
-    });
+    }, { proxyUrl });
     const d = await res.json().catch(() => ({}));
     if (!d.accessToken) {
       if (!d.error || d.error === "authorization_pending" || d.error === "slow_down") return { pending: true };
       return { error: d.error_description || d.error };
     }
-    const profileArn = d.profileArn || (await fetchKiroProfileArn(d.accessToken));
+    const profileArn = d.profileArn || (await fetchKiroProfileArn(d.accessToken, { proxyUrl }));
     return {
       tokens: {
         access_token: d.accessToken,
@@ -539,14 +543,14 @@ const kiro = {
 // long-lived coding-plan API key, so the account needs no refresh afterwards.
 const glm = {
   flowType: "device_code",
-  async start() {
+  async start({ proxyUrl = null } = {}) {
     const cfg = OAUTH_CONFIG.glm;
     const pollToken = crypto.randomBytes(32).toString("hex");
     const res = await oauthFetch(cfg.cliInitUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${pollToken}` },
       body: JSON.stringify({ provider: cfg.providerId }),
-    });
+    }, { proxyUrl });
     const payload = await readJson(res, "ZCode OAuth init");
     const d = payload.data;
     if (!isZaiSuccess(payload.code) || !d?.flow_id || !d?.authorize_url) {
@@ -560,11 +564,11 @@ const glm = {
       state: { pollToken },
     };
   },
-  async poll({ deviceCode, state }) {
+  async poll({ deviceCode, state, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.glm;
     const res = await oauthFetch(`${cfg.cliPollUrl}/${encodeURIComponent(deviceCode)}`, {
       headers: { Authorization: `Bearer ${state.pollToken}` },
-    });
+    }, { proxyUrl });
     if (!res.ok) return { error: `ZCode poll gagal (HTTP ${res.status})` };
     const payload = await res.json();
     if (!isZaiSuccess(payload.code)) return { error: payload.msg || "ZCode poll gagal" };
@@ -575,7 +579,7 @@ const glm = {
     const zai = d[cfg.providerId] || {};
     const zaiToken = zai.access_token || zai.accessToken || d.accessToken || d.access_token;
     if (!zaiToken) return { error: "Respons ZCode tidak berisi access token." };
-    const apiKey = await resolveGlmPlanApiKey(zaiToken);
+    const apiKey = await resolveGlmPlanApiKey(zaiToken, { proxyUrl });
     const user = d.user || {};
     return { tokens: { access_token: apiKey, email: user.email, name: user.name } };
   },
@@ -593,8 +597,8 @@ function relativeSeconds(expiresAt) {
   return s > 0 ? s : null;
 }
 
-async function zaiJson(url, init, label) {
-  const payload = await readJson(await oauthFetch(url, init), `Z.ai ${label}`);
+async function zaiJson(url, init, label, { proxyUrl = null } = {}) {
+  const payload = await readJson(await oauthFetch(url, init, { proxyUrl }), `Z.ai ${label}`);
   if (!isZaiSuccess(payload?.code) || payload?.success === false) {
     throw new Error(payload?.msg || `Z.ai ${label} returned error ${payload?.code}`);
   }
@@ -602,18 +606,19 @@ async function zaiJson(url, init, label) {
 }
 
 /** Z.ai OAuth token → business JWT → the "zcode-api-key" coding-plan key (created if missing). */
-async function resolveGlmPlanApiKey(zaiToken) {
+async function resolveGlmPlanApiKey(zaiToken, { proxyUrl = null } = {}) {
   const cfg = OAUTH_CONFIG.glm;
   const login = await zaiJson(
     cfg.businessLoginUrl,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: zaiToken }) },
-    "business login"
+    "business login",
+    { proxyUrl }
   );
   const business = login?.access_token || login?.accessToken;
   if (!business) throw new Error("Z.ai business login returned no access_token");
   const headers = { Authorization: `Bearer ${business}`, "Content-Type": "application/json" };
 
-  const info = await zaiJson(`${cfg.apiBaseUrl}/api/biz/customer/getCustomerInfo`, { headers }, "customer info");
+  const info = await zaiJson(`${cfg.apiBaseUrl}/api/biz/customer/getCustomerInfo`, { headers }, "customer info", { proxyUrl });
   // Personal org/project: skip team projects (projectType "2"), prefer the default ones.
   const isDefault = (n) => /默认机构|默认项目/.test(String(n || "")) || String(n || "").trim().toLowerCase() === "default";
   const orgs = (info?.organizations || [])
@@ -624,18 +629,19 @@ async function resolveGlmPlanApiKey(zaiToken) {
   const project = org.projects.find((p) => isDefault(p.projectName)) || org.projects[0];
 
   const listUrl = `${cfg.apiBaseUrl}/api/biz/v1/organization/${org.o.organizationId}/projects/${project.projectId}/api_keys`;
-  const keys = (await zaiJson(listUrl, { headers }, "api keys")) || [];
+  const keys = (await zaiJson(listUrl, { headers }, "api keys", { proxyUrl })) || [];
   let entry = Array.isArray(keys) ? keys.find((k) => k?.name === cfg.planApiKeyName) : null;
   if (!entry) {
     entry = await zaiJson(
       listUrl,
       { method: "POST", headers, body: JSON.stringify({ name: cfg.planApiKeyName }) },
-      "api key create"
+      "api key create",
+      { proxyUrl }
     );
   }
   const apiKey = entry?.apiKey?.trim();
   if (!apiKey) throw new Error("Z.ai api_keys response has no apiKey");
-  const secret = await zaiJson(`${listUrl}/copy/${encodeURIComponent(apiKey)}`, { headers }, "api key copy");
+  const secret = await zaiJson(`${listUrl}/copy/${encodeURIComponent(apiKey)}`, { headers }, "api key copy", { proxyUrl });
   if (!secret?.secretKey?.trim()) throw new Error("Z.ai api key copy has no secretKey");
   return `${apiKey}.${secret.secretKey.trim()}`;
 }

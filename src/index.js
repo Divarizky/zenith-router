@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { streamSSE } from "hono/streaming";
 import { fileURLToPath } from "node:url";
 import { handleListModels } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
@@ -7,6 +9,12 @@ import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
 import { handleGetUsage } from "./services/usage.js";
 import { handleGetQuota } from "./services/quota.js";
+import {
+  initConsoleLogCapture,
+  getConsoleLogs,
+  clearConsoleLogs,
+  getConsoleEmitter,
+} from "./services/logger.js";
 import { renderOverviewPage } from "./ui/pages/overview.js";
 import {
   renderProvidersPage,
@@ -67,6 +75,9 @@ app.use("/v1/*", gatewayAuth);
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", service: "zenroute", timestamp: Date.now() }));
+
+// Serve static files from public/
+app.use("/*", serveStatic({ root: "./public" }));
 
 // Home & Dashboard Overview
 app.get("/", (c) => c.html(renderOverviewPage(PORT)));
@@ -129,8 +140,61 @@ app.post("/v1/responses", handleResponses);
 app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
 
+// Console Logs API
+app.get("/api/console-logs", (c) => c.json({ logs: getConsoleLogs() }));
+app.delete("/api/console-logs", (c) => {
+  clearConsoleLogs();
+  return c.json({ ok: true });
+});
+app.get("/api/console-logs/stream", async (c) => {
+  initConsoleLogCapture();
+  const emitter = getConsoleEmitter();
+  return streamSSE(c, async (stream) => {
+    // Send initial backlog
+    const initialLogs = getConsoleLogs();
+    await stream.writeSSE({
+      data: JSON.stringify({ type: "init", logs: initialLogs }),
+    });
+
+    const onLines = async (lines) => {
+      try {
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "lines", lines }),
+        });
+      } catch {}
+    };
+
+    const onClear = async () => {
+      try {
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "clear" }),
+        });
+      } catch {}
+    };
+
+    emitter.on("lines", onLines);
+    emitter.on("clear", onClear);
+
+    // Keep connection alive with periodic ping
+    const pingInterval = setInterval(async () => {
+      try {
+        await stream.writeSSE({ event: "ping", data: "" });
+      } catch {
+        clearInterval(pingInterval);
+      }
+    }, 15000);
+
+    stream.onAbort(() => {
+      clearInterval(pingInterval);
+      emitter.off("lines", onLines);
+      emitter.off("clear", onClear);
+    });
+  });
+});
+
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 export function startServer() {
+  initConsoleLogCapture();
   startModelSyncScheduler();
   const hostname = getBindHost();
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { initDb, getDb } from "../src/db/index.js";
+import { initDb, getDb, addConnection } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 import {
   syncFreeModels,
@@ -47,6 +47,65 @@ const KILO = {
       { id: "vendor/b", pricing: { prompt: "0", completion: "0" } },
       { id: "vendor/c:free", isFree: false },
       { id: "vendor/paid", pricing: { prompt: "0.000002", completion: "0.000008" } },
+    ],
+  },
+};
+
+const CLINE = {
+  payload: {
+    recommended: [
+      { id: "anthropic/claude-opus-4.8" },
+      { id: "cline-free/solar-mini4", name: "Solar Mini 4" },
+    ],
+    free: [
+      { id: "cline-free/solar-mini4", name: "Solar Mini 4" },
+      { id: "cline-free/mimo-v2.6-flash", name: "Mimo V2.6 Flash" },
+    ],
+  },
+};
+
+const OPENROUTER = {
+  payload: {
+    data: [
+      { id: "google/gemini-2.0-flash-exp:free" },
+      { id: "other/paid-model", pricing: { prompt: "0.000003", completion: "0.000015" } },
+      { id: "meta-llama/llama-3.3-70b-instruct", pricing: { prompt: "0", completion: "0" } },
+    ],
+  },
+};
+
+const MISTRAL = {
+  payload: {
+    data: [
+      { id: "mistral-large-latest" },
+      { id: "devstral-latest" },
+    ],
+  },
+};
+
+const OLLAMA = {
+  payload: {
+    data: [
+      { id: "llama3.3:latest" },
+      { id: "qwen2.5-coder:32b" },
+    ],
+  },
+};
+
+const OVH = {
+  payload: {
+    data: [
+      { id: "gpt-oss-120b" },
+      { id: "Qwen3.6-27B" },
+    ],
+  },
+};
+
+const XKIRO = {
+  payload: {
+    data: [
+      { id: "qwen/qwen3-coder-plus:free", access_tier: "free" },
+      { id: "minimax/minimax-m3:free", access_tier: "free" },
     ],
   },
 };
@@ -148,17 +207,127 @@ test("sync - failures keep the previous list and record the error", async (t) =>
   assert.strictEqual(state.error, null);
 });
 
+test("cline sync - public feed merges free models without requiring an account", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "api.cline.bot": CLINE });
+
+  assert.deepStrictEqual(await syncFreeModels("cline"), { code: "synced", count: 2 });
+  const routed = ids();
+  assert.ok(routed.includes("cl/z-ai/glm-5.2"), "hardcoded models stay in merge mode");
+  assert.ok(routed.includes("cl/cline-free/solar-mini4"));
+  assert.ok(routed.includes("cl/cline-free/mimo-v2.6-flash"));
+});
+
+test("openrouter sync - public model list merges free models without requiring an account", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "openrouter.ai": OPENROUTER });
+
+  assert.deepStrictEqual(await syncFreeModels("openrouter"), { code: "synced", count: 2 });
+  const routed = ids();
+  assert.ok(routed.includes("or/auto"), "hardcoded models stay");
+  assert.ok(routed.includes("or/google/gemini-2.0-flash-exp:free"));
+  assert.ok(routed.includes("or/meta-llama/llama-3.3-70b-instruct"), "zero pricing counted as free");
+  assert.ok(!routed.includes("or/other/paid-model"));
+});
+
+test("ollama sync - public cloud model list merges free cloud models without requiring an account", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "ollama.com": { payload: { data: [{ id: "gpt-oss:120b" }, { id: "mistral-large-4" }] } } });
+
+  assert.deepStrictEqual(await syncFreeModels("ollama"), { code: "synced", count: 2 });
+  const routed = ids();
+  assert.ok(routed.includes("ol/kimi-k3"), "hardcoded models stay");
+  assert.ok(routed.includes("ol/gpt-oss:120b"));
+  assert.ok(routed.includes("ol/mistral-large-4"));
+});
+
+test("ovhcloud sync - public anonymous endpoint replaces models without requiring an account", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "ovh.net": OVH });
+
+  assert.deepStrictEqual(await syncFreeModels("ovhcloud"), { code: "synced", count: 2 });
+  const routed = ids();
+  assert.ok(routed.includes("ovh/gpt-oss-120b"));
+  assert.ok(routed.includes("ovh/Qwen3.6-27B"));
+});
+
+test("xkiro sync - public free model list merges free models without requiring an account", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "xkiro.com": XKIRO });
+
+  assert.deepStrictEqual(await syncFreeModels("xkiro"), { code: "synced", count: 2 });
+  const routed = ids();
+  assert.ok(routed.includes("xkr/qwen/qwen3-coder-plus:free"));
+  assert.ok(routed.includes("xkr/minimax/minimax-m3:free"));
+});
+
+test("conditional sync - glm, bazaarlink, and mistral require connection, sync when account is added", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+
+  // Without connection
+  assert.deepStrictEqual(await syncFreeModels("glm"), { code: "no_account", count: 0 });
+  assert.deepStrictEqual(await syncFreeModels("bazaarlink"), { code: "no_account", count: 0 });
+  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "no_account", count: 0 });
+
+  // With connection
+  addConnection({ provider: "glm", name: "GLM", credentials: { api_key: "glm-key" } });
+  addConnection({ provider: "bazaarlink", name: "BZL", credentials: { api_key: "bzl-key" } });
+  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
+
+  mockUpstream({
+    "api.z.ai": { payload: { data: [{ id: "glm-4.7-flash" }, { id: "glm-5.1" }] } },
+    "bazaarlink.ai": { payload: { data: [{ id: "auto:free", isFree: true }, { id: "gpt-5.5", isFree: false }] } },
+    "api.mistral.ai": MISTRAL,
+  });
+
+  assert.deepStrictEqual(await syncFreeModels("glm"), { code: "synced", count: 1 });
+  assert.deepStrictEqual(await syncFreeModels("bazaarlink"), { code: "synced", count: 1 });
+  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
+  const routed = ids();
+  assert.ok(routed.includes("glm/glm-4.7-flash"));
+  assert.ok(routed.includes("bzl/auto:free"));
+  assert.ok(routed.includes("mis/mistral-large-latest"));
+});
+
 test("sync - only providers with freeModelSync; disabled toggles still apply", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
-  const calls = mockUpstream({ "opencode.ai": OPENCODE, "api.kilo.ai": KILO });
+  const calls = mockUpstream({
+    "opencode.ai": OPENCODE,
+    "api.kilo.ai": KILO,
+    "api.cline.bot": CLINE,
+    "openrouter.ai": OPENROUTER,
+    "ollama.com": { payload: { data: [{ id: "gpt-oss:120b" }] } },
+    "ovh.net": OVH,
+    "xkiro.com": XKIRO,
+  });
 
-  assert.strictEqual((await syncFreeModels("glm")).code, "unsupported");
+  assert.strictEqual((await syncFreeModels("together")).code, "unsupported");
+  assert.strictEqual((await syncFreeModels("commandcode")).code, "unsupported");
   assert.strictEqual((await syncFreeModels("kiro")).code, "unsupported");
 
   const results = await syncAllFreeModels();
-  assert.deepStrictEqual(Object.keys(results).sort(), ["kilocode", "opencode"]);
-  assert.strictEqual(calls.length, 2);
+  assert.deepStrictEqual(Object.keys(results).sort(), [
+    "bazaarlink",
+    "cline",
+    "freebuff",
+    "glm",
+    "kilocode",
+    "mistral",
+    "ollama",
+    "opencode",
+    "openrouter",
+    "ovhcloud",
+    "xkiro",
+  ]);
+  // 7 public providers make calls; bazaarlink, freebuff, glm, and mistral return no_account without making calls
+  assert.strictEqual(calls.length, 7);
 
   disableModel("opencode", "exo-free");
   assert.ok(!ids().includes("oc/exo-free"));

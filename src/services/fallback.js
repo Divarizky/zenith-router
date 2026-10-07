@@ -7,8 +7,10 @@ import { getProvider } from "../providers/index.js";
 import { isConnectionExhausted } from "./quota.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
+import { getSetting } from "./settings.js";
+import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 
-export function listAvailableConnections(providerId) {
+export function listAvailableConnections(providerId, { rotation = null } = {}) {
   if (!providerId) return [];
   const providerDef = getProvider(providerId);
   const connections = getConnections(providerId);
@@ -16,7 +18,13 @@ export function listAvailableConnections(providerId) {
   const available = connections.filter(
     (c) => c.is_active === 1 && !isConnectionInCooldown(c) && !isConnectionExhausted(c)
   );
-  available.sort((a, b) => (a.last_used_at || 0) - (b.last_used_at || 0));
+
+  const strategy = rotation || getSetting("account_rotation", "lru");
+  if (strategy === "sticky") {
+    available.sort((a, b) => (b.last_used_at || 0) - (a.last_used_at || 0));
+  } else {
+    available.sort((a, b) => (a.last_used_at || 0) - (b.last_used_at || 0));
+  }
 
   if (available.length === 0 && providerDef?.noAuth) {
     available.push({
@@ -52,6 +60,35 @@ export function markProviderCooldown(providerId, durationMs = 60000) {
   for (const c of connections) {
     setConnectionCooldown(c.id, until);
   }
+}
+
+function attachSlotRelease(res, releaseSlot) {
+  if (!res || !releaseSlot) return res;
+  if (!res.body) {
+    releaseSlot();
+    return res;
+  }
+  let released = false;
+  const safeRelease = () => {
+    if (!released) {
+      released = true;
+      releaseSlot();
+    }
+  };
+  const releaseTransform = new TransformStream({
+    flush() {
+      safeRelease();
+    },
+    cancel() {
+      safeRelease();
+    },
+  });
+  const wrappedBody = res.body.pipeThrough(releaseTransform);
+  return new Response(wrappedBody, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
 }
 
 function buildErrorResponse(res, bodyText, targetFormat) {
@@ -114,58 +151,97 @@ export async function executeWithFallback({
       }
     }
 
+    let releaseSlot = null;
+    try {
+      releaseSlot = await acquireAccountSlot(connection, signal);
+    } catch (err) {
+      if (signal?.aborted) {
+        throw err;
+      }
+    }
+
     const headers = { ...baseHeaders };
     applyConnectionAuth(headers, connection);
     const url = resolveUrl(connection);
 
-    let res = await executor.execute({
-      url,
-      method: "POST",
-      headers,
-      body: bodyText,
-      signal,
-      proxyUrl: connection?.proxy_url,
-    });
+    let res;
+    try {
+      res = await executor.execute({
+        url,
+        method: "POST",
+        headers,
+        body: bodyText,
+        signal,
+        proxyUrl: connection?.proxy_url,
+      });
+    } catch (err) {
+      if (releaseSlot) releaseSlot();
+      throw err;
+    }
 
     // Success: this connection can serve the request
     if (res.ok) {
-      return { ok: true, upstreamRes: res, connection };
+      return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
+    }
+
+    // Attempt failed: release slot before processing failover or next attempt
+    if (releaseSlot) {
+      releaseSlot();
+      releaseSlot = null;
     }
 
     // Capture response for error relaying
     lastFailureResponse = buildErrorResponse(res, await res.text(), targetFormat);
 
-    // Transient failure: cool down and try next account before any bytes are sent to client
+    // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
       if (connection.id) setConnectionCooldown(connection.id, Date.now() + 60000);
+      await applyReactiveJitter(signal);
       continue;
     }
 
     // Auth failure: refresh once on this account, then decide
     if ((res.status === 401 || res.status === 403) && canRefresh(connection)) {
       try {
-        const refreshed = await refreshOAuthToken(connection);
+        const refreshed = await refreshOAuthToken(connection, { force: true });
         if (!refreshed) {
           return { ok: false, response: lastFailureResponse };
         }
         connection = refreshed;
         applyConnectionAuth(headers, connection);
-        res = await executor.execute({
-          url,
-          method: "POST",
-          headers,
-          body: bodyText,
-          signal,
-          proxyUrl: connection?.proxy_url,
-        });
-        if (res.ok) return { ok: true, upstreamRes: res, connection };
+
+        try {
+          releaseSlot = await acquireAccountSlot(connection, signal);
+        } catch {}
+
+        try {
+          res = await executor.execute({
+            url,
+            method: "POST",
+            headers,
+            body: bodyText,
+            signal,
+            proxyUrl: connection?.proxy_url,
+          });
+        } catch (err) {
+          if (releaseSlot) releaseSlot();
+          throw err;
+        }
+
+        if (res.ok) return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
+        if (releaseSlot) {
+          releaseSlot();
+          releaseSlot = null;
+        }
         lastFailureResponse = buildErrorResponse(res, await res.text(), targetFormat);
         if (res.status === 429 || res.status >= 500) {
           if (connection.id) setConnectionCooldown(connection.id, Date.now() + 60000);
+          await applyReactiveJitter(signal);
           continue;
         }
         return { ok: false, response: lastFailureResponse };
       } catch (err) {
+        if (releaseSlot) releaseSlot();
         console.error(`[zenroute] Reactive refresh error for ${connection.id}:`, err.message);
         return { ok: false, response: lastFailureResponse };
       }

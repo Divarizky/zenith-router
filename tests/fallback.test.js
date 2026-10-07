@@ -117,3 +117,28 @@ test("Failover - client 400 error does not fail over to other accounts", async (
 
   setCustomExecutor(null);
 });
+
+test("Account Rotation - respects sticky vs LRU strategy", async () => {
+  const { listAvailableConnections } = await import("../src/services/fallback.js");
+  const { setSetting } = await import("../src/services/settings.js");
+
+  const db = initDb(":memory:");
+  const c1 = addConnection({ provider: "glm", name: "GLM Acc 1", credentials: { api_key: "k1" } });
+  const c2 = addConnection({ provider: "glm", name: "GLM Acc 2", credentials: { api_key: "k2" } });
+
+  // Update c1 last_used_at to 1000, c2 last_used_at to 2000
+  db.prepare("UPDATE connections SET last_used_at = ? WHERE id = ?").run(1000, c1.id);
+  db.prepare("UPDATE connections SET last_used_at = ? WHERE id = ?").run(2000, c2.id);
+
+  // LRU strategy (default): oldest last_used_at (c1: 1000) should be first
+  setSetting("account_rotation", "lru");
+  const lruList = listAvailableConnections("glm");
+  assert.strictEqual(lruList[0].id, c1.id);
+  assert.strictEqual(lruList[1].id, c2.id);
+
+  // Sticky strategy: newest last_used_at (c2: 2000) should be first to stay on the same account
+  setSetting("account_rotation", "sticky");
+  const stickyList = listAvailableConnections("glm");
+  assert.strictEqual(stickyList[0].id, c2.id);
+  assert.strictEqual(stickyList[1].id, c1.id);
+});

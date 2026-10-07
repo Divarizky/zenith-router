@@ -17,15 +17,18 @@ Sudah berfungsi:
 - `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, `GET /v1/models`, streaming SSE dan non-streaming.
 - Translasi penuh OpenAI ↔ Claude untuk `/v1/chat/completions` dan `/v1/messages` (termasuk translasi skema tool calling dan tool execution).
 - Failover otomatis ke akun berikutnya saat 429 atau 5xx sebelum byte pertama dikirim, akun bermasalah diberi cooldown 60 detik.
-- Connection per provider di SQLite, rotasi akun least-recently-used, refresh token proaktif & reaktif setelah 401/403, proxy HTTP/HTTPS per connection.
-- Manajemen **Providers**: halaman terpadu untuk akun dan model per provider (OAuth, Free Tier, API Key) dengan toggle enable/disable dan penambahan model custom.
-- **Sinkronisasi Model Gratis Otomatis**: OpenCode dan Kilo Code otomatis menyinkronkan katalog model gratis saat startup dan berkala (default tiap 6 jam), dilengkapi tombol *Sync Now*.
-- **Import Model Live**: Import daftar model dari upstream (OpenCode, Kilo Code, GLM, GitHub, Claude) dengan pilihan filter model gratis/semua dan fitur *Delete Selected* berbasis checkbox.
-- Registry 17 provider (codex, github, kiro, antigravity, glm, claude, opencode, kilocode, nvidia, cline, pollinations, cloudflare-ai, openrouter, llm7, bazaarlink, together, freebuff) disinkronkan dengan 9router & OmniRoute.
+- **Traffic Guard & Request Pacing**: Pembatas konkurensi in-flight per akun (default: 2 untuk OAuth) dengan antrean FIFO otomatis, serta *proactive jitter* (100–300ms) untuk memecah pola burst bot dan *reactive failover jitter* (50–150ms).
+- **Strategi Rotasi Akun**: Opsi `lru` (round-robin least-recently-used) atau `sticky` (mempertahankan akun yang sama hingga cooldown/limit) yang dapat diatur via dashboard Settings.
+- **Isolasi Proxy & Refresh Token Aman**: Seluruh alur OAuth (pertukaran kode, polling device code, minting token, hingga refresh token) diteruskan melalui `proxy_url` akun dengan jaminan fail-closed. Dilengkapi single-flight concurrency lock untuk mencegah race condition pada Refresh Token Rotation (RTR).
+- Connection per provider di SQLite, refresh token proaktif & reaktif setelah 401/403, proxy HTTP/HTTPS per connection.
+- Manajemen **Providers**: halaman terpadu untuk akun dan model per provider (OAuth, Free Tier, API Key) dengan toggle enable/disable, penambahan model custom, dan peringatan cakupan scope izin pada modal login.
+- **Sinkronisasi Model Gratis Otomatis**: Provider dengan katalog gratis (OpenCode, Kilo Code, Ollama, Cline, OpenRouter, OVHcloud, xKiro, serta GLM, Bazaarlink, dan Mistral saat akun terhubung) otomatis menyinkronkan model gratis saat startup dan berkala (default tiap 6 jam), dilengkapi tombol *Sync Now*.
+- **Import Model Live**: Import daftar model dari upstream (OpenCode, Kilo Code, Ollama, GLM, GitHub, Claude, Mistral, OVHcloud, xKiro) dengan pilihan filter model gratis/semua dan fitur *Delete Selected* berbasis checkbox.
+- Registry 21 provider (codex, github, kiro, antigravity, glm, claude, opencode, kilocode, nvidia, cline, mistral, cloudflare-ai, openrouter, llm7, bazaarlink, together, freebuff, ollama, commandcode, ovhcloud, xkiro) disinkronkan dengan 9router & OmniRoute.
 - API key gateway (`zr_...`) yang disimpan sebagai hash, akses dashboard hanya dari localhost, proteksi CSRF, DNS rebinding, dan header `Cache-Control: no-store` untuk mencegah stale state.
-- Usage tracking untuk streaming (`stream_options.include_usage` + fallback estimasi) dan non-streaming, status kuota, RTK, Caveman (opt-in), dan halaman terpisah **Token Saver**.
+- Usage tracking untuk streaming (`stream_options.include_usage` + fallback estimasi) dan non-streaming, audit trail pemakaian per API key (`api_key_id`), status kuota, RTK, Caveman (opt-in), dan halaman terpisah **Token Saver**.
 
-- **Login akun OAuth ala 9router**: Claude, Codex (ChatGPT), Antigravity (Google), dan Cline login lewat browser dengan callback ke zenroute. GitHub Copilot, Kilo Code, Kiro (AWS Builder ID), dan GLM (Z.ai) memakai device code. Kiro dan Freebuff juga bisa import login dari Kiro IDE atau Freebuff CLI di mesin yang sama. Tempel token manual tetap tersedia sebagai cadangan. Token diperpanjang otomatis sesuai cara tiap provider.
+- **Login akun OAuth ala 9router**: Claude, Codex (ChatGPT), Antigravity (Google), dan Cline login lewat browser dengan callback ke zenroute. GitHub Copilot, Kilo Code, Kiro (AWS Builder ID), dan GLM (Z.ai) memakai device code. Kiro, Freebuff, dan Command Code juga bisa import login dari instalasi CLI lokal di mesin yang sama (~/.commandcode/auth.json). Tempel token manual tetap tersedia sebagai cadangan. Token diperpanjang otomatis sesuai cara tiap provider.
 
 Belum berfungsi:
 - Routing chat untuk Codex (format Responses API), Antigravity (format Cloud Code), dan Kiro (eventstream AWS). Login akunnya sudah bisa, tapi translator request/response untuk ketiga format itu belum ada.
@@ -86,7 +89,7 @@ Key zenroute hanya membuka akses ke gateway dan tidak pernah diteruskan ke provi
 | `ZENROUTE_CORS_ORIGINS` | kosong (CORS mati) | Origin browser yang boleh memanggil `/v1` |
 | `ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
 | `ZENROUTE_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar-chunk stream upstream |
-| `ZENROUTE_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkron model gratis (OpenCode, Kilo Code); `0` mematikan sinkron otomatis |
+| `ZENROUTE_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkron model gratis; `0` mematikan sinkron otomatis |
 
 Header `x-zenroute-token-saver: false` mematikan RTK dan Caveman untuk satu request.
 
@@ -117,10 +120,10 @@ zenroute/
 │   ├── providers/        # Registry 17 provider & model routing resolution
 │   ├── executors/        # base.js (header & idle timeout), proxy.js, freebuff.js
 │   ├── config/           # freeTierCatalog.js
-│   ├── services/         # apiKeys, auth, tokenRefresh, usage, quota, modelOverrides,
-│   │                     # modelImport, modelSync, tokenSaver, rtk, caveman, settings,
-│   │                     # oauth/ (alur login per provider + session login)
+│   ├── services/         # apiKeys, auth, tokenRefresh, trafficGuard, usage, quota,
+│   │                     # modelOverrides, modelImport, modelSync, tokenSaver, rtk,
+│   │                     # caveman, settings, oauth/ (alur login per provider + session login)
 │   └── ui/               # layout.js, cliMenu.js, html.js, pages/ (overview, providers, usage, keys, etc.)
-├── tests/                # Test suite lengkap (129 tests)
+├── tests/                # Test suite lengkap (168 tests)
 └── package.json
 ```

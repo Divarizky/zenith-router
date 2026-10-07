@@ -158,16 +158,21 @@ export async function requireJsonBody(c, next) {
  * credentials come from the stored connection.
  */
 export async function gatewayAuth(c, next) {
-  if (c.req.method === "OPTIONS" || !isApiKeyRequired()) {
+  if (c.req.method === "OPTIONS") {
     return next();
   }
 
   const key = extractClientApiKey(c.req.raw.headers);
-  if (!key) {
+  if (key) {
+    const verified = verifyApiKey(key);
+    if (verified) {
+      c.set("apiKeyId", verified.id);
+      c.set("apiKeyName", verified.name);
+    } else if (isApiKeyRequired()) {
+      return gatewayError(c, 401, "authentication_error", "Invalid zenroute API key");
+    }
+  } else if (isApiKeyRequired()) {
     return gatewayError(c, 401, "authentication_error", "Missing zenroute API key");
-  }
-  if (!verifyApiKey(key)) {
-    return gatewayError(c, 401, "authentication_error", "Invalid zenroute API key");
   }
 
   await next();

@@ -209,7 +209,7 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
 <body>
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-logo">z</div>
+      <img src="/logo.png" alt="zenroute" class="brand-logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;" />
       <div><h1>zenroute</h1><small>v0.1.0</small></div>
     </div>
     <nav>${navHtml}</nav>

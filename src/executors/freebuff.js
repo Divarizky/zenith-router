@@ -1,18 +1,36 @@
 import { randomInt } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { proxyFetch } from "./proxy.js";
+import { getSetting } from "../services/settings.js";
 
-const MODEL_TO_AGENT = {
-  "deepseek/deepseek-v4-flash": "base2-free-deepseek-flash",
-  "deepseek/deepseek-v4-pro": "base2-free-deepseek",
-  "openai/gpt-5.6-luna": "base2-free-luna",
-  "minimax/minimax-m3": "base2-free-minimax-m3",
+// Verbatim from upstream FREEBUFF_ROOT_AGENT_ID_BY_MODEL
+// (CodebuffAI/freebuff common/src/constants/free-agents.ts).
+const STATIC_MODEL_TO_AGENT = {
   "mimo/mimo-v2.5": "base2-free-mimo",
-  "z-ai/glm-5.2": "base2-free-glm",
+  "mimo/mimo-v2.6-pro": "base2-free-mimo-2-6-pro",
+  "minimax/minimax-m3": "base2-free-minimax-m3",
+  "openai/gpt-6-luna": "base2-free-luna-6",
+  "openai/gpt-6.1-sol": "base2-free-gpt-6-1-sol",
+  "upstage/solar-pro4": "base2-free-solar-pro4",
+  "upstage/solar-mini4": "base2-free-solar-mini4",
+  "deepseek/deepseek-v4-flash": "base2-free-deepseek-flash",
+  "deepseek/deepseek-v4-flash-fast": "base2-free-deepseek-flash-fast",
+  "z-ai/glm-5.3-flash": "base2-free-glm-5-3-flash",
   "crof/kimi-k3-eco": "base2-free-kimi-k3-eco",
-  "anthropic/claude-fable-5": "base2-free-fable",
+  "anthropic/claude-fable-5.1": "base2-free-fable",
   "meta/muse-spark-1.2-contributor": "base2-free-muse-spark",
 };
+
+export function resolveFreebuffAgent(modelId) {
+  try {
+    const raw = getSetting("freebuff_agent_map", "");
+    if (raw) {
+      const dynamicMap = JSON.parse(raw);
+      if (dynamicMap && dynamicMap[modelId]) return dynamicMap[modelId];
+    }
+  } catch {}
+  return STATIC_MODEL_TO_AGENT[modelId] || "base2-free";
+}
 
 function generateClientSessionId() {
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -56,7 +74,7 @@ export class FreebuffExecutor extends BaseExecutor {
       typeof payload.model === "string"
         ? payload.model.replace(/^(fb|freebuff)\//, "")
         : "deepseek/deepseek-v4-flash";
-    const agentId = MODEL_TO_AGENT[requestedModel] || "base2-free";
+    const agentId = resolveFreebuffAgent(requestedModel);
 
     const fetcher = (targetUrl, init) =>
       proxyUrl ? proxyFetch(targetUrl, init, proxyUrl) : this.fetchFn(targetUrl, init);
@@ -87,14 +105,38 @@ export class FreebuffExecutor extends BaseExecutor {
         instanceId = data.instanceId || "";
       } else {
         const errText = await sessionRes.text();
+        const status = sessionRes.status;
+
+        // Detect quota exceeded / rate limit
+        if (status === 429 || errText.toLowerCase().includes("quota") || errText.toLowerCase().includes("rate limit") || errText.toLowerCase().includes("exceeded")) {
+          const now = new Date();
+          const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+          const hoursLeft = Math.ceil((utcMidnight - now) / (1000 * 60 * 60));
+
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: `Sesi harian Freebuff sudah habis untuk model ${requestedModel}. Reset dalam ~${hoursLeft} jam (pukul 00:00 UTC).`,
+                type: "quota_exceeded",
+                provider: "freebuff",
+                model: requestedModel,
+                reset_at: utcMidnight.toISOString(),
+                hours_until_reset: hoursLeft,
+              },
+            }),
+            { status: 429, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        // Generic error
         return new Response(
           JSON.stringify({
             error: {
-              message: `Freebuff session failed (${sessionRes.status}): ${errText}`,
+              message: `Freebuff session failed (${status}): ${errText}`,
               type: "upstream_error",
             },
           }),
-          { status: sessionRes.status, headers: { "Content-Type": "application/json" } }
+          { status, headers: { "Content-Type": "application/json" } }
         );
       }
     } catch (err) {
@@ -179,6 +221,32 @@ export class FreebuffExecutor extends BaseExecutor {
       timeoutMs,
       proxyUrl,
     });
+
+    // Check for quota exceeded in chat completion response
+    if (response.status === 429 || response.status === 402) {
+      try {
+        const errBody = await response.clone().text();
+        if (errBody.toLowerCase().includes("quota") || errBody.toLowerCase().includes("rate limit") || errBody.toLowerCase().includes("exceeded")) {
+          const now = new Date();
+          const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+          const hoursLeft = Math.ceil((utcMidnight - now) / (1000 * 60 * 60));
+
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: `Sesi harian Freebuff sudah habis untuk model ${requestedModel}. Reset dalam ~${hoursLeft} jam (pukul 00:00 UTC).`,
+                type: "quota_exceeded",
+                provider: "freebuff",
+                model: requestedModel,
+                reset_at: utcMidnight.toISOString(),
+                hours_until_reset: hoursLeft,
+              },
+            }),
+            { status: 429, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      } catch {}
+    }
 
     // 5. Finish agent run (background cleanup)
     if (runId) {

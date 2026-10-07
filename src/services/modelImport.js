@@ -31,6 +31,24 @@ function payloadSaysFree(m) {
  * list endpoint works without an account.
  */
 const IMPORTERS = {
+  cline: {
+    url: "https://api.cline.bot/api/v1/ai/cline/recommended-models",
+    public: true,
+    // The public feed publishes the free tier in a `free` array; the same
+    // models also appear under `cline-free/` in the `recommended` list.
+    modes: ["all", "free"],
+    parse: (json) => {
+      const free = Array.isArray(json?.free) ? json.free : [];
+      const freeIds = new Set(free.map((m) => m.id));
+      const all = [...(Array.isArray(json?.recommended) ? json.recommended : [])];
+      for (const m of free) if (!all.some((r) => r.id === m.id)) all.push(m);
+      return all.map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        isFree: freeIds.has(m.id) || String(m.id).startsWith("cline-free/"),
+      }));
+    },
+  },
   opencode: {
     url: "https://opencode.ai/zen/v1/models",
     public: true,
@@ -82,6 +100,7 @@ const IMPORTERS = {
   },
   openrouter: {
     url: "https://openrouter.ai/api/v1/models",
+    public: true,
     modes: ["all", "free"],
     parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
   },
@@ -100,11 +119,33 @@ const IMPORTERS = {
     modes: ["all"],
     parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: false })),
   },
-  pollinations: {
-    url: "https://gen.pollinations.ai/v1/models",
-    public: true,
+  mistral: {
+    url: "https://api.mistral.ai/v1/models",
     modes: ["all"],
-    parse: (json) => listOf(json).map((m) => ({ id: m.name || m.id, name: m.description || m.name || m.id, isFree: true })),
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: true })),
+  },
+  ollama: {
+    url: "https://ollama.com/v1/models",
+    public: true,
+    modes: ["all", "free"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id || m.name, name: m.name || m.id, isFree: true })),
+  },
+  ovhcloud: {
+    url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models",
+    public: true,
+    modes: ["all", "free"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: true })),
+  },
+  xkiro: {
+    url: "https://api.xkiro.com/v1/models",
+    public: true,
+    modes: ["all", "free"],
+    parse: (json) =>
+      listOf(json).map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        isFree: payloadSaysFree(m) || m.access_tier === "free" || String(m.id).endsWith(":free"),
+      })),
   },
 };
 

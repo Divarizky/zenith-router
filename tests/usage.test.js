@@ -96,3 +96,59 @@ test("GET /api/usage - returns JSON usage analytics", async () => {
   assert.strictEqual(json.summary.total_requests, 1);
   assert.strictEqual(json.summary.total_tokens, 20);
 });
+
+test("usage service - records apiKeyId and aggregates by_api_key", () => {
+  const db = initDb(":memory:");
+
+  // Insert two api keys
+  const k1 = db
+    .prepare("INSERT INTO api_keys (name, key_prefix, key_hash, created_at) VALUES (?, ?, ?, ?) RETURNING id")
+    .get("Agent Alpha", "zr_alpha", "hash1", Date.now());
+  const k2 = db
+    .prepare("INSERT INTO api_keys (name, key_prefix, key_hash, created_at) VALUES (?, ?, ?, ?) RETURNING id")
+    .get("Agent Beta", "zr_beta", "hash2", Date.now());
+
+  recordUsage({
+    apiKeyId: k1.id,
+    model: "claude-3-7-sonnet",
+    inputTokens: 100,
+    outputTokens: 50,
+  });
+  recordUsage({
+    apiKeyId: k1.id,
+    model: "claude-3-7-sonnet",
+    inputTokens: 100,
+    outputTokens: 50,
+  });
+  recordUsage({
+    apiKeyId: k2.id,
+    model: "gpt-4o",
+    inputTokens: 300,
+    outputTokens: 200,
+  });
+  recordUsage({
+    apiKeyId: null, // anonymous
+    model: "gpt-4o",
+    inputTokens: 50,
+    outputTokens: 50,
+  });
+
+  const stats = getUsageStats();
+  assert.ok(Array.isArray(stats.by_api_key));
+  assert.strictEqual(stats.by_api_key.length, 3);
+
+  const alpha = stats.by_api_key.find((k) => k.name === "Agent Alpha");
+  assert.ok(alpha);
+  assert.strictEqual(alpha.count, 2);
+  assert.strictEqual(alpha.total_tokens, 300);
+
+  const beta = stats.by_api_key.find((k) => k.name === "Agent Beta");
+  assert.ok(beta);
+  assert.strictEqual(beta.count, 1);
+  assert.strictEqual(beta.total_tokens, 500);
+
+  const anon = stats.by_api_key.find((k) => k.name === "anonymous");
+  assert.ok(anon);
+  assert.strictEqual(anon.count, 1);
+  assert.strictEqual(anon.total_tokens, 100);
+});

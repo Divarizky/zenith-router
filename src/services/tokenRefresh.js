@@ -1,7 +1,8 @@
-import { getConnections, updateConnection } from "../db/index.js";
+import { getConnectionById, getConnections, updateConnection } from "../db/index.js";
 import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn } from "./oauth/providers.js";
 
 let customTokenRefresher = null;
+const inFlightRefreshes = new Map();
 
 /**
  * Set custom token refresher (for tests and mocking)
@@ -35,22 +36,22 @@ export function needsTokenRefresh(connection) {
   return Number(creds.expires_at) - Date.now() < fiveMinutesMs;
 }
 
-async function postJson(url, body, label, extraHeaders = {}) {
+async function postJson(url, body, label, extraHeaders = {}, proxyUrl = null) {
   const res = await oauthFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json", ...extraHeaders },
     body: JSON.stringify(body),
-  });
+  }, { proxyUrl });
   if (!res.ok) throw new Error(`${label} refresh failed with HTTP ${res.status}`);
   return res.json();
 }
 
-async function postForm(url, params, label) {
+async function postForm(url, params, label, proxyUrl = null) {
   const res = await oauthFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: new URLSearchParams(params),
-  });
+  }, { proxyUrl });
   if (!res.ok) throw new Error(`${label} refresh failed with HTTP ${res.status}`);
   return res.json();
 }
@@ -62,20 +63,24 @@ function expiresAt(seconds) {
 // Per-provider refresh, matching 9router open-sse/services/tokenRefresh/providers.js.
 // Each returns { access_token, refresh_token?, expires_at, ...extra credential fields }.
 const REFRESHERS = {
-  async claude(creds) {
+  async claude(creds, proxyUrl) {
     const t = await postJson(
       OAUTH_CONFIG.claude.tokenUrl,
       { grant_type: "refresh_token", refresh_token: creds.refresh_token, client_id: OAUTH_CONFIG.claude.clientId },
-      "Claude"
+      "Claude",
+      {},
+      proxyUrl
     );
     return { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: expiresAt(t.expires_in) };
   },
 
-  async codex(creds) {
+  async codex(creds, proxyUrl) {
     const t = await postJson(
       OAUTH_CONFIG.codex.tokenUrl,
       { grant_type: "refresh_token", refresh_token: creds.refresh_token, client_id: OAUTH_CONFIG.codex.clientId },
-      "Codex"
+      "Codex",
+      {},
+      proxyUrl
     );
     return {
       access_token: t.access_token,
@@ -85,7 +90,7 @@ const REFRESHERS = {
     };
   },
 
-  async antigravity(creds) {
+  async antigravity(creds, proxyUrl) {
     const cfg = OAUTH_CONFIG.antigravity;
     const t = await postForm(
       cfg.tokenUrl,
@@ -95,16 +100,19 @@ const REFRESHERS = {
         client_id: cfg.clientId,
         client_secret: cfg.clientSecret,
       },
-      "Google"
+      "Google",
+      proxyUrl
     );
     return { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: expiresAt(t.expires_in) };
   },
 
-  async cline(creds) {
+  async cline(creds, proxyUrl) {
     const body = await postJson(
       OAUTH_CONFIG.cline.refreshUrl,
       { refreshToken: creds.refresh_token, grantType: "refresh_token", clientType: "extension" },
-      "Cline"
+      "Cline",
+      {},
+      proxyUrl
     );
     const t = body?.data || body;
     return {
@@ -114,7 +122,7 @@ const REFRESHERS = {
     };
   },
 
-  async kiro(creds) {
+  async kiro(creds, proxyUrl) {
     let t;
     if (creds.client_id && creds.client_secret) {
       // Builder ID / IdC: AWS SSO OIDC refresh with the registered client.
@@ -127,15 +135,17 @@ const REFRESHERS = {
           refreshToken: creds.refresh_token,
           grantType: "refresh_token",
         },
-        "Kiro"
+        "Kiro",
+        {},
+        proxyUrl
       );
     } else {
       // Social (Google/GitHub) login from the Kiro IDE.
       t = await postJson(OAUTH_CONFIG.kiro.socialRefreshUrl, { refreshToken: creds.refresh_token }, "Kiro", {
         "User-Agent": "kiro-cli/1.0.0",
-      });
+      }, proxyUrl);
     }
-    const profileArn = creds.profile_arn || t.profileArn || (await fetchKiroProfileArn(t.accessToken));
+    const profileArn = creds.profile_arn || t.profileArn || (await fetchKiroProfileArn(t.accessToken, { proxyUrl }));
     return {
       access_token: t.accessToken,
       refresh_token: t.refreshToken,
@@ -144,8 +154,8 @@ const REFRESHERS = {
     };
   },
 
-  async github(creds) {
-    const copilot = await fetchCopilotToken(creds.github_token);
+  async github(creds, proxyUrl) {
+    const copilot = await fetchCopilotToken(creds.github_token, { proxyUrl });
     return { access_token: copilot.token, expires_at: copilot.expiresAt };
   },
 };
@@ -156,40 +166,65 @@ const REFRESHERS = {
 async function defaultRefreshHandler(connection) {
   const refresher = REFRESHERS[connection.provider];
   if (!refresher) throw new Error(`Token refresh is not supported for ${connection.provider}`);
-  return refresher(connection.credentials || {});
+  return refresher(connection.credentials || {}, connection.proxy_url || null);
 }
 
 /**
- * Refresh OAuth token for a connection and update the SQLite database
+ * Perform actual refresh execution
  */
-export function refreshOAuthToken(connection) {
-  return (async () => {
-    if (!connection || !connection.id) return null;
+async function executeRefresh(connection) {
+  let newTokens;
+  if (customTokenRefresher) {
+    newTokens = await customTokenRefresher(connection);
+  } else {
+    newTokens = await defaultRefreshHandler(connection);
+  }
 
-    let newTokens;
-    if (customTokenRefresher) {
-      newTokens = await customTokenRefresher(connection);
-    } else {
-      newTokens = await defaultRefreshHandler(connection);
+  if (!newTokens || !newTokens.access_token) {
+    throw new Error("Invalid token payload returned from refresher");
+  }
+
+  const { access_token, refresh_token, expires_at, ...extra } = newTokens;
+  const updatedCreds = {
+    ...(connection.credentials || {}),
+    ...extra,
+    access_token,
+    expires_at: expires_at || Date.now() + 3600 * 1000,
+  };
+  const nextRefresh = refresh_token || connection.credentials?.refresh_token;
+  if (nextRefresh) updatedCreds.refresh_token = nextRefresh;
+
+  const updated = updateConnection(connection.id, { credentials: updatedCreds });
+  return updated;
+}
+
+/**
+ * Refresh OAuth token for a connection and update the SQLite database.
+ * Uses a single-flight mutex per connection.id to prevent race conditions on token rotation.
+ * In-flight callers share the same refresh promise. Once resolved, subsequent callers re-check DB state.
+ */
+export function refreshOAuthToken(connection, { force = false } = {}) {
+  if (!connection || !connection.id) return Promise.resolve(null);
+
+  const existing = inFlightRefreshes.get(connection.id);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = (async () => {
+    try {
+      const freshConn = getConnectionById(connection.id) || connection;
+      if (!force && !needsTokenRefresh(freshConn)) {
+        return freshConn;
+      }
+      return await executeRefresh(freshConn);
+    } finally {
+      inFlightRefreshes.delete(connection.id);
     }
-
-    if (!newTokens || !newTokens.access_token) {
-      throw new Error("Invalid token payload returned from refresher");
-    }
-
-    const { access_token, refresh_token, expires_at, ...extra } = newTokens;
-    const updatedCreds = {
-      ...(connection.credentials || {}),
-      ...extra,
-      access_token,
-      expires_at: expires_at || Date.now() + 3600 * 1000,
-    };
-    const nextRefresh = refresh_token || connection.credentials?.refresh_token;
-    if (nextRefresh) updatedCreds.refresh_token = nextRefresh;
-
-    const updated = updateConnection(connection.id, { credentials: updatedCreds });
-    return updated;
   })();
+
+  inFlightRefreshes.set(connection.id, promise);
+  return promise;
 }
 
 /**

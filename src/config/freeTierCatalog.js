@@ -7,6 +7,8 @@
  */
 
 export const FREE_TIER_BUDGETS = {
+  mistral: 1_000_000_000,
+  xkiro: 150_000_000,
   kiro: 25_000,
 };
 
@@ -14,6 +16,9 @@ export const FREE_TIER_TOS = {
   antigravity: "avoid",
   opencode: "avoid",
   kiro: "avoid",
+  mistral: "caution",
+  xkiro: "caution",
+  ovhcloud: "ok",
 };
 
 export function computeFreeTierTotals({ excludeTosAvoid = false } = {}) {

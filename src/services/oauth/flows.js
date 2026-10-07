@@ -86,7 +86,7 @@ export async function startOAuthFlow({ providerId, origin, name, proxyUrl }) {
   };
 
   if (impl.flowType === "device_code") {
-    const d = await impl.start({});
+    const d = await impl.start({ proxyUrl: flow.proxyUrl });
     Object.assign(flow, {
       deviceCode: d.deviceCode,
       deviceState: d.state || {},
@@ -153,6 +153,7 @@ async function exchangeAndSave(flow, code, state) {
       state,
       redirectUri: flow.redirectUri,
       codeVerifier: flow.codeVerifier,
+      proxyUrl: flow.proxyUrl,
     });
     if (!tokens?.access_token) throw new Error("Provider tidak mengembalikan access token.");
     const conn = saveOAuthConnection(flow.providerId, tokens, flow);
@@ -224,7 +225,11 @@ export async function pollOAuthFlow(flowId) {
 
   flow.nextPollAt = Date.now() + flow.interval;
   try {
-    const result = await flow.impl.poll({ deviceCode: flow.deviceCode, state: flow.deviceState });
+    const result = await flow.impl.poll({
+      deviceCode: flow.deviceCode,
+      state: flow.deviceState,
+      proxyUrl: flow.proxyUrl,
+    });
     if (result.pending) return { status: "pending" };
     if (result.error) {
       finish(flow, { status: "error", error: result.error });
@@ -268,16 +273,61 @@ async function readJsonFile(path) {
   }
 }
 
-/** Freebuff/Codebuff CLI stores its login in ~/.config/manicode/credentials.json. */
+/**
+ * Freebuff/Codebuff CLI login. Newer CLIs keep only metadata in
+ * ~/.config/manicode/credentials.json and the token in the OS keychain
+ * (Windows Credential Manager target "freebuff-cli/<credentials path>").
+ */
 async function importFreebuff() {
   for (const dir of ["manicode", "codebuff"]) {
-    const data = await readJsonFile(join(homedir(), ".config", dir, "credentials.json"));
+    const credPath = join(homedir(), ".config", dir, "credentials.json");
+    const data = await readJsonFile(credPath);
     const user = data?.default || data;
     if (user?.authToken) {
       return { access_token: user.authToken, email: user.email, name: user.name };
     }
+    if (user && process.platform === "win32") {
+      const token = await readWindowsCredential(`freebuff-cli/${credPath}`);
+      if (token) return { access_token: token, email: user.email, name: user.name };
+    }
   }
   throw new Error("Kredensial Freebuff tidak ditemukan. Jalankan `freebuff` (npm i -g freebuff) lalu login dulu.");
+}
+
+/** Read a generic Windows credential via CredRead (no new dependencies, .NET only). */
+async function readWindowsCredential(target) {
+  const { execFile } = await import("node:child_process");
+  const script = [
+    "Add-Type @'",
+    "using System; using System.Runtime.InteropServices;",
+    "public class ZrCred {",
+    "  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]",
+    "  public struct CRED { public int Flags; public int Type; public string TargetName; public string Comment; public long LastWritten; public int CredBlobSize; public IntPtr CredBlob; public int Persist; public int AttrCount; public IntPtr Attributes; public string TargetAlias; public string UserName; }",
+    '  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]',
+    "  public static extern bool CredRead(string t, int ty, int f, out IntPtr c);",
+    '  [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr c);',
+    "}",
+    "'@",
+    `$t = "${target.replace(/"/g, '""')}"`,
+    "$p = [IntPtr]::Zero",
+    "if ([ZrCred]::CredRead($t, 1, 0, [ref]$p)) {",
+    "  $c = [Runtime.InteropServices.Marshal]::PtrToStructure($p, [type][ZrCred+CRED])",
+    "  $b = New-Object byte[] $c.CredBlobSize",
+    "  [Runtime.InteropServices.Marshal]::Copy($c.CredBlob, $b, 0, $c.CredBlobSize)",
+    "  [ZrCred]::CredFree($p)",
+    "  [Text.Encoding]::Unicode.GetString($b).Trim()",
+    "}",
+  ].join("\n");
+  try {
+    const out = await new Promise((resolve, reject) =>
+      execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 15000 }, (err, stdout) =>
+        err ? reject(err) : resolve(stdout)
+      )
+    );
+    return String(out || "").trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /** Kiro IDE keeps its login in the AWS SSO cache (~/.aws/sso/cache). */
@@ -319,7 +369,37 @@ async function importKiro() {
   };
 }
 
-const LOCAL_IMPORTERS = { freebuff: importFreebuff, kiro: importKiro };
+/** CommandCode CLI keeps its API key in ~/.commandcode/auth.json. */
+async function importCommandCode() {
+  const filePath = join(homedir(), ".commandcode", "auth.json");
+  const data = await readJsonFile(filePath);
+  if (!data) {
+    throw new Error("File ~/.commandcode/auth.json tidak ditemukan. Login ke Command Code CLI (cmd login) dulu.");
+  }
+
+  // Precedence matches CLI resolver: apiKey, commandcode, access_token, token
+  const key =
+    (typeof data.apiKey === "string" && data.apiKey) ||
+    (typeof data.commandcode === "string" && data.commandcode) ||
+    (typeof data.token === "string" && data.token) ||
+    (typeof data.access_token === "string" && data.access_token) ||
+    (data.commandcode && typeof data.commandcode === "object" ? data.commandcode.key || data.commandcode.access : null) ||
+    (data["command-code"] && typeof data["command-code"] === "object" ? data["command-code"].key || data["command-code"].access : null);
+
+  if (!key) {
+    throw new Error("API Key tidak ditemukan di ~/.commandcode/auth.json. Login ke Command Code CLI dulu.");
+  }
+
+  return {
+    access_token: key,
+    api_key: key,
+    extra: {
+      api_key: key,
+    },
+  };
+}
+
+const LOCAL_IMPORTERS = { freebuff: importFreebuff, kiro: importKiro, commandcode: importCommandCode };
 
 export function hasLocalImport(providerId) {
   return Boolean(LOCAL_IMPORTERS[providerId]);

@@ -3,6 +3,8 @@ export default {
   name: "Bazaarlink",
   alias: ["bzl", "bazaarlink"],
   category: "apikey",
+  // Sync needs an account; without one it reports no_account and keeps the static list.
+  freeModelSync: "merge",
   format: "openai",
   transport: {
     baseUrl: "https://bazaarlink.ai/api/v1/chat/completions",

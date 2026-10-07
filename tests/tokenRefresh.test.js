@@ -197,3 +197,49 @@ test("POST /v1/chat/completions - reactive 401 triggers token refresh and retrie
   setCustomExecutor(null);
   setCustomTokenRefresher(null);
 });
+
+test("tokenRefresh - concurrent calls for the same expiring connection share single refresh promise", async () => {
+  initDb(":memory:");
+
+  const conn = addConnection({
+    provider: "claude",
+    name: "Concurrent Claude",
+    auth_type: "oauth",
+    credentials: {
+      access_token: "old_tok",
+      refresh_token: "ref_tok",
+      expires_at: Date.now() - 5000,
+    },
+  });
+
+  let executions = 0;
+  setCustomTokenRefresher(async (connection) => {
+    executions++;
+    await new Promise((r) => setTimeout(r, 40));
+    return {
+      access_token: "single_fresh_token",
+      refresh_token: "single_fresh_refresh",
+      expires_at: Date.now() + 3600 * 1000,
+    };
+  });
+
+  const results = await Promise.all([
+    refreshOAuthToken(conn),
+    refreshOAuthToken(conn),
+    refreshOAuthToken(conn),
+    refreshOAuthToken(conn),
+    refreshOAuthToken(conn),
+  ]);
+
+  assert.strictEqual(executions, 1, "Must only invoke underlying refresher once for concurrent calls");
+  for (const res of results) {
+    assert.strictEqual(res.credentials.access_token, "single_fresh_token");
+  }
+
+  // After completion, another call when token is already valid re-checks DB and does not re-refresh
+  const subsequent = await refreshOAuthToken(conn);
+  assert.strictEqual(executions, 1, "Subsequent call must not re-refresh when DB already has fresh token");
+  assert.strictEqual(subsequent.credentials.access_token, "single_fresh_token");
+
+  setCustomTokenRefresher(null);
+});

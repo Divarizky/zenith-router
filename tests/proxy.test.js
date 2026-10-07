@@ -82,3 +82,42 @@ test("BaseExecutor - uses proxyFetch when proxyUrl is supplied", async () => {
     await new Promise((resolve) => proxyServer.close(resolve));
   }
 });
+
+test("oauthFetch - routes requests through proxyUrl when supplied", async () => {
+  const { oauthFetch } = await import("../src/services/oauth/providers.js");
+  let proxyCalled = false;
+
+  const proxyServer = http.createServer((req, res) => {
+    proxyCalled = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ proxied_oauth: true }));
+  });
+
+  await new Promise((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+  const proxyPort = proxyServer.address().port;
+  const proxyUrl = `http://127.0.0.1:${proxyPort}`;
+
+  try {
+    const res = await oauthFetch("http://oauth.example.com/token", { method: "POST" }, { proxyUrl });
+    assert.strictEqual(proxyCalled, true, "OAuth request must be routed through proxy");
+    const json = await res.json();
+    assert.strictEqual(json.proxied_oauth, true);
+  } finally {
+    await new Promise((resolve) => proxyServer.close(resolve));
+  }
+});
+
+test("oauthFetch - throws error if proxyUrl fails and does not leak directly", async () => {
+  const { oauthFetch } = await import("../src/services/oauth/providers.js");
+
+  // Point to closed/dead port
+  const deadProxy = "http://127.0.0.1:49999";
+
+  await assert.rejects(
+    async () => {
+      await oauthFetch("http://oauth.example.com/token", { method: "POST" }, { proxyUrl: deadProxy });
+    },
+    /ECONNREFUSED/i,
+    "Failing proxy must reject and not fall back to direct internet connection"
+  );
+});

@@ -1,0 +1,33 @@
+export default {
+  id: "ollama",
+  name: "Ollama Cloud",
+  alias: ["ol", "ollama", "ollama-cloud"],
+  category: "apikey",
+  // /v1/models is public; chat completions require an API key from https://ollama.com/settings/keys.
+  freeModelSync: "merge",
+  format: "openai",
+  transport: {
+    baseUrl: "https://ollama.com/v1/chat/completions",
+    format: "openai",
+  },
+  models: [
+    { id: "gpt-oss:120b", name: "GPT OSS 120B" },
+    { id: "gpt-oss:20b", name: "GPT OSS 20B" },
+    { id: "kimi-k3", name: "Kimi K3" },
+    { id: "kimi-k2.7-code", name: "Kimi K2.7 Code" },
+    { id: "kimi-k2.6", name: "Kimi K2.6" },
+    { id: "glm-5.3", name: "GLM 5.3" },
+    { id: "glm-5.3-flash", name: "GLM 5.3 Flash" },
+    { id: "glm-5.2", name: "GLM 5.2" },
+    { id: "minimax-m3", name: "MiniMax M3" },
+    { id: "minimax-m2.7", name: "MiniMax M2.7" },
+    { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+    { id: "deepseek-v4-pro:0813", name: "DeepSeek V4 Pro 0813" },
+    { id: "mistral-large-4", name: "Mistral Large 4" },
+    { id: "mistral-large-3:675b", name: "Mistral Large 3" },
+    { id: "nemotron-3-ultra", name: "Nemotron 3 Ultra" },
+    { id: "nemotron-3-super", name: "Nemotron 3 Super" },
+    { id: "nemotron-3-nano:30b", name: "Nemotron 3 Nano 30B" },
+    { id: "gemma4:31b", name: "Gemma 4 31B" },
+  ],
+};

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS usage_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   connection_id INTEGER,
+  api_key_id INTEGER,
   model TEXT NOT NULL,
   input_tokens INTEGER DEFAULT 0,
   output_tokens INTEGER DEFAULT 0,
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS usage_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,7 +150,19 @@ export function initDb(dbPath = null) {
   }
 
   dbInstance.exec(SCHEMA_SQL);
+  migrateSchema(dbInstance);
   return dbInstance;
+}
+
+function migrateSchema(db) {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(usage_history)").all();
+    const hasApiKeyId = tableInfo.some((col) => col.name === "api_key_id");
+    if (!hasApiKeyId) {
+      db.exec("ALTER TABLE usage_history ADD COLUMN api_key_id INTEGER");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
+    }
+  } catch {}
 }
 
 /**

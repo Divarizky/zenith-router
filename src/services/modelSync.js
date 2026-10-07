@@ -1,6 +1,8 @@
 import { getDb } from "../db/index.js";
 import { getAllProviders, getProvider } from "../providers/index.js";
 import { fetchProviderModels } from "./modelImport.js";
+import { fetchFreebuffCatalog } from "./freebuffCatalog.js";
+import { getSetting, setSetting } from "./settings.js";
 
 const DEFAULT_INTERVAL_HOURS = 6;
 
@@ -35,6 +37,44 @@ function recordState(providerId, { ok, count = 0, error = null }) {
 export async function syncFreeModels(providerId) {
   const provider = getProvider(providerId);
   if (!provider?.freeModelSync) return { code: "unsupported", count: 0 };
+
+  if (provider.id === "freebuff") {
+    const prevEtag = getSetting("freebuff_sync_etag", "");
+    const res = await fetchFreebuffCatalog({ etag: prevEtag || null });
+
+    if (res.notModified) {
+      const existingCount =
+        getDb().prepare("SELECT COUNT(*) as c FROM synced_models WHERE provider = ?").get("freebuff")?.c || 0;
+      recordState("freebuff", { ok: true, count: existingCount });
+      return { code: "synced", count: existingCount };
+    }
+
+    if (!res.ok) {
+      recordState("freebuff", { ok: false, error: ERROR_TEXT[res.code] || res.code });
+      return { code: res.code, count: 0 };
+    }
+
+    if (res.etag) setSetting("freebuff_sync_etag", res.etag);
+    if (res.agentMap) setSetting("freebuff_agent_map", JSON.stringify(res.agentMap));
+
+    const free = res.models;
+    const db = getDb();
+    const now = Date.now();
+    const insert = db.prepare(
+      "INSERT OR REPLACE INTO synced_models (provider, model_id, name, synced_at) VALUES (?, ?, ?, ?)"
+    );
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM synced_models WHERE provider = ?").run("freebuff");
+      for (const m of free) insert.run("freebuff", m.id, m.name || null, now);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    recordState("freebuff", { ok: true, count: free.length });
+    return { code: "synced", count: free.length };
+  }
 
   const fetched = await fetchProviderModels(provider);
   if (!fetched.ok) {

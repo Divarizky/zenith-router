@@ -5,6 +5,7 @@ import { getDb } from "../db/index.js";
  */
 export function recordUsage({
   connectionId = null,
+  apiKeyId = null,
   model,
   inputTokens = 0,
   outputTokens = 0,
@@ -18,17 +19,19 @@ export function recordUsage({
     const totalTok = inTok + outTok;
     const dur = Number(durationMs) || 0;
     const connId = connectionId ? Number(connectionId) : null;
+    const keyId = apiKeyId ? Number(apiKeyId) : null;
 
     const stmt = db.prepare(`
-      INSERT INTO usage_history (connection_id, model, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (connection_id, api_key_id, model, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const info = stmt.run(connId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
+    const info = stmt.run(connId, keyId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
 
     return {
       id: Number(info.lastInsertRowid),
       connection_id: connId,
+      api_key_id: keyId,
       model,
       input_tokens: inTok,
       output_tokens: outTok,
@@ -62,7 +65,7 @@ export function estimateTokens(textOrMessages) {
 /**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
-export function createUsageTapStream({ connectionId, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
+export function createUsageTapStream({ connectionId, apiKeyId = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
   let inputTokens = 0;
   let outputTokens = 0;
   let streamedTextLength = 0;
@@ -130,6 +133,7 @@ export function createUsageTapStream({ connectionId, model, startTime = Date.now
       queueMicrotask(() => {
         recordUsage({
           connectionId,
+          apiKeyId,
           model,
           inputTokens,
           outputTokens,
@@ -180,6 +184,21 @@ export function getUsageStats(options = {}) {
   `);
   const byModel = modelStmt.all(since) || [];
 
+  // Breakdown by api_key
+  const keyStmt = db.prepare(`
+    SELECT
+      u.api_key_id,
+      COALESCE(k.name, 'anonymous') AS api_key_name,
+      COUNT(*) AS count,
+      COALESCE(SUM(u.total_tokens), 0) AS total_tokens
+    FROM usage_history u
+    LEFT JOIN api_keys k ON u.api_key_id = k.id
+    WHERE u.timestamp >= ?
+    GROUP BY u.api_key_id
+    ORDER BY total_tokens DESC
+  `);
+  const byApiKey = keyStmt.all(since) || [];
+
   return {
     summary: {
       total_requests: Number(summary.total_requests),
@@ -190,6 +209,12 @@ export function getUsageStats(options = {}) {
     },
     by_model: byModel.map((row) => ({
       model: row.model,
+      count: Number(row.count),
+      total_tokens: Number(row.total_tokens),
+    })),
+    by_api_key: byApiKey.map((row) => ({
+      api_key_id: row.api_key_id,
+      name: row.api_key_name,
       count: Number(row.count),
       total_tokens: Number(row.total_tokens),
     })),

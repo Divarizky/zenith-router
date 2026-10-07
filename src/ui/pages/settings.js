@@ -4,7 +4,7 @@ import { renderLayout } from "../layout.js";
 /**
  * Render Settings Control page
  */
-export function renderSettingsPage(port = 20128) {
+export function renderSettingsPage(port = 20120) {
   const settings = getAllSettings();
 
   const isRequireAuth = settings.require_api_key === "true";

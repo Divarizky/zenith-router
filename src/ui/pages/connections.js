@@ -11,7 +11,7 @@ import { renderLayout } from "../layout.js";
 /**
  * Render Connections Management page
  */
-export function renderConnectionsPage(port = 20128) {
+export function renderConnectionsPage(port = 20120) {
   const connections = getConnections();
   const providers = getAllProviders();
 

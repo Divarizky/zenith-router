@@ -20,7 +20,7 @@ import {
 } from "./ui/pages/settings.js";
 
 export const app = new Hono();
-const PORT = Number(process.env.PORT || 20128);
+const PORT = Number(process.env.PORT || 20120);
 
 // Explicit CORS middleware for all endpoints
 app.use(

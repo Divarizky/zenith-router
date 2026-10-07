@@ -5,7 +5,7 @@ import { renderLayout } from "../layout.js";
 /**
  * Render Usage Analytics and Quota page
  */
-export function renderUsagePage(port = 20128) {
+export function renderUsagePage(port = 20120) {
   const stats = getUsageStats({ days: 30 });
   const quotas = getAllQuotaStatus();
 

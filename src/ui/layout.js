@@ -1,7 +1,7 @@
 /**
  * Base HTML Layout for zenroute Minimal Dashboard
  */
-export function renderLayout({ title = "zenroute", activeTab = "overview", content = "", port = 20128 }) {
+export function renderLayout({ title = "zenroute", activeTab = "overview", content = "", port = 20120 }) {
   const tabs = [
     { id: "overview", label: "Overview", href: "/dashboard" },
     { id: "connections", label: "Connections", href: "/dashboard/connections" },

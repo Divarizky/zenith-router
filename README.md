@@ -12,7 +12,7 @@ Disederhanakan dari arsitektur 9router dan OmniRoute dengan membuang bloatware d
 - **HTTP Engine**: Hono + `@hono/node-server`
 - **Database**: `node:sqlite` (DatabaseSync bawaan Node, tanpa kompilasi native C++)
 - **Dashboard**: Hono JSX (SSR) + HTMX/Vanilla JS (tanpa build step React/Next.js)
-- **Port Default**: `20128` (kompatibel langsung dengan ekstensi Pi `9router.ts`)
+- **Port Default**: `20120` (dipisahkan agar tidak tabrakan dengan 9router/OmniRoute di port `20128`)
 - **Total Footprint**: ~3–5 MB disk, RAM idle ~25–40 MB
 
 ---

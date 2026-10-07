@@ -22,7 +22,7 @@ test("GET /dashboard - returns Overview HTML page with tabs and status", async (
   assert.ok(html.includes("Connections"));
   assert.ok(html.includes("Usage"));
   assert.ok(html.includes("Settings"));
-  assert.ok(html.includes("20128"));
+  assert.ok(html.includes("20120"));
   assert.ok(html.includes("Active Connections"));
 });
 

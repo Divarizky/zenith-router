@@ -8,7 +8,7 @@ import { renderLayout } from "../layout.js";
 /**
  * Render Overview Dashboard page
  */
-export function renderOverviewPage(port = 20128) {
+export function renderOverviewPage(port = 20120) {
   const connections = getConnections();
   const activeCount = connections.filter(
     (c) => c.is_active === 1 && !isConnectionInCooldown(c) && !isConnectionExhausted(c)

@@ -10,6 +10,7 @@ Single-writer konten requirement: `to-requirements`.
 - **GR-03 (Resilience):** WHEN request upstream mengalami kegagalan transient (HTTP 429 atau 5xx) sebelum byte data streaming dikirim ke client, THE SYSTEM SHALL melakukan failover otomatis ke connection/akun alternatif berikutnya yang tersedia.
 - **GR-04 (Privacy):** THE SYSTEM SHALL menyimpan seluruh token OAuth, API keys, dan riwayat request secara lokal di dalam database SQLite tanpa telemetri atau pengiriman data keluar selain ke upstream provider yang dituju.
 - **GR-05 (Performance):** WHILE melayani streaming request, THE SYSTEM SHALL tidak melakukan blocking pada Node.js event loop dengan durasi melebihi 20 milidetik.
+- **GR-06 (Exposure):** THE SYSTEM SHALL listen di loopback secara default, dan WHEN di-bind ke alamat non-loopback THE SYSTEM SHALL mewajibkan API key zenroute pada `/v1` serta membatasi dashboard dan `/api` ke klien loopback.
 
 ## Feature Registry
 | ID | Feature | Status | Updated |
@@ -19,6 +20,14 @@ Single-writer konten requirement: `to-requirements`.
 | F-03 | Usage Tracking & Quota Sync | approved | 2026-10-06 |
 | F-04 | Token Saver Engine | approved | 2026-10-06 |
 | F-05 | Minimal Dashboard UI | approved | 2026-10-06 |
+| F-06 | Security Hardening & Gateway API Keys | approved | 2026-10-07 |
+
+## Known Gaps (review 07-10-2026)
+Requirement berikut sudah approved tetapi belum terpenuhi oleh kode saat ini:
+- GR-03 (failover): 429/5xx hanya menandai cooldown, belum mencoba akun berikutnya.
+- F-01 REQ-03: tool calling belum diterjemahkan; `/v1/messages` belum menerjemahkan ke provider non-Claude; `/v1/responses` belum ada.
+- F-02 REQ-11/REQ-12/REQ-16: belum ada alur login OAuth, endpoint refresh token masih tebakan, dan loop refresh di background belum dijadwalkan. Registry `codex`, `github`, `kiro`, `antigravity` belum cocok dengan 9router.
+- F-03 REQ-18: usage streaming tercatat 0 token (stream OpenAI tanpa `include_usage`; translator membuang usage Claude). REQ-21: quota fetcher masih stub.
 
 ## Feature Requirements
 ### F-01 — Base Gateway & Core Translator
@@ -58,7 +67,7 @@ Single-writer konten requirement: `to-requirements`.
 
 ### F-04 — Token Saver Engine
 - **Scope:** Pipeline pemadatan prompt in-memory: algoritma RTK untuk deduplikasi log terminal & tool outputs, penyisipan instruksi efisiensi Caveman ke system prompt, dan prinsip fail-open request.
-- **REQ-24 (RTK Compaction):** WHEN RTK aktif THEN sistem SHALL memadatkan log dan tool results berulang di dalam pesan input tanpa merusak struktur sintaks kode. (Ref: AC-01)
+- **REQ-24 (RTK Compaction):** WHEN RTK aktif THEN sistem SHALL memadatkan baris berulang pada teks yang diketik user tanpa merusak struktur sintaks kode. Hasil tool dan giliran assistant tidak diubah (revisi F-06: hasil tool berisi isi file mentah yang dicocokkan persis saat agent mengedit). (Ref: AC-01)
 - **REQ-25 (Caveman Injection):** WHEN Caveman aktif THEN sistem SHALL menyisipkan aturan instruksi efisiensi jawaban ke system prompt. (Ref: AC-02)
 - **REQ-26 (Fail-Open Guarantee):** IF pemadatan token mengalami exception THEN sistem SHALL mengembalikan payload asli secara fail-open tanpa menggagalkan request HTTP. (Ref: AC-03)
 - **REQ-27 (Toggle Settings):** WHEN RTK atau Caveman dinonaktifkan THEN sistem SHALL meneruskan payload tanpa modifikasi. (Ref: AC-04)
@@ -77,3 +86,15 @@ Single-writer konten requirement: `to-requirements`.
 - **REQ-36 (Settings Form):** WHEN form pengaturan dikirim (`POST /dashboard/settings`) THEN sistem SHALL menyimpan nilai baru ke tabel `settings`. (Ref: AC-06)
 - **REQ-37 (Zero Bundler SSR):** WHILE dashboard web dirender THEN sistem SHALL menggunakan HTML/JSX bawaan Hono tanpa memerlukan build step frontend (ukuran <50 KB). (Ref: AC-07)
 - **Verification:** Integration tests rendering halaman `/dashboard` dan `/dashboard/connections`, serta form POST testing via `app.request`.
+
+### F-06 — Security Hardening & Gateway API Keys
+- **Scope:** API key gateway yang tersimpan sebagai hash, penegakan `require_api_key`, pemisahan kredensial klien dari upstream, hardening jaringan dan dashboard, timeout stream, dan settings token saver yang tersambung.
+- **REQ-38 (Key Storage):** WHEN API key dibuat THEN sistem SHALL menampilkan plaintext sekali dan hanya menyimpan hash SHA-256 serta prefix tampilan.
+- **REQ-39 (Key Enforcement):** WHILE `require_api_key` aktif atau bind non-loopback THEN sistem SHALL menolak request `/v1` tanpa key zenroute aktif dengan HTTP 401.
+- **REQ-40 (Credential Isolation):** THE SYSTEM SHALL tidak meneruskan header auth klien ke upstream; IF tidak ada connection aktif THEN sistem SHALL membalas HTTP 503.
+- **REQ-41 (Control Plane Access):** WHEN request dashboard atau `/api` datang dari alamat non-loopback THEN sistem SHALL menolak dengan HTTP 403; WHEN POST dashboard datang lintas origin THEN sistem SHALL menolak dengan HTTP 403.
+- **REQ-42 (Host & CORS):** WHILE bind loopback THEN sistem SHALL menolak Host non-loopback kecuali terdaftar di `ZENROUTE_ALLOWED_HOSTS`; CORS hanya aktif untuk origin di `ZENROUTE_CORS_ORIGINS`; POST `/v1` wajib `Content-Type: application/json`.
+- **REQ-43 (Output Escaping):** THE SYSTEM SHALL meng-escape semua nilai dinamis yang dirender di dashboard.
+- **REQ-44 (Stream Timeouts):** THE SYSTEM SHALL membatasi waktu tunggu header respons upstream dan jeda antar-chunk, tanpa batas durasi total stream.
+- **REQ-45 (Settings Wiring):** WHEN Settings token saver diubah THEN request berikutnya SHALL mengikuti nilai baru; Caveman default nonaktif.
+- **Verification:** `tests/apiKeys.test.js`, `tests/security.test.js`, `tests/dashboardKeys.test.js`, `tests/timeout.test.js`, `tests/tokenSaver.test.js`.

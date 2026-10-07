@@ -1,103 +1,100 @@
 # zenroute
 
-Gateway AI personal ultra-ringan (<5 MB) yang kompatibel dengan protokol OpenAI, Anthropic, dan Responses API, dirancang khusus untuk agent coding (Pi, Claude Code, Cursor, Codex).
-
-Disederhanakan dari arsitektur 9router dan OmniRoute dengan membuang bloatware dan hanya mempertahankan fitur esensial.
-
----
+Gateway AI personal yang ringan untuk coding agent, kompatibel dengan endpoint OpenAI Chat Completions dan Anthropic Messages. Disederhanakan dari 9router dan OmniRoute: Hono, `node:sqlite`, tanpa build step frontend, dan hanya 2 dependensi runtime.
 
 ## Spesifikasi Teknis
 
-- **Runtime**: Node.js 22+ (ESM murni)
-- **HTTP Engine**: Hono + `@hono/node-server`
-- **Database**: `node:sqlite` (DatabaseSync bawaan Node, tanpa kompilasi native C++)
-- **Dashboard**: Hono JSX (SSR) + HTMX/Vanilla JS (tanpa build step React/Next.js)
+- **Runtime**: Node.js 22+ (ESM)
+- **HTTP**: Hono + `@hono/node-server`
+- **Database**: `node:sqlite` (`DatabaseSync`), tanpa kompilasi native
+- **Dashboard**: HTML template string yang dirender server, tanpa React/Next.js
 - **Port Default**: `20120` (dipisahkan agar tidak tabrakan dengan 9router/OmniRoute di port `20128`)
-- **Total Footprint**: ~3–5 MB disk, RAM idle ~25–40 MB
+- **Bind Default**: `127.0.0.1`
 
----
+## Status Fitur
 
-## 5 Fitur Utama (Merged Architecture)
+Sudah berfungsi:
+- `POST /v1/chat/completions`, `POST /v1/messages`, `GET /v1/models`, streaming SSE dan non-streaming.
+- Translasi teks OpenAI ↔ Claude untuk `/v1/chat/completions`.
+- Connection per provider di SQLite, rotasi akun least-recently-used, cooldown 60 detik setelah 429, refresh token sekali setelah 401/403, proxy HTTP/HTTPS per connection.
+- API key gateway (`zr_...`) yang disimpan sebagai hash, akses dashboard hanya dari localhost, proteksi CSRF dan DNS rebinding.
+- Usage tracking (non-streaming), status kuota, RTK, Caveman (opt-in), dan dashboard.
 
-### 1. Gateway
-- Endpoint: `/v1/chat/completions`, `/v1/messages`, `/v1/responses`, `/v1/models`.
-- Streaming SSE & non-streaming support.
-- Hub-and-Spoke translator (pivot lewat OpenAI format).
-- Combo routing: `fallback` (berurutan) dan `round-robin` + sticky session.
-- Mengadopsi ide OmniRoute: Circuit breaker provider sederhana + auto-retry koneksi sebelum emisi byte pertama.
+Belum berfungsi:
+- Tool calling lintas vendor, translasi `/v1/messages` ke provider non-Claude, dan `/v1/responses`. Claude Code dan Codex CLI belum bisa dipakai lewat zenroute.
+- Login OAuth dan refresh token otomatis di background.
+- Provider `codex`, `github`, `kiro`, `antigravity`: URL atau protokolnya belum disesuaikan dengan 9router.
+- Failover ke akun berikutnya saat 429/5xx, dan combo routing.
+- Hitungan token untuk request streaming (tercatat 0).
 
-### 2. Connections (Providers & Proxy Pool)
-- 8 provider esensial:
-  - **OAuth**: Claude, Codex, GitHub (Copilot), Kiro, Antigravity, GLM
-  - **Free**: Opencode, Kilocode
-  - **Custom**: OpenAI-compatible & Anthropic-compatible nodes
-- Token refresh otomatis di background.
-- Konfigurasi proxy pool terintegrasi langsung per-koneksi (`proxy_url`).
+## Menjalankan
 
-### 3. Usage & Quota
-- Tracking token in/out per request dari SSE header/footer.
-- Sinkronisasi sisa kuota live per provider.
-- Penyimpanan ringkas di SQLite (`usage_history`, `quota_cache`).
+```powershell
+cd zenroute
+npm install
+npm start          # atau: npm run dev
+```
 
-### 4. Token Saver
-- In-process engine:
-  - **RTK (Reduced Token Kit)**: Pemadatan context & dedup baris log/diff.
-  - **Caveman**: Kompaksi system prompt instruksi panjang.
+Kalau PowerShell memblokir `npm.ps1`, pakai `npm.cmd start`. Dashboard ada di `http://127.0.0.1:20120/dashboard`.
 
-### 5. Settings
-- 1 tabel SQLite / JSON config untuk semua pengaturan:
-  - API key access guard (`requireApiKey`).
-  - Default routing fallback model.
-  - Toggle token saver.
-  - Header overrides.
+## Langkah Pemakaian
 
----
+1. Buka **Connections**, tambahkan kredensial provider (misalnya `glm` dengan API key).
+2. Buka **API Keys**, buat key untuk tiap klien. Key lengkap hanya tampil sekali.
+3. Opsional: aktifkan **Require API Key** di **Settings**.
+4. Kirim request dengan model berprefix provider:
+
+```powershell
+$key  = "zr_..."   # dari halaman API Keys
+$body = @{ model = "glm/glm-5.2"; messages = @(@{ role = "user"; content = "Halo" }) } | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "http://127.0.0.1:20120/v1/chat/completions" -Method Post `
+  -ContentType "application/json" -Headers @{ Authorization = "Bearer $key" } -Body $body
+```
+
+Prefix menentukan provider (`cc`, `cx`, `gh`, `kr`, `ag`, `glm`, `oc`, `kc`, atau id provider). Nama model setelah `/` diteruskan apa adanya.
+
+Key zenroute hanya membuka akses ke gateway dan tidak pernah diteruskan ke provider. Kredensial provider selalu diambil dari Connections; tanpa connection aktif, gateway membalas 503.
+
+## Konfigurasi (Environment)
+
+| Variabel | Default | Fungsi |
+|---|---|---|
+| `PORT` | `20120` | Port server |
+| `HOST` | `127.0.0.1` | Alamat bind. Selain loopback, API key otomatis wajib |
+| `ZENROUTE_DB_PATH` | `<root>/data/zenroute.db` | Lokasi database |
+| `ZENROUTE_ALLOWED_HOSTS` | kosong | Host tambahan yang diterima saat bind loopback |
+| `ZENROUTE_CORS_ORIGINS` | kosong (CORS mati) | Origin browser yang boleh memanggil `/v1` |
+| `ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
+| `ZENROUTE_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar-chunk stream upstream |
+
+Header `x-zenroute-token-saver: false` mematikan RTK dan Caveman untuk satu request.
+
+## Keamanan
+
+- Server listen di `127.0.0.1`; dashboard dan `/api/*` hanya menerima klien localhost.
+- Kredensial provider tersimpan plaintext di `data/zenroute.db`. Jangan bagikan atau commit file ini.
+- Detail lengkap ada di `.workspace/context/SECURITY.md`.
+
+## Test
+
+```powershell
+npm test   # node --test, database otomatis :memory:
+```
 
 ## Struktur Folder
 
 ```
 zenroute/
 ├── src/
-│   ├── index.js               # Entry point Hono server & route definitions
-│   ├── db/
-│   │   ├── index.js           # Inisialisasi node:sqlite & migrations
-│   │   └── schema.sql         # Skema tabel (connections, usage, settings, combos)
-│   ├── gateway/
-│   │   ├── chat.js            # Handler /v1/chat/completions
-│   │   ├── messages.js        # Handler /v1/messages (Claude)
-│   │   ├── responses.js       # Handler /v1/responses
-│   │   └── models.js          # Handler /v1/models
-│   ├── translator/
-│   │   ├── index.js           # Hub-and-spoke translation engine
-│   │   └── formats/           # Converter (claude, gemini, kiro, openai)
-│   ├── providers/
-│   │   ├── index.js           # Provider registry loader
-│   │   ├── registry/          # 8 file registry provider pilihan
-│   │   └── oauth/             # OAuth flows (PKCE, device code, refresh)
-│   ├── executors/
-│   │   ├── base.js            # Base executor (fetch, timeout, retry, proxy)
-│   │   ├── default.js         # Default executor
-│   │   └── special/           # Executor khusus (kiro, codex, antigravity, github)
-│   ├── services/
-│   │   ├── auth.js            # Credential resolver & account fallback
-│   │   ├── combo.js           # Combo fallback & round-robin
-│   │   ├── usage.js           # Usage & quota recorder
-│   │   ├── tokenSaver.js      # RTK & Caveman pipeline
-│   │   └── backgroundRefresh.js # Token refresher background loop
-│   └── ui/
-│       ├── layout.js          # Hono JSX base layout
-│       └── pages/             # Dashboard, connections, usage, settings
-├── public/                    # Static CSS & icon assets
-├── package.json
-└── README.md
+│   ├── index.js          # Entry point, middleware, route, bind HOST/PORT
+│   ├── security.js       # Host guard, akses dashboard, CSRF, CORS opt-in, auth /v1
+│   ├── db/               # node:sqlite dan skema
+│   ├── gateway/          # chat.js, messages.js, models.js
+│   ├── translator/       # OpenAI <-> Claude
+│   ├── providers/        # Registry 8 provider
+│   ├── executors/        # base.js (timeout), proxy.js
+│   ├── services/         # apiKeys, auth, tokenRefresh, usage, quota, tokenSaver, rtk, caveman, settings
+│   └── ui/               # layout, html.js (escaping), pages/
+├── tests/
+└── package.json
 ```
-
----
-
-## Rencana Implementasi
-
-1. **Fase 1**: Scaffold core Hono server, SQLite DB, dan Base Gateway (`/v1/models`, `/v1/chat/completions`).
-2. **Fase 2**: Porting Registry & Executor untuk 8 provider utama + Hub Translator.
-3. **Fase 3**: OAuth flow handler & loop refresh token background.
-4. **Fase 4**: Integrasi Combo routing, Account fallback, dan Token Saver (RTK).
-5. **Fase 5**: Dashboard UI sederhana berbasis Hono JSX + Tailwind.

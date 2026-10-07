@@ -5,7 +5,7 @@ Model yang masih kandidat disimpan di work card `F-<id>.md`; model approved dica
 
 ## Stack & Connection <!-- auto -->
 - Database & Provider: SQLite lokal menggunakan native `node:sqlite` (`DatabaseSync` bawaan Node.js 22+) — Source: `src/db/index.js`
-- Lokasi File DB: `data/zenroute.db` (dibuat otomatis saat inisialisasi)
+- Lokasi File DB: `<root project>/data/zenroute.db`, tidak bergantung CWD; bisa diganti lewat env `ZENROUTE_DB_PATH`. Run `node --test` otomatis memakai `:memory:`.
 - Mode Akses: WAL (Write-Ahead Logging) diaktifkan untuk konkurensi pembacaan tinggi.
 
 ## Core Models <!-- auto -->
@@ -24,12 +24,18 @@ Model yang masih kandidat disimpan di work card `F-<id>.md`; model approved dica
 - Constraints & Index: Index pada `(connection_id, timestamp)`.
 
 ### settings
-- Deskripsi: Konfigurasi sistem global (single-row key-value).
+- Deskripsi: Konfigurasi sistem global (key-value).
 - Fields: `key` (TEXT PRIMARY KEY), `value` (TEXT), `updated_at` (INTEGER).
+- Keys: `require_api_key`, `token_saver_rtk`, `token_saver_caveman`, `default_fallback_model` (belum dipakai gateway).
+
+### api_keys
+- Deskripsi: API key gateway zenroute. Plaintext tidak pernah disimpan.
+- Fields: `id` (INTEGER PRIMARY KEY), `name` (TEXT), `key_prefix` (TEXT, 10 karakter pertama untuk tampilan), `key_hash` (TEXT UNIQUE, SHA-256 hex), `is_active` (INTEGER), `created_at` (INTEGER), `last_used_at` (INTEGER).
+- Constraints & Index: index unik pada `key_hash` untuk lookup verifikasi.
 
 ## Migrations & Schema Changes <!-- auto -->
 - Skema diinisialisasi melalui DDL script di `src/db/schema.sql`.
 - Perubahan skema masa depan ditambahkan secara idempotent (`CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ADD COLUMN` terproteksi).
 
 ## Seed Data <!-- auto -->
-- Inisialisasi otomatis memasukkan pengaturan default ke tabel `settings` (misal `requireApiKey = false`, `defaultFallbackStrategy = "fallback"`).
+- Tidak ada seed. Nilai default settings ada di kode (`src/services/settings.js`): `require_api_key=false`, `token_saver_rtk=true`, `token_saver_caveman=false`, `default_fallback_model=glm/glm-4-flash`.

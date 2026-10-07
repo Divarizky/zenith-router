@@ -58,8 +58,8 @@ test("POST /v1/chat/completions - streaming records token usage after stream com
   initDb(":memory:");
 
   const conn = addConnection({
-    provider: "codex",
-    name: "Codex User",
+    provider: "glm",
+    name: "GLM User",
     credentials: { api_key: "k2" },
   });
 
@@ -93,7 +93,7 @@ test("POST /v1/chat/completions - streaming records token usage after stream com
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "codex/gpt-4o",
+      model: "glm/glm-4-flash",
       messages: [{ role: "user", content: "stream test" }],
       stream: true,
     }),

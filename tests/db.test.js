@@ -124,3 +124,40 @@ test("Connections Cooldown - setConnectionCooldown marks cooldown timestamp", ()
   const fetched = getConnectionById(conn.id);
   assert.strictEqual(fetched.cooldown_until, cooldownTime);
 });
+
+test("Database - migrates a pre-api_key_id usage_history table on startup", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dir = mkdtempSync(join(tmpdir(), "zenroute-migrate-"));
+  const dbPath = join(dir, "old.db");
+  t.after(() => {
+    closeDb();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // Schema shipped before gateway API keys existed.
+  const old = new DatabaseSync(dbPath);
+  old.exec(`CREATE TABLE usage_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    connection_id INTEGER,
+    model TEXT NOT NULL,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    duration_ms INTEGER DEFAULT 0,
+    timestamp INTEGER NOT NULL
+  )`);
+  old.prepare("INSERT INTO usage_history (model, total_tokens, timestamp) VALUES (?, ?, ?)").run("old-model", 42, Date.now());
+  old.close();
+
+  const db = initDb(dbPath);
+  const columns = db.prepare("PRAGMA table_info(usage_history)").all().map((c) => c.name);
+  assert.ok(columns.includes("api_key_id"), "api_key_id column is added");
+  const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name);
+  assert.ok(indexes.includes("idx_usage_api_key"));
+  assert.strictEqual(db.prepare("SELECT total_tokens FROM usage_history").get().total_tokens, 42, "existing rows kept");
+  assert.strictEqual(getDb(), db);
+});

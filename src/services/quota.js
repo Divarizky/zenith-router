@@ -1,4 +1,5 @@
 import { getConnections, updateConnection } from "../db/index.js";
+import { fetchLiveQuota } from "./quota/index.js";
 
 let customQuotaFetcher = null;
 
@@ -34,13 +35,22 @@ export async function syncProviderQuota(connection) {
   if (customQuotaFetcher) {
     quotaData = await customQuotaFetcher(connection);
   } else {
-    // Default provider quota checks can be added per-provider as needed
-    quotaData = connection.credentials?.quota || {
-      remaining: null,
-      unit: "unknown",
-      updated_at: Date.now(),
-      is_exhausted: false,
-    };
+    try {
+      const live = await fetchLiveQuota(connection);
+      if (live) {
+        quotaData = live;
+      }
+    } catch (err) {
+      console.error(`[zenroute] Failed to fetch live quota for ${connection.provider} (#${connection.id}):`, err.message);
+    }
+
+    if (!quotaData) {
+      quotaData = connection.credentials?.quota || {
+        remaining: null,
+        unit: "unknown",
+        is_exhausted: false,
+      };
+    }
   }
 
   const updatedCreds = {

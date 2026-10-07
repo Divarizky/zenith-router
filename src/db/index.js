@@ -62,7 +62,6 @@ CREATE TABLE IF NOT EXISTS usage_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,28 +140,38 @@ export function initDb(dbPath = null) {
     } catch {}
   }
 
-  dbInstance = new DatabaseSync(effectivePath);
+  const db = new DatabaseSync(effectivePath);
 
   if (effectivePath !== ":memory:") {
     try {
-      dbInstance.exec("PRAGMA journal_mode = WAL;");
+      db.exec("PRAGMA journal_mode = WAL;");
     } catch {}
   }
 
-  dbInstance.exec(SCHEMA_SQL);
-  migrateSchema(dbInstance);
+  try {
+    db.exec(SCHEMA_SQL);
+    migrateSchema(db);
+  } catch (err) {
+    db.close();
+    throw err;
+  }
+  // Only publish the handle once the schema is complete, so a failed init is retried
+  // instead of leaving a half-migrated database behind.
+  dbInstance = db;
   return dbInstance;
 }
 
+/**
+ * Bring databases created by older versions up to the current schema.
+ * Indexes on added columns live here, not in SCHEMA_SQL: CREATE TABLE IF NOT EXISTS
+ * skips existing tables, so an index on a new column would fail before the column exists.
+ */
 function migrateSchema(db) {
-  try {
-    const tableInfo = db.prepare("PRAGMA table_info(usage_history)").all();
-    const hasApiKeyId = tableInfo.some((col) => col.name === "api_key_id");
-    if (!hasApiKeyId) {
-      db.exec("ALTER TABLE usage_history ADD COLUMN api_key_id INTEGER");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
-    }
-  } catch {}
+  const usageColumns = db.prepare("PRAGMA table_info(usage_history)").all();
+  if (!usageColumns.some((col) => col.name === "api_key_id")) {
+    db.exec("ALTER TABLE usage_history ADD COLUMN api_key_id INTEGER");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
 }
 
 /**

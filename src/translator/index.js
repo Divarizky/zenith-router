@@ -5,6 +5,20 @@ import {
   openAIToClaudeResponse,
   createResponseTransformStream,
 } from "./response.js";
+import {
+  openaiToResponsesRequest,
+  responsesToOpenAIResponse,
+  createResponsesToOpenAITransformStream,
+} from "./responses.js";
+import {
+  openaiToGeminiRequest,
+  geminiToOpenAIResponse,
+  createGeminiToOpenAITransformStream,
+} from "./gemini.js";
+import {
+  openaiToKiroRequest,
+  createKiroToOpenAITransformStream,
+} from "./kiro.js";
 
 export { FORMATS };
 
@@ -19,15 +33,29 @@ export function translateRequest(sourceFormat, targetFormat, body, targetModel) 
     return { ...body, model: targetModel || body.model };
   }
 
-  if (src === FORMATS.OPENAI && tgt === FORMATS.CLAUDE) {
-    return openaiToClaude(body, targetModel);
+  // Normalize source to OpenAI first if incoming from Claude
+  let openAIBody = body;
+  if (src === FORMATS.CLAUDE) {
+    openAIBody = claudeToOpenAI(body, targetModel);
   }
 
-  if (src === FORMATS.CLAUDE && tgt === FORMATS.OPENAI) {
-    return claudeToOpenAI(body, targetModel);
+  if (tgt === FORMATS.CLAUDE) {
+    return openaiToClaude(openAIBody, targetModel);
   }
 
-  return { ...body, model: targetModel || body.model };
+  if (tgt === FORMATS.OPENAI_RESPONSES) {
+    return openaiToResponsesRequest(openAIBody, targetModel);
+  }
+
+  if (tgt === FORMATS.GEMINI) {
+    return openaiToGeminiRequest(openAIBody, targetModel);
+  }
+
+  if (tgt === FORMATS.KIRO) {
+    return openaiToKiroRequest(openAIBody, targetModel);
+  }
+
+  return { ...openAIBody, model: targetModel || openAIBody.model };
 }
 
 /**
@@ -47,6 +75,14 @@ export function translateResponse(sourceFormat, targetFormat, data, model) {
     return openAIToClaudeResponse(data, model);
   }
 
+  if (src === FORMATS.OPENAI_RESPONSES && tgt === FORMATS.OPENAI) {
+    return responsesToOpenAIResponse(data, model);
+  }
+
+  if (src === FORMATS.GEMINI && tgt === FORMATS.OPENAI) {
+    return geminiToOpenAIResponse(data, model);
+  }
+
   return data;
 }
 
@@ -56,5 +92,18 @@ export function translateResponse(sourceFormat, targetFormat, data, model) {
 export function createTransformStream(sourceFormat, targetFormat, model) {
   const src = normalizeFormat(sourceFormat);
   const tgt = normalizeFormat(targetFormat);
+
+  if (src === FORMATS.OPENAI_RESPONSES && tgt === FORMATS.OPENAI) {
+    return createResponsesToOpenAITransformStream(model);
+  }
+
+  if (src === FORMATS.GEMINI && tgt === FORMATS.OPENAI) {
+    return createGeminiToOpenAITransformStream(model);
+  }
+
+  if (src === FORMATS.KIRO && tgt === FORMATS.OPENAI) {
+    return createKiroToOpenAITransformStream(model);
+  }
+
   return createResponseTransformStream(src, tgt, model);
 }

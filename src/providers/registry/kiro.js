@@ -1,3 +1,5 @@
+import "../../executors/kiro.js";
+
 export default {
   id: "kiro",
   name: "Kiro AI",

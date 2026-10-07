@@ -29,10 +29,8 @@ Sudah berfungsi:
 - Usage tracking untuk streaming (`stream_options.include_usage` + fallback estimasi) dan non-streaming, audit trail pemakaian per API key (`api_key_id`), status kuota, RTK, Caveman (opt-in), dan halaman terpisah **Token Saver**.
 
 - **Login akun OAuth ala 9router**: Claude, Codex (ChatGPT), Antigravity (Google), dan Cline login lewat browser dengan callback ke zenroute. GitHub Copilot, Kilo Code, Kiro (AWS Builder ID), dan GLM (Z.ai) memakai device code. Kiro, Freebuff, dan Command Code juga bisa import login dari instalasi CLI lokal di mesin yang sama (~/.commandcode/auth.json). Tempel token manual tetap tersedia sebagai cadangan. Token diperpanjang otomatis sesuai cara tiap provider.
-
-Belum berfungsi:
-- Routing chat untuk Codex (format Responses API), Antigravity (format Cloud Code), dan Kiro (eventstream AWS). Login akunnya sudah bisa, tapi translator request/response untuk ketiga format itu belum ada.
-- Live quota fetcher per vendor pihak ketiga (saat ini masih mock).
+- **Routing Chat Multi-Format**: Mendukung translasi penuh dua arah untuk OpenAI Chat Completions, Anthropic Claude Messages, OpenAI Responses API (Codex backend), Google Cloud Code / Gemini v1internal (Antigravity), dan AWS EventStream binary (Kiro AI).
+- **Live Quota Fetcher**: Mengambil kuota, sisa token, rate limit, dan status tier langsung dari endpoint resmi provider (Codex, Antigravity, GitHub Copilot, GLM Z.ai, OpenRouter).
 
 ## Instalasi & Menjalankan
 
@@ -124,6 +122,6 @@ zenroute/
 │   │                     # modelOverrides, modelImport, modelSync, tokenSaver, rtk,
 │   │                     # caveman, settings, oauth/ (alur login per provider + session login)
 │   └── ui/               # layout.js, cliMenu.js, html.js, pages/ (overview, providers, usage, keys, etc.)
-├── tests/                # Test suite lengkap (168 tests)
+├── tests/                # Test suite lengkap (178 tests)
 └── package.json
 ```

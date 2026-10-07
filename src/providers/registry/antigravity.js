@@ -1,3 +1,5 @@
+import "../../executors/antigravity.js";
+
 const ANTIGRAVITY_IDE_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
 const ANTIGRAVITY_IDE_USER_AGENT = "antigravity/ide/0.0.1 darwin/arm64";
 

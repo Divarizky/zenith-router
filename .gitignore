@@ -8,3 +8,5 @@ data/
 *.log
 .DS_Store
 Thumbs.db
+.pi/
+.freebuff/

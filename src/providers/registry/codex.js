@@ -1,3 +1,5 @@
+import "../../executors/codex.js";
+
 const CODEX_CLI_VERSION = "0.159.0";
 
 export default {

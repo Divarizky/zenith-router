@@ -7,7 +7,7 @@ import {
   createTransformStream,
 } from "../src/translator/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
-import { initDb } from "../src/db/index.js";
+import { initDb, addConnection } from "../src/db/index.js";
 
 test("Translator Request - converts OpenAI payload to Claude format", () => {
   const openAIBody = {
@@ -108,6 +108,7 @@ test("Translator Stream - converts Claude SSE events to OpenAI SSE stream", asyn
 
 test("POST /v1/chat/completions - cross-vendor routing to Claude upstream with translation", async () => {
   initDb(":memory:");
+  addConnection({ provider: "claude", name: "Claude test", credentials: { api_key: "sk-ant-test" } });
   // Client sends OpenAI request to Claude model. Upstream returns Claude format.
   const mockClaudeResponse = {
     id: "msg_cross_1",

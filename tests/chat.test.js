@@ -2,6 +2,12 @@ import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
 import { BaseExecutor, setCustomExecutor } from "../src/executors/base.js";
+import { initDb, addConnection } from "../src/db/index.js";
+
+function seedGlmConnection() {
+  initDb(":memory:");
+  addConnection({ provider: "glm", name: "GLM test", credentials: { api_key: "test-key" } });
+}
 
 test("BaseExecutor - executes fetch with timeout and headers", async () => {
   const mockFetch = async (url, options) => {
@@ -54,6 +60,7 @@ test("POST /v1/chat/completions - returns 404 when model is not recognized", asy
 });
 
 test("POST /v1/chat/completions - non-streaming relays upstream completion", async () => {
+  seedGlmConnection();
   // Setup mock executor
   const mockResponse = {
     id: "chatcmpl-mock-1",
@@ -97,6 +104,7 @@ test("POST /v1/chat/completions - non-streaming relays upstream completion", asy
 });
 
 test("POST /v1/chat/completions - streaming relays SSE events and completes with [DONE]", async () => {
+  seedGlmConnection();
   const sseChunks = [
     'data: {"id":"1","choices":[{"delta":{"content":"Hello"}}]}\n\n',
     'data: {"id":"1","choices":[{"delta":{"content":" world"}}]}\n\n',
@@ -154,6 +162,7 @@ test("POST /v1/chat/completions - streaming relays SSE events and completes with
 });
 
 test("POST /v1/chat/completions - upstream failure returns standard OpenAI error", async () => {
+  seedGlmConnection();
   const mockExecutor = {
     async execute() {
       return new Response(

@@ -93,26 +93,31 @@ export async function handleChat(c) {
     upstreamHeaders["Anthropic-Version"] = "2023-06-01";
   }
 
-  // Pick connection from local DB if available
+  // Upstream credentials always come from a stored connection; client auth headers are never forwarded
   let connection = getActiveConnection(provider.id);
-  if (connection) {
-    // Proactive token refresh if near expiry
-    if (needsTokenRefresh(connection)) {
-      try {
-        const refreshed = await refreshOAuthToken(connection);
-        if (refreshed) connection = refreshed;
-      } catch (err) {
-        console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
-      }
-    }
-    applyConnectionAuth(upstreamHeaders, connection);
+  if (!connection) {
+    return c.json(
+      {
+        error: {
+          message: `No available connection for provider '${provider.id}'. Add or re-enable one in the dashboard.`,
+          type: "service_unavailable",
+          code: "no_available_connection",
+        },
+      },
+      503
+    );
   }
 
-  // Pass incoming authorization or api-key as override if client supplied one
-  const authHeader = c.req.header("authorization");
-  const xApiKey = c.req.header("x-api-key");
-  if (authHeader) upstreamHeaders["Authorization"] = authHeader;
-  if (xApiKey) upstreamHeaders["x-api-key"] = xApiKey;
+  // Proactive token refresh if near expiry
+  if (needsTokenRefresh(connection)) {
+    try {
+      const refreshed = await refreshOAuthToken(connection);
+      if (refreshed) connection = refreshed;
+    } catch (err) {
+      console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
+    }
+  }
+  applyConnectionAuth(upstreamHeaders, connection);
 
   try {
     let upstreamRes = await executor.execute({
@@ -195,7 +200,6 @@ export async function handleChat(c) {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
-          "Access-Control-Allow-Origin": "*",
         },
       });
     }

@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { fileURLToPath } from "node:url";
 import { handleListModels } from "./gateway/models.js";
@@ -18,27 +17,25 @@ import {
   renderSettingsPage,
   handleSaveSettings,
 } from "./ui/pages/settings.js";
+import {
+  getBindHost,
+  isLoopbackHost,
+  hostGuard,
+  controlPlaneGuard,
+  corsOptIn,
+  requireJsonBody,
+  gatewayAuth,
+} from "./security.js";
 
 export const app = new Hono();
 const PORT = Number(process.env.PORT || 20120);
 
-// Explicit CORS middleware for all endpoints
-app.use(
-  "*",
-  cors({
-    origin: "*",
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["*"],
-  })
-);
-
-// Fallback OPTIONS handler to guarantee CORS headers on any raw OPTIONS preflight
-app.options("*", (c) => {
-  c.header("Access-Control-Allow-Origin", "*");
-  c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  c.header("Access-Control-Allow-Headers", "*");
-  return c.text("", 204);
-});
+// Security middleware: host check, localhost-only control plane, then gateway auth for /v1
+app.use("*", hostGuard);
+app.use("*", controlPlaneGuard);
+app.use("/v1/*", corsOptIn);
+app.use("/v1/*", requireJsonBody);
+app.use("/v1/*", gatewayAuth);
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", service: "zenroute", timestamp: Date.now() }));
@@ -73,9 +70,17 @@ app.get("/api/quota", handleGetQuota);
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  console.log(`[zenroute] Starting on http://localhost:${PORT}`);
+  const hostname = getBindHost();
+  const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
+  console.log(`[zenroute] Starting on http://${displayHost}:${PORT}`);
+  if (!isLoopbackHost(hostname)) {
+    console.warn(
+      "[zenroute] Bound to a non-loopback address: zenroute API keys are required on /v1 and the dashboard stays localhost-only."
+    );
+  }
   serve({
     fetch: app.fetch,
     port: PORT,
+    hostname,
   });
 }

@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { applyTokenSaver } from "../src/services/tokenSaver.js";
 import { app } from "../src/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
+import { initDb, addConnection } from "../src/db/index.js";
 
 test("tokenSaver pipeline - applies both RTK and Caveman", () => {
   const body = {
@@ -48,6 +49,8 @@ test("tokenSaver pipeline - guarantees fail-open on internal error", () => {
 });
 
 test("POST /v1/chat/completions - bypasses token saver when header x-zenroute-token-saver is false", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "glm", name: "GLM test", credentials: { api_key: "test-key" } });
   let capturedBody = null;
 
   const mockExecutor = {

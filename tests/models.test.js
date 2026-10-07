@@ -45,15 +45,3 @@ test("GET /v1/models - returns OpenAI compatible model list", async () => {
   assert.strictEqual(first.object, "model");
   assert.ok(first.owned_by);
 });
-
-test("OPTIONS /v1/models - CORS preflight responds with wildcard headers", async () => {
-  const res = await app.request("/v1/models", {
-    method: "OPTIONS",
-    headers: {
-      Origin: "http://localhost:3000",
-    },
-  });
-  assert.ok(res.status === 200 || res.status === 204);
-  assert.strictEqual(res.headers.get("access-control-allow-origin"), "*");
-  assert.ok(res.headers.get("access-control-allow-methods")?.includes("GET"));
-});

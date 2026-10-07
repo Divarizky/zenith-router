@@ -3,7 +3,7 @@ import {
   addConnection,
   deleteConnection,
 } from "../../db/index.js";
-import { getAllProviders } from "../../providers/index.js";
+import { getAllProviders, getProvider } from "../../providers/index.js";
 import { isConnectionInCooldown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import { renderLayout } from "../layout.js";
@@ -126,19 +126,18 @@ export async function handleAddConnection(c) {
 
   const provider = String(body.provider || "").trim();
   const name = String(body.name || `${provider} Account`).trim();
-  const auth_type = String(body.auth_type || "apikey").trim();
-  const apiKey = String(body.api_key || "").trim();
-  const proxy_url = body.proxy_url ? String(body.proxy_url).trim() : null;
+  const auth_type = body.auth_type === "oauth" ? "oauth" : "apikey";
+  const secret = String(body.api_key || "").trim();
+  const proxy_url = body.proxy_url ? String(body.proxy_url).trim() : "";
 
-  if (provider && apiKey) {
+  const proxyValid = !proxy_url || /^https?:\/\/[^\s]+$/i.test(proxy_url);
+
+  if (getProvider(provider) && secret && proxyValid) {
     addConnection({
       provider,
       name,
       auth_type,
-      credentials: {
-        api_key: apiKey,
-        access_token: apiKey,
-      },
+      credentials: auth_type === "oauth" ? { access_token: secret } : { api_key: secret },
       proxy_url: proxy_url || null,
     });
   }

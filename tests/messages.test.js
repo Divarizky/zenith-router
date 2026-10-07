@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
-import { initDb } from "../src/db/index.js";
+import { initDb, addConnection } from "../src/db/index.js";
 
 test("POST /v1/messages - returns 400 on missing or invalid payload", async () => {
   const res = await app.request("/v1/messages", {
@@ -77,6 +77,7 @@ test("POST /v1/messages - intercepts Claude Code Warmup in streaming mode", asyn
 
 test("POST /v1/messages - non-streaming relays upstream Anthropic response", async () => {
   initDb(":memory:");
+  addConnection({ provider: "claude", name: "Claude test", credentials: { api_key: "sk-ant-test" } });
   const mockAnthropicResponse = {
     id: "msg_12345",
     type: "message",

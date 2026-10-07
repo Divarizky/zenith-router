@@ -186,25 +186,30 @@ export async function handleMessages(c) {
     ...(provider.transport?.headers || {}),
   };
 
-  // Pick connection from local DB if available
+  // Upstream credentials always come from a stored connection; client auth headers are never forwarded
   let connection = getActiveConnection(provider.id);
-  if (connection) {
-    if (needsTokenRefresh(connection)) {
-      try {
-        const refreshed = await refreshOAuthToken(connection);
-        if (refreshed) connection = refreshed;
-      } catch (err) {
-        console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
-      }
-    }
-    applyConnectionAuth(upstreamHeaders, connection);
+  if (!connection) {
+    return c.json(
+      {
+        type: "error",
+        error: {
+          type: "overloaded_error",
+          message: `No available connection for provider '${provider.id}'. Add or re-enable one in the dashboard.`,
+        },
+      },
+      503
+    );
   }
 
-  // Pass incoming authorization or api-key as override
-  const authHeader = c.req.header("authorization");
-  const xApiKey = c.req.header("x-api-key");
-  if (xApiKey) upstreamHeaders["x-api-key"] = xApiKey;
-  if (authHeader) upstreamHeaders["Authorization"] = authHeader;
+  if (needsTokenRefresh(connection)) {
+    try {
+      const refreshed = await refreshOAuthToken(connection);
+      if (refreshed) connection = refreshed;
+    } catch (err) {
+      console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
+    }
+  }
+  applyConnectionAuth(upstreamHeaders, connection);
 
   try {
     let upstreamRes = await executor.execute({
@@ -278,7 +283,6 @@ export async function handleMessages(c) {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
-          "Access-Control-Allow-Origin": "*",
         },
       });
     }

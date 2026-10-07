@@ -65,22 +65,27 @@ export function getActiveConnection(providerId) {
 }
 
 /**
- * Apply credentials from connection to request headers
+ * Apply credentials from connection to request headers, based on the connection auth type
  */
 export function applyConnectionAuth(headers, connection) {
-  if (!connection || !connection.credentials) return headers;
+  if (!connection || !connection.credentials || connection.auth_type === "noauth") return headers;
 
   const creds = connection.credentials;
 
-  // Bearer token (access_token or api_key with bearer scheme)
-  if (creds.access_token) {
-    headers["Authorization"] = `Bearer ${creds.access_token}`;
-  } else if (creds.api_key) {
-    if (connection.provider === "claude") {
-      headers["x-api-key"] = creds.api_key;
-    } else {
-      headers["Authorization"] = `Bearer ${creds.api_key}`;
-    }
+  if (connection.auth_type === "oauth") {
+    const token = creds.access_token || creds.api_key;
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return headers;
+  }
+
+  const apiKey = creds.api_key || creds.access_token;
+  if (!apiKey) return headers;
+
+  // Anthropic API keys go in x-api-key; Bearer is reserved for OAuth tokens there
+  if (connection.provider === "claude") {
+    headers["x-api-key"] = apiKey;
+  } else {
+    headers["Authorization"] = `Bearer ${apiKey}`;
   }
 
   return headers;

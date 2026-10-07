@@ -69,6 +69,7 @@ Key zenroute hanya membuka akses ke gateway dan tidak pernah diteruskan ke provi
 | `ZENROUTE_CORS_ORIGINS` | kosong (CORS mati) | Origin browser yang boleh memanggil `/v1` |
 | `ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
 | `ZENROUTE_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar-chunk stream upstream |
+| `ZENROUTE_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkron model gratis (OpenCode, Kilo Code); `0` mematikan sinkron otomatis |
 
 Header `x-zenroute-token-saver: false` mematikan RTK dan Caveman untuk satu request.
 

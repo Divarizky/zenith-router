@@ -4,6 +4,9 @@ export default {
   alias: ["oc", "opencode"],
   category: "free",
   noAuth: true,
+  // Free models change often upstream; the synced list replaces the one below,
+  // which only serves until the first successful sync.
+  freeModelSync: "replace",
   format: "openai",
   transport: {
     baseUrl: "https://opencode.ai/v1/chat/completions",

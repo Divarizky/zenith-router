@@ -1,5 +1,5 @@
 import { getConnections, addConnection, deleteConnection } from "../../db/index.js";
-import { getAllProviders, getProvider } from "../../providers/index.js";
+import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionInCooldown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import {
@@ -11,8 +11,11 @@ import {
   isModelDisabled,
   listImportedModels,
   clearImportedModels,
+  deleteImportedModels,
+  getModelSyncState,
 } from "../../services/modelOverrides.js";
-import { getImporter, importProviderModels } from "../../services/modelImport.js";
+import { getImportModes, importProviderModels } from "../../services/modelImport.js";
+import { syncFreeModels, getSyncIntervalMs } from "../../services/modelSync.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
@@ -53,11 +56,26 @@ function importNotice(query = {}) {
 
   const count = Number.parseInt(query.count, 10) || 0;
   const status = Number.parseInt(query.status, 10);
+  const httpSuffix = Number.isFinite(status) ? ` (HTTP ${status})` : "";
+  switch (query.sync) {
+    case "synced":
+      return { ok: true, text: `Sinkron selesai: ${count} model gratis.` };
+    case "empty":
+      return { ok: false, text: "Sinkron gagal: provider tidak mengembalikan model gratis. Daftar sebelumnya tetap dipakai." };
+    case "no_account":
+      return { ok: false, text: "Sinkron gagal: butuh akun untuk mengambil daftar model." };
+    case "upstream_error":
+      return { ok: false, text: `Sinkron gagal${httpSuffix}. Daftar sebelumnya tetap dipakai.` };
+    case "unsupported":
+      return { ok: false, text: "Provider ini tidak disinkron otomatis." };
+  }
   switch (query.import) {
     case "imported":
       return { ok: true, text: `${count} model berhasil di-import.` };
     case "cleared":
       return { ok: true, text: "Model hasil import dihapus." };
+    case "deleted":
+      return { ok: true, text: `${count} model hasil import dihapus.` };
     case "empty":
       return { ok: false, text: "Tidak ada model yang cocok dengan pilihan import." };
     case "no_account":
@@ -72,6 +90,48 @@ function importNotice(query = {}) {
     default:
       return null;
   }
+}
+
+const WIB_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Jakarta",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/** DD-MM-YYYY HH:mm WIB */
+function formatWib(ms) {
+  const parts = Object.fromEntries(WIB_FORMAT.formatToParts(new Date(Number(ms))).map((x) => [x.type, x.value]));
+  return `${parts.day}-${parts.month}-${parts.year} ${parts.hour}:${parts.minute} WIB`;
+}
+
+/** One-line sync status for providers with freeModelSync. */
+function syncSummary(p) {
+  const state = getModelSyncState(p.id);
+  const hours = getSyncIntervalMs() / 3_600_000;
+  const schedule = hours > 0 ? `Model gratis disinkron otomatis tiap ${hours} jam.` : "Sinkron otomatis dimatikan (ZENROUTE_MODEL_SYNC_INTERVAL_HOURS=0).";
+  const fallback = p.freeModelSync === "replace" ? "memakai daftar bawaan" : "hanya daftar bawaan yang tampil";
+
+  let status;
+  if (!state?.last_success_at) status = `Belum pernah berhasil sinkron, ${fallback}.`;
+  else status = `Terakhir sinkron ${formatWib(state.last_success_at)} (${state.count} model).`;
+
+  const error =
+    state && state.ok === 0 && state.error
+      ? ` <span style="color: var(--danger);">Percobaan terakhir ${formatWib(state.last_attempt_at)} gagal: ${escapeHtml(state.error)}</span>`
+      : "";
+  return `<p class="hint" style="margin-bottom: 0.75rem;">${schedule} ${status}${error}</p>`;
+}
+
+/** Unique model ids a provider exposes: built-in (static or synced), imported, custom. */
+function countProviderModels(p, imported, custom) {
+  const ids = new Set(getProviderModels(p).map((m) => m.id));
+  for (const m of imported) ids.add(m.model_id);
+  for (const m of custom) ids.add(m.model_id);
+  return ids.size;
 }
 
 function formatTokens(n) {
@@ -116,10 +176,8 @@ export function renderProvidersPage(port = 20120) {
     byProvider.get(c.provider).push(c);
   }
 
-  const extraModels = new Map();
-  for (const m of [...listImportedModels(), ...listCustomModels()]) {
-    extraModels.set(m.provider, (extraModels.get(m.provider) || 0) + 1);
-  }
+  const allImported = listImportedModels();
+  const allCustom = listCustomModels();
 
   const sections = SECTIONS.map((s) => {
     const providers = getAllProviders()
@@ -141,7 +199,11 @@ export function renderProvidersPage(port = 20120) {
           <h3>${escapeHtml(p.name)}</h3>
           ${statusPill(p, stats)}
         </div>
-        <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${p.models.length + (extraModels.get(p.id) || 0)} model</p>
+        <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${countProviderModels(
+          p,
+          allImported.filter((m) => m.provider === p.id),
+          allCustom.filter((m) => m.provider === p.id)
+        )} model</p>
         ${s.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       </a>`;
       })
@@ -167,7 +229,7 @@ export function renderProvidersPage(port = 20120) {
 export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const p = getProvider(idOrAlias);
   if (!p) return null;
-  const importer = getImporter(p.id);
+  const importModes = getImportModes(p);
   const notice = importNotice(query);
 
   const alias = primaryAlias(p);
@@ -210,8 +272,19 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       </table>`;
   }
 
+  const builtInModels = getProviderModels(p);
+  const builtInIds = new Set(builtInModels.map((m) => m.id));
+  const importedModels = listImportedModels(p.id).filter((m) => !builtInIds.has(m.model_id));
+  const importedIds = new Set(importedModels.map((m) => m.model_id));
+  const customModels = listCustomModels().filter(
+    (m) => m.provider === p.id && !builtInIds.has(m.model_id) && !importedIds.has(m.model_id)
+  );
+  // The selection column only exists when there are imported rows to delete.
+  const hasImported = importedModels.length > 0;
+
   const SOURCE_CELL = {
     builtin: `<span class="hint">Built-in</span>`,
+    synced: `<span class="pill">Synced</span>`,
     custom: `<span class="pill">Custom</span>`,
     imported: `<span class="pill">Imported</span>`,
   };
@@ -220,8 +293,13 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     const custom = source === "custom";
     const disabled = isModelDisabled(p.id, modelId);
     const toggleAction = disabled ? "enable" : "disable";
+    const selectCell =
+      source === "imported"
+        ? `<input type="checkbox" name="model_ids" value="${escapeHtml(modelId)}" form="delete-imported-form" data-select-group="imported" autocomplete="off" aria-label="Pilih ${escapeHtml(modelId)}" />`
+        : "";
     return `
         <tr${disabled ? ` class="muted"` : ""}>
+          ${hasImported ? `<td class="select-cell">${selectCell}</td>` : ""}
           <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code></td>
           <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Free</span>` : ""}</td>
           <td>${SOURCE_CELL[source]}</td>
@@ -245,21 +323,14 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         </tr>`;
   };
 
-  const builtInIds = new Set(p.models.map((m) => m.id));
-  const importedModels = listImportedModels(p.id).filter((m) => !builtInIds.has(m.model_id));
-  const importedIds = new Set(importedModels.map((m) => m.model_id));
-  const customModels = listCustomModels().filter(
-    (m) => m.provider === p.id && !builtInIds.has(m.model_id) && !importedIds.has(m.model_id)
-  );
   const modelRows = [
-    ...p.models.map((m) => modelRow(m.id, m.name, "builtin")),
+    ...builtInModels.map((m) => modelRow(m.id, m.name, m.source, null, m.source === "synced")),
     ...importedModels.map((m) => modelRow(m.model_id, m.name, "imported", null, m.is_free === 1)),
     ...customModels.map((m) => modelRow(m.model_id, m.name, "custom", m.id)),
   ].join("");
-  const totalModels = p.models.length + importedModels.length + customModels.length;
+  const totalModels = builtInModels.length + importedModels.length + customModels.length;
 
-  const importModes = importer?.modes || [];
-  const importModal = importer
+  const importModal = importModes.length > 0
     ? `
     <div class="modal-backdrop" id="import-models-modal">
       <div class="modal">
@@ -275,8 +346,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           </label>`
             )
             .join("")}
-          <p class="hint" style="margin-top: 0.75rem;">Daftar model diambil langsung dari provider. Import ulang akan mengganti hasil import sebelumnya. Model built-in dan custom tidak tersentuh.${
-            p.id === "opencode" ? " Model berbayar OpenCode Zen butuh API key, jadi hanya model gratis yang bisa di-import di sini." : ""
+          <p class="hint" style="margin-top: 0.75rem;">Daftar model diambil langsung dari provider. Import ulang akan mengganti hasil import sebelumnya. Model built-in, hasil sinkron, dan custom tidak tersentuh.${
+            p.freeModelSync ? " Model gratis provider ini sudah disinkron otomatis, jadi tidak perlu di-import." : ""
           }</p>
           <div class="modal-actions">
             <button type="button" class="btn" data-close-modal="import-models-modal">Cancel</button>
@@ -329,19 +400,40 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         <h3>Models (${totalModels})</h3>
         <div class="btn-row">
           ${
-            importedModels.length > 0
-              ? `<form action="/dashboard/providers/models/import/clear" method="POST">
+            hasImported
+              ? `<button type="submit" class="btn btn-danger btn-sm" form="delete-imported-form" data-requires-selection="imported" disabled>Delete Selected (<span data-selected-count="imported">0</span>)</button>
+          <form action="/dashboard/providers/models/import/clear" method="POST" onsubmit="return confirm('Hapus semua model hasil import?')">
             <input type="hidden" name="provider" value="${id}" />
             <button type="submit" class="btn btn-danger btn-sm">Clear Imported</button>
           </form>`
               : ""
           }
-          ${importer ? `<button class="btn btn-sm" onclick="openModal('import-models-modal')">Import Models</button>` : ""}
+          ${
+            p.freeModelSync
+              ? `<form action="/dashboard/providers/models/sync" method="POST">
+            <input type="hidden" name="provider" value="${id}" />
+            <button type="submit" class="btn btn-sm">Sync Now</button>
+          </form>`
+              : ""
+          }
+          ${importModes.length > 0 ? `<button class="btn btn-sm" onclick="openModal('import-models-modal')">Import Models</button>` : ""}
           <button class="btn btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
         </div>
       </div>
+      ${p.freeModelSync ? syncSummary(p) : ""}
+      ${
+        hasImported
+          ? `<form id="delete-imported-form" action="/dashboard/providers/models/import/delete" method="POST" onsubmit="return confirmSelected(this, 'model_ids', 'model hasil import')">
+        <input type="hidden" name="provider" value="${id}" />
+      </form>`
+          : ""
+      }
       <table>
-        <thead><tr><th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
+        <thead><tr>${
+          hasImported
+            ? `<th class="select-cell"><input type="checkbox" data-select-all="imported" autocomplete="off" aria-label="Pilih semua model hasil import" title="Pilih semua model hasil import" /></th>`
+            : ""
+        }<th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
         <tbody>${modelRows}</tbody>
       </table>
     </div>
@@ -461,6 +553,27 @@ export async function handleImportModels(c) {
   const mode = body.mode === "free" ? "free" : "all";
   const result = await importProviderModels(provider.id, mode);
   const params = new URLSearchParams({ import: result.code, count: String(result.count) });
+  if (result.status) params.set("status", String(result.status));
+  return c.redirect(`${providerUrl(provider.id)}?${params}`);
+}
+
+export async function handleDeleteImported(c) {
+  const body = await c.req.parseBody({ all: true });
+  const provider = getProvider(String([].concat(body.provider || "")[0]));
+  if (!provider) return c.redirect("/dashboard/providers");
+
+  const ids = [].concat(body.model_ids || []).map((v) => String(v)).filter(Boolean);
+  const removed = ids.length > 0 ? deleteImportedModels(provider.id, ids) : 0;
+  return c.redirect(`${providerUrl(provider.id)}?import=deleted&count=${removed}`);
+}
+
+export async function handleSyncFreeModels(c) {
+  const body = await c.req.parseBody();
+  const provider = getProvider(String(body.provider || ""));
+  if (!provider) return c.redirect("/dashboard/providers");
+
+  const result = await syncFreeModels(provider.id);
+  const params = new URLSearchParams({ sync: result.code, count: String(result.count) });
   if (result.status) params.set("status", String(result.status));
   return c.redirect(`${providerUrl(provider.id)}?${params}`);
 }

@@ -1,5 +1,5 @@
 import { getDb, getConnections } from "../db/index.js";
-import { getProvider } from "../providers/index.js";
+import { getProvider, getProviderModels } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
 import { applyConnectionAuth } from "./auth.js";
 
@@ -87,16 +87,27 @@ export function getImporter(providerId) {
 }
 
 /**
- * Fetch the provider's model list and replace its imported rows.
- * Returns `{ code, count }`; codes: imported, unsupported, no_account, upstream_error, empty.
+ * Import choices offered for a provider. Free-only import is dropped when the
+ * provider already syncs its free models automatically (freeModelSync).
  */
-export async function importProviderModels(providerId, mode = "all") {
-  const provider = getProvider(providerId);
+export function getImportModes(provider) {
   const importer = provider && IMPORTERS[provider.id];
-  if (!importer || !importer.modes.includes(mode)) return { code: "unsupported", count: 0 };
+  if (!importer) return [];
+  return importer.modes.filter((mode) => !(mode === "free" && provider.freeModelSync));
+}
+
+/**
+ * Fetch and parse a provider's live model list, using its first active account
+ * (credentials and proxy) when there is one.
+ * Returns `{ ok: true, models }` or `{ ok: false, code, status? }` with code
+ * unsupported, no_account, or upstream_error.
+ */
+export async function fetchProviderModels(provider) {
+  const importer = provider && IMPORTERS[provider.id];
+  if (!importer) return { ok: false, code: "unsupported" };
 
   const connection = getConnections(provider.id).find((c) => c.is_active === 1) || null;
-  if (!connection && !importer.public && !provider.noAuth) return { code: "no_account", count: 0 };
+  if (!connection && !importer.public && !provider.noAuth) return { ok: false, code: "no_account" };
 
   const headers = {
     Accept: "application/json",
@@ -107,7 +118,6 @@ export async function importProviderModels(providerId, mode = "all") {
   delete headers["Content-Type"];
   applyConnectionAuth(headers, connection);
 
-  let models;
   try {
     const res = await getExecutor(provider.id).execute({
       url: importer.url,
@@ -116,17 +126,33 @@ export async function importProviderModels(providerId, mode = "all") {
       timeoutMs: IMPORT_TIMEOUT_MS,
       proxyUrl: connection?.proxy_url || null,
     });
-    if (!res.ok) return { code: "upstream_error", count: 0, status: res.status };
-    models = importer.parse(await res.json()).filter((m) => typeof m.id === "string" && m.id);
+    if (!res.ok) return { ok: false, code: "upstream_error", status: res.status };
+    const models = importer.parse(await res.json()).filter((m) => typeof m.id === "string" && m.id);
+    return { ok: true, models };
   } catch {
-    return { code: "upstream_error", count: 0 };
+    return { ok: false, code: "upstream_error" };
+  }
+}
+
+/**
+ * Fetch the provider's model list and replace its imported rows.
+ * Returns `{ code, count }`; codes: imported, unsupported, no_account, upstream_error, empty.
+ */
+export async function importProviderModels(providerId, mode = "all") {
+  const provider = getProvider(providerId);
+  if (!provider || !getImportModes(provider).includes(mode)) return { code: "unsupported", count: 0 };
+
+  const fetched = await fetchProviderModels(provider);
+  if (!fetched.ok) {
+    return fetched.status ? { code: fetched.code, count: 0, status: fetched.status } : { code: fetched.code, count: 0 };
   }
 
+  let models = fetched.models;
   if (mode === "free") models = models.filter((m) => m.isFree);
   if (models.length === 0) return { code: "empty", count: 0 };
 
-  // Built-in registry models stay as they are; only extra ids are stored.
-  const builtIn = new Set(provider.models.map((m) => m.id));
+  // Built-in (static or synced) models stay as they are; only extra ids are stored.
+  const builtIn = new Set(getProviderModels(provider).map((m) => m.id));
   const rows = models.filter((m) => !builtIn.has(m.id));
 
   const db = getDb();

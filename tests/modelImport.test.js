@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert";
 import { initDb, addConnection } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
-import { importProviderModels } from "../src/services/modelImport.js";
+import { importProviderModels, getImportModes } from "../src/services/modelImport.js";
 import { listImportedModels } from "../src/services/modelOverrides.js";
-import { getAvailableModels } from "../src/providers/index.js";
+import { getAvailableModels, getProvider } from "../src/providers/index.js";
 import { app } from "../src/index.js";
 
 /** Mock upstream that records each call and answers with `payload` (or `status`). */
@@ -25,63 +25,47 @@ function form(fields) {
   return fd;
 }
 
-const OPENCODE_LIST = {
-  object: "list",
+const KILO_LIST = {
   data: [
-    { id: "big-pickle" },
-    { id: "exo-free" },
-    { id: "muse-spark-1.2-contributor-free" },
-    { id: "claude-opus-5-5" },
+    { id: "kilo-auto/free", isFree: true, pricing: { prompt: "-1", completion: "-1" } },
+    { id: "vendor/a:free" },
+    { id: "vendor/b", pricing: { prompt: "0", completion: "0" } },
+    { id: "vendor/c:free", isFree: false },
+    { id: "vendor/paid", pricing: { prompt: "0.000002", completion: "0.000008" } },
   ],
 };
 
-test("opencode import - free only, no credentials, paid Zen models excluded", async (t) => {
-  t.after(() => setCustomExecutor(null));
-  initDb(":memory:");
-  const calls = mockUpstream(OPENCODE_LIST);
-
-  const result = await importProviderModels("opencode", "free");
-  assert.deepStrictEqual(result, { code: "imported", count: 2 });
-  assert.strictEqual(calls[0].url, "https://opencode.ai/zen/v1/models");
-  assert.strictEqual(calls[0].method, "GET");
-  assert.ok(!("Authorization" in calls[0].headers));
-
-  // big-pickle is free without the suffix; the built-in muse-spark entry is not duplicated.
-  const ids = listImportedModels("opencode").map((m) => m.model_id);
-  assert.deepStrictEqual(ids, ["big-pickle", "exo-free"]);
-
-  const routed = getAvailableModels().map((m) => m.id);
-  assert.ok(routed.includes("oc/exo-free"));
-  assert.ok(!routed.includes("oc/claude-opus-5-5"));
-
-  // "all" is not offered for OpenCode: paid models would need an API key.
-  assert.strictEqual((await importProviderModels("opencode", "all")).code, "unsupported");
+test("import modes - free-only import is dropped for providers that sync free models", () => {
+  assert.deepStrictEqual(getImportModes(getProvider("opencode")), []);
+  assert.deepStrictEqual(getImportModes(getProvider("kilocode")), ["all"]);
+  assert.deepStrictEqual(getImportModes(getProvider("glm")), ["all", "free"]);
+  assert.deepStrictEqual(getImportModes(getProvider("kiro")), []);
 });
 
-test("kilocode import - all vs free uses payload evidence (explicit isFree wins)", async (t) => {
+test("opencode import - refused because its free models are synced automatically", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
-  mockUpstream({
-    data: [
-      { id: "kilo-auto/free", isFree: true, pricing: { prompt: "-1", completion: "-1" } },
-      { id: "vendor/a:free" },
-      { id: "vendor/b", pricing: { prompt: "0", completion: "0" } },
-      { id: "vendor/c:free", isFree: false },
-      { id: "vendor/paid", pricing: { prompt: "0.000002", completion: "0.000008" } },
-    ],
-  });
+  const calls = mockUpstream({ data: [{ id: "exo-free" }] });
 
-  assert.deepStrictEqual(await importProviderModels("kilocode", "free"), { code: "imported", count: 3 });
-  assert.deepStrictEqual(
-    listImportedModels("kilocode").map((m) => m.model_id),
-    ["kilo-auto/free", "vendor/a:free", "vendor/b"]
-  );
+  assert.strictEqual((await importProviderModels("opencode", "free")).code, "unsupported");
+  assert.strictEqual((await importProviderModels("opencode", "all")).code, "unsupported");
+  assert.strictEqual(calls.length, 0);
+});
 
-  // Re-import replaces the previous rows.
+test("kilocode import - all models, with the free flag kept per row", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  const calls = mockUpstream(KILO_LIST);
+
   assert.deepStrictEqual(await importProviderModels("kilocode", "all"), { code: "imported", count: 5 });
+  assert.strictEqual(calls[0].url, "https://api.kilo.ai/api/openrouter/models");
   const rows = listImportedModels("kilocode");
   assert.strictEqual(rows.length, 5);
   assert.strictEqual(rows.find((m) => m.model_id === "vendor/paid").is_free, 0);
+  assert.strictEqual(rows.find((m) => m.model_id === "vendor/c:free").is_free, 0, "explicit isFree:false wins");
+  assert.ok(getAvailableModels().some((m) => m.id === "kc/vendor/paid"));
+
+  assert.strictEqual((await importProviderModels("kilocode", "free")).code, "unsupported");
 });
 
 test("glm import - needs an account, sends its key, free rule from Omni catalog", async (t) => {
@@ -116,57 +100,104 @@ test("claude import - OAuth token gets the oauth beta header and only claude-* i
 test("import - upstream error keeps the previous import and unsupported providers are refused", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
-  mockUpstream(OPENCODE_LIST);
-  await importProviderModels("opencode", "free");
+  mockUpstream(KILO_LIST);
+  await importProviderModels("kilocode", "all");
 
   mockUpstream({ error: "nope" }, 503);
-  assert.deepStrictEqual(await importProviderModels("opencode", "free"), {
+  assert.deepStrictEqual(await importProviderModels("kilocode", "all"), {
     code: "upstream_error",
     count: 0,
     status: 503,
   });
-  assert.strictEqual(listImportedModels("opencode").length, 2);
+  assert.strictEqual(listImportedModels("kilocode").length, 5);
 
   assert.strictEqual((await importProviderModels("kiro", "all")).code, "unsupported");
 });
 
-test("dashboard import flow - modal, redirect notice, Free pill, and clear", async (t) => {
+test("dashboard import flow - modal, redirect notice, selection column, and clear", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
-  mockUpstream(OPENCODE_LIST);
+  mockUpstream(KILO_LIST);
 
-  let html = await (await app.request("/dashboard/providers/opencode")).text();
-  assert.ok(html.includes("Import Models"));
-  assert.ok(html.includes("Hanya model gratis"));
-  assert.ok(!html.includes(`value="all"`), "OpenCode offers free-only import");
+  let html = await (await app.request("/dashboard/providers/kilocode")).text();
+  assert.ok(html.includes("openModal('import-models-modal')"));
+  assert.ok(html.includes(`value="all"`));
+  assert.ok(!html.includes(`value="free"`), "free models are synced, not imported");
+  assert.ok(!html.includes(`data-select-all="imported"`), "no selection column without imported rows");
 
-  // Providers without an importer do not show the button.
-  const kiro = await (await app.request("/dashboard/providers/kiro")).text();
-  assert.ok(!kiro.includes("openModal('import-models-modal')"));
+  // OpenCode syncs its free models: no import button, a Sync Now button instead.
+  const oc = await (await app.request("/dashboard/providers/opencode")).text();
+  assert.ok(!oc.includes("openModal('import-models-modal')"));
+  assert.ok(oc.includes("Sync Now"));
 
   const res = await app.request("/dashboard/providers/models/import", {
     method: "POST",
-    body: form({ provider: "opencode", mode: "free" }),
+    body: form({ provider: "kilocode", mode: "all" }),
   });
   assert.strictEqual(res.status, 302);
-  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/opencode?import=imported&count=2");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/kilocode?import=imported&count=5");
 
   html = await (await app.request(res.headers.get("location"))).text();
-  assert.ok(html.includes("2 model berhasil di-import."));
-  assert.ok(html.includes("oc/exo-free"));
+  assert.ok(html.includes("5 model berhasil di-import."));
+  assert.ok(html.includes("kc/vendor/paid"));
   assert.ok(html.includes("Imported"));
   assert.ok(html.includes(">Free</span>"));
+  assert.ok(html.includes(`data-select-all="imported"`));
+  assert.strictEqual((html.match(/name="model_ids"/g) || []).length, 5, "one checkbox per imported row");
+  assert.ok(html.includes("Delete Selected"));
   assert.ok(html.includes("Clear Imported"));
 
   // Unknown notice codes are ignored rather than echoed.
-  const bogus = await (await app.request("/dashboard/providers/opencode?import=%3Cscript%3E")).text();
-  assert.ok(!bogus.includes("<script>x"));
+  const bogus = await (await app.request("/dashboard/providers/kilocode?import=%3Cscript%3E")).text();
   assert.ok(!bogus.includes(`class="notice`));
 
   const cleared = await app.request("/dashboard/providers/models/import/clear", {
     method: "POST",
-    body: form({ provider: "opencode" }),
+    body: form({ provider: "kilocode" }),
   });
-  assert.strictEqual(cleared.headers.get("location"), "/dashboard/providers/opencode?import=cleared");
-  assert.strictEqual(listImportedModels("opencode").length, 0);
+  assert.strictEqual(cleared.headers.get("location"), "/dashboard/providers/kilocode?import=cleared");
+  assert.strictEqual(listImportedModels("kilocode").length, 0);
+});
+
+test("POST /dashboard/providers/models/import/delete - removes only the selected imported models", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream(KILO_LIST);
+  await importProviderModels("kilocode", "all");
+
+  const fd = new FormData();
+  fd.append("provider", "kilocode");
+  fd.append("model_ids", "vendor/paid");
+  fd.append("model_ids", "vendor/b");
+  fd.append("model_ids", "not-imported");
+  const res = await app.request("/dashboard/providers/models/import/delete", { method: "POST", body: fd });
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/kilocode?import=deleted&count=2");
+
+  const left = listImportedModels("kilocode").map((m) => m.model_id);
+  assert.deepStrictEqual(left, ["kilo-auto/free", "vendor/a:free", "vendor/c:free"]);
+  assert.ok(!getAvailableModels().some((m) => m.id === "kc/vendor/paid"));
+
+  const html = await (await app.request(res.headers.get("location"))).text();
+  assert.ok(html.includes("2 model hasil import dihapus."));
+
+  // A single selected value and an empty selection both work.
+  const one = await app.request("/dashboard/providers/models/import/delete", {
+    method: "POST",
+    body: form({ provider: "kilocode", model_ids: "vendor/a:free" }),
+  });
+  assert.strictEqual(one.headers.get("location"), "/dashboard/providers/kilocode?import=deleted&count=1");
+  const none = await app.request("/dashboard/providers/models/import/delete", {
+    method: "POST",
+    body: form({ provider: "kilocode" }),
+  });
+  assert.strictEqual(none.headers.get("location"), "/dashboard/providers/kilocode?import=deleted&count=0");
+
+  // Another provider's rows are never touched through this provider's form.
+  const other = await app.request("/dashboard/providers/models/import/delete", {
+    method: "POST",
+    body: form({ provider: "glm", model_ids: "kilo-auto/free" }),
+  });
+  assert.strictEqual(other.headers.get("location"), "/dashboard/providers/glm?import=deleted&count=0");
+  assert.strictEqual(listImportedModels("kilocode").length, 2);
 });

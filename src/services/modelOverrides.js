@@ -35,6 +35,28 @@ export function clearImportedModels(provider) {
   db.prepare(`DELETE FROM imported_models WHERE provider = ?`).run(provider);
 }
 
+/** Delete selected imported models of one provider; returns how many rows were removed. */
+export function deleteImportedModels(provider, modelIds) {
+  const db = getDb();
+  const stmt = db.prepare(`DELETE FROM imported_models WHERE provider = ? AND model_id = ?`);
+  let removed = 0;
+  for (const modelId of modelIds) removed += Number(stmt.run(provider, modelId).changes);
+  return removed;
+}
+
+/** Free models synced from providers with freeModelSync (written by services/modelSync.js). */
+export function listSyncedModels(provider = null) {
+  const db = getDb();
+  return provider
+    ? db.prepare(`SELECT * FROM synced_models WHERE provider = ? ORDER BY model_id`).all(provider)
+    : db.prepare(`SELECT * FROM synced_models ORDER BY provider, model_id`).all();
+}
+
+export function getModelSyncState(provider) {
+  const db = getDb();
+  return db.prepare(`SELECT * FROM model_sync_state WHERE provider = ?`).get(provider) || null;
+}
+
 export function disableModel(provider, model_id) {
   const db = getDb();
   db.prepare(`INSERT OR IGNORE INTO disabled_models (provider, model_id) VALUES (?, ?)`).run(provider, model_id);

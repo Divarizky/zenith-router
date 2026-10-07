@@ -19,6 +19,8 @@ import {
   handleEnableModel,
   handleImportModels,
   handleClearImported,
+  handleDeleteImported,
+  handleSyncFreeModels,
 } from "./ui/pages/providers.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
 import { renderTokenSaverPage, handleSaveTokenSaver } from "./ui/pages/tokenSaver.js";
@@ -43,6 +45,7 @@ import {
 } from "./security.js";
 import { getConnections } from "./db/index.js";
 import { getAllProviders } from "./providers/index.js";
+import { startModelSyncScheduler } from "./services/modelSync.js";
 
 export const app = new Hono();
 export const PORT = Number(process.env.PORT || 20120);
@@ -71,6 +74,8 @@ app.post("/dashboard/providers/models/disable", handleDisableModel);
 app.post("/dashboard/providers/models/enable", handleEnableModel);
 app.post("/dashboard/providers/models/import", handleImportModels);
 app.post("/dashboard/providers/models/import/clear", handleClearImported);
+app.post("/dashboard/providers/models/import/delete", handleDeleteImported);
+app.post("/dashboard/providers/models/sync", handleSyncFreeModels);
 app.get("/dashboard/providers/:id", (c) => {
   const html = renderProviderDetailPage(PORT, c.req.param("id"), c.req.query());
   return html ? c.html(html) : c.redirect("/dashboard/providers");
@@ -110,6 +115,7 @@ app.get("/api/quota", handleGetQuota);
 
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 export function startServer() {
+  startModelSyncScheduler();
   const hostname = getBindHost();
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
   const base = `http://${displayHost}:${PORT}`;

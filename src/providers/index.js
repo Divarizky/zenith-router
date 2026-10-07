@@ -6,7 +6,7 @@ import antigravity from "./registry/antigravity.js";
 import glm from "./registry/glm.js";
 import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
-import { listCustomModels, listImportedModels, isModelDisabled } from "../services/modelOverrides.js";
+import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
 
 const REGISTRY = [claude, codex, github, kiro, antigravity, glm, opencode, kilocode];
 
@@ -35,6 +35,23 @@ export function getProvider(idOrAlias) {
  */
 export function getAllProviders() {
   return REGISTRY;
+}
+
+/**
+ * Built-in models of a provider: `{ id, name, source }` with source "builtin" or "synced".
+ * Providers with `freeModelSync` use their last synced free list: "replace" swaps out the
+ * hardcoded list (kept only as a fallback until the first sync), "merge" adds to it.
+ */
+export function getProviderModels(p) {
+  const staticModels = p.models.map((m) => ({ id: m.id, name: m.name, source: "builtin" }));
+  if (!p.freeModelSync) return staticModels;
+
+  const synced = listSyncedModels(p.id).map((m) => ({ id: m.model_id, name: m.name || m.model_id, source: "synced" }));
+  if (synced.length === 0) return staticModels;
+  if (p.freeModelSync === "replace") return synced;
+
+  const staticIds = new Set(staticModels.map((m) => m.id));
+  return [...staticModels, ...synced.filter((m) => !staticIds.has(m.id))];
 }
 
 /**
@@ -94,7 +111,7 @@ export function getAvailableModels() {
   for (const p of REGISTRY) {
     const primaryAlias = Array.isArray(p.alias) ? p.alias[0] : (p.alias || p.id);
 
-    for (const m of p.models) {
+    for (const m of getProviderModels(p)) {
       if (isModelDisabled(p.id, m.id)) continue;
 
       // Direct prefixed model: e.g. "glm/glm-4-flash"

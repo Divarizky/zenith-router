@@ -139,6 +139,9 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
 .back-link:hover { color: var(--text); background: var(--surface-3); border-color: var(--text-subtle); }
 .back-link svg { flex-shrink: 0; }
 td.actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
+th.select-cell, td.select-cell { width: 2.25rem; padding-right: 0; }
+.select-cell input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); cursor: pointer; vertical-align: middle; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 tr.muted td { color: var(--text-subtle); }
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
 .btn-row { display: flex; gap: 0.4rem; align-items: center; }
@@ -218,10 +221,10 @@ tr.muted td { color: var(--text-subtle); }
     });
 
     // Clean transient query parameters from the address bar after render
-    if (window.location.search && /[?&](import|saved|status|notice)=/.test(window.location.search)) {
+    if (window.location.search && /[?&](import|sync|saved|status|notice)=/.test(window.location.search)) {
       try {
         var url = new URL(window.location.href);
-        ['import', 'saved', 'status', 'notice', 'count'].forEach(function(k) { url.searchParams.delete(k); });
+        ['import', 'sync', 'saved', 'status', 'notice', 'count'].forEach(function(k) { url.searchParams.delete(k); });
         var clean = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '');
         window.history.replaceState({}, document.title, clean);
       } catch (e) {}
@@ -246,6 +249,42 @@ tr.muted td { color: var(--text-subtle); }
         document.querySelectorAll('.modal-backdrop.open').forEach(function(m) { m.classList.remove('open'); });
       }
     });
+
+    // Row selection: checkboxes share data-select-group; data-select-all toggles the group,
+    // data-selected-count shows how many are checked, data-requires-selection disables until one is.
+    function syncSelection(group) {
+      var boxes = document.querySelectorAll('input[data-select-group="' + group + '"]');
+      var n = 0;
+      boxes.forEach(function(b) { if (b.checked) n++; });
+      document.querySelectorAll('[data-selected-count="' + group + '"]').forEach(function(el) { el.textContent = n; });
+      document.querySelectorAll('[data-requires-selection="' + group + '"]').forEach(function(el) { el.disabled = n === 0; });
+      document.querySelectorAll('input[data-select-all="' + group + '"]').forEach(function(all) {
+        all.checked = n > 0 && n === boxes.length;
+        all.indeterminate = n > 0 && n < boxes.length;
+      });
+    }
+    document.addEventListener('change', function(e) {
+      var t = e.target;
+      if (!t.matches) return;
+      if (t.matches('input[data-select-all]')) {
+        var group = t.getAttribute('data-select-all');
+        document.querySelectorAll('input[data-select-group="' + group + '"]').forEach(function(b) { b.checked = t.checked; });
+        syncSelection(group);
+      } else if (t.matches('input[data-select-group]')) {
+        syncSelection(t.getAttribute('data-select-group'));
+      }
+    });
+    document.querySelectorAll('input[data-select-all]').forEach(function(all) { syncSelection(all.getAttribute('data-select-all')); });
+
+    // Confirm a bulk action; controls tied with form="..." are part of form.elements.
+    function confirmSelected(form, name, label) {
+      var n = 0;
+      for (var i = 0; i < form.elements.length; i++) {
+        var el = form.elements[i];
+        if (el.name === name && el.checked) n++;
+      }
+      return n > 0 && confirm('Hapus ' + n + ' ' + label + '?');
+    }
   </script>
 </body>
 </html>`;

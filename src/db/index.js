@@ -98,6 +98,25 @@ CREATE TABLE IF NOT EXISTS imported_models (
   imported_at INTEGER NOT NULL,
   PRIMARY KEY (provider, model_id)
 );
+
+-- Free models synced automatically for providers with freeModelSync; each successful sync replaces the provider's rows.
+CREATE TABLE IF NOT EXISTS synced_models (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  name TEXT,
+  synced_at INTEGER NOT NULL,
+  PRIMARY KEY (provider, model_id)
+);
+
+-- Last free model sync attempt per provider, shown on the provider page.
+CREATE TABLE IF NOT EXISTS model_sync_state (
+  provider TEXT PRIMARY KEY,
+  last_attempt_at INTEGER NOT NULL,
+  last_success_at INTEGER,
+  ok INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
 `;
 
 /**

@@ -8,6 +8,11 @@ import { handleMessages } from "./gateway/messages.js";
 import { handleGetUsage } from "./services/usage.js";
 import { handleGetQuota } from "./services/quota.js";
 import { renderOverviewPage } from "./ui/pages/overview.js";
+import {
+  renderConnectionsPage,
+  handleAddConnection,
+  handleDeleteConnection,
+} from "./ui/pages/connections.js";
 
 export const app = new Hono();
 const PORT = Number(process.env.PORT || 20128);
@@ -36,6 +41,11 @@ app.get("/health", (c) => c.json({ status: "ok", service: "zenroute", timestamp:
 // Home & Dashboard Overview
 app.get("/", (c) => c.html(renderOverviewPage(PORT)));
 app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
+
+// Dashboard Connections UI & Actions
+app.get("/dashboard/connections", (c) => c.html(renderConnectionsPage(PORT)));
+app.post("/dashboard/connections/add", handleAddConnection);
+app.post("/dashboard/connections/delete", handleDeleteConnection);
 
 // Models Discovery
 app.get("/v1/models", handleListModels);

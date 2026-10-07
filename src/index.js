@@ -34,9 +34,11 @@ import {
   requireJsonBody,
   gatewayAuth,
 } from "./security.js";
+import { getConnections } from "./db/index.js";
+import { getAllProviders } from "./providers/index.js";
 
 export const app = new Hono();
-const PORT = Number(process.env.PORT || 20120);
+export const PORT = Number(process.env.PORT || 20120);
 
 // Security middleware: host check, localhost-only control plane, then gateway auth for /v1
 app.use("*", hostGuard);
@@ -90,7 +92,16 @@ app.get("/api/quota", handleGetQuota);
 export function startServer() {
   const hostname = getBindHost();
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
-  console.log(`[zenroute] Starting on http://${displayHost}:${PORT}`);
+  const base = `http://${displayHost}:${PORT}`;
+  const dim = "\x1b[2m";
+  const bold = "\x1b[1m";
+  const reset = "\x1b[0m";
+  console.log(`\n${bold}zenroute${reset} ${dim}v0.1.0${reset}\n`);
+  console.log(`  Dashboard:  ${base}/dashboard`);
+  console.log(`  Endpoint:   ${base}/v1`);
+  console.log(`  Health:     ${base}/health`);
+  console.log(`  Providers:  ${getAllProviders().length} registered, ${getConnections().length} connection(s)`);
+  console.log(`\n  ${dim}Ctrl+C untuk berhenti. Setup awal lewat dashboard.${reset}\n`);
   if (!isLoopbackHost(hostname)) {
     console.warn(
       "[zenroute] Bound to a non-loopback address: zenroute API keys are required on /v1 and the dashboard stays localhost-only."

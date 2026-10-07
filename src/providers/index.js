@@ -6,8 +6,7 @@ import antigravity from "./registry/antigravity.js";
 import glm from "./registry/glm.js";
 import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
-import { listCustomModels, isModelDisabled } from "../services/modelOverrides.js";
-import { getLiveModels } from "../services/modelFetchers.js";
+import { listCustomModels, listImportedModels, isModelDisabled } from "../services/modelOverrides.js";
 
 const REGISTRY = [claude, codex, github, kiro, antigravity, glm, opencode, kilocode];
 
@@ -122,24 +121,21 @@ export function getAvailableModels() {
     }
   }
 
-  // Live catalog from provider model endpoints (modelsFetcher), when fetched.
-  for (const p of REGISTRY) {
-    if (!p.modelsFetcher) continue;
-    const primaryAlias = Array.isArray(p.alias) ? p.alias[0] : (p.alias || p.id);
-    const staticIds = new Set(p.models.map((m) => m.id));
-    for (const m of getLiveModels(p.id)) {
-      if (staticIds.has(m.id) || isModelDisabled(p.id, m.id)) continue;
-      result.push({
-        id: `${primaryAlias}/${m.id}`,
-        object: "model",
-        created: now,
-        owned_by: p.id,
-        permission: [],
-        root: m.id,
-        parent: null,
-        live: true,
-      });
-    }
+  // Models imported from a provider's live list (dashboard "Import Models").
+  for (const im of listImportedModels()) {
+    const provider = getProvider(im.provider);
+    if (!provider || isModelDisabled(provider.id, im.model_id)) continue;
+    const primaryAlias = Array.isArray(provider.alias) ? provider.alias[0] : (provider.alias || provider.id);
+    result.push({
+      id: `${primaryAlias}/${im.model_id}`,
+      object: "model",
+      created: now,
+      owned_by: provider.id,
+      permission: [],
+      root: im.model_id,
+      parent: null,
+      imported: true,
+    });
   }
 
   // Custom models ride along with caps derived from a simple cloud default.

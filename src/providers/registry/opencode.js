@@ -15,5 +15,4 @@ export default {
     { id: "union-alpha", name: "Union Alpha Free" },
     { id: "jev-1.13-free", name: "Jev 1.13 Free" },
   ],
-  modelsFetcher: { url: "https://opencode.ai/zen/v1/models" },
 };

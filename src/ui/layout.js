@@ -130,6 +130,12 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
 td.actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
 tr.muted td { color: var(--text-subtle); }
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+.btn-row { display: flex; gap: 0.4rem; align-items: center; }
+.radio-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; cursor: pointer; font-size: 0.88rem; }
+.radio-row input { width: auto; accent-color: var(--text); }
+.notice { padding: 0.65rem 0.9rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1rem; border: 1px solid var(--border); }
+.notice-ok { color: var(--success); border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.08); }
+.notice-error { color: var(--danger); border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.08); }
 .stat .value { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; }
     .stat .label { color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .stat .sub { color: var(--text-subtle); font-size: 0.78rem; margin-top: 0.2rem; }

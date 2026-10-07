@@ -69,3 +69,13 @@ CREATE TABLE IF NOT EXISTS disabled_models (
   model_id TEXT NOT NULL,
   PRIMARY KEY (provider, model_id)
 );
+
+-- Models imported from a provider's live model list; each import replaces the provider's rows.
+CREATE TABLE IF NOT EXISTS imported_models (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  name TEXT,
+  is_free INTEGER NOT NULL DEFAULT 0,
+  imported_at INTEGER NOT NULL,
+  PRIMARY KEY (provider, model_id)
+);

@@ -22,6 +22,19 @@ export function deleteCustomModel(id) {
   db.prepare(`DELETE FROM custom_models WHERE id = ?`).run(id);
 }
 
+/** Models imported from a provider's live list (written by services/modelImport.js). */
+export function listImportedModels(provider = null) {
+  const db = getDb();
+  return provider
+    ? db.prepare(`SELECT * FROM imported_models WHERE provider = ? ORDER BY model_id`).all(provider)
+    : db.prepare(`SELECT * FROM imported_models ORDER BY provider, model_id`).all();
+}
+
+export function clearImportedModels(provider) {
+  const db = getDb();
+  db.prepare(`DELETE FROM imported_models WHERE provider = ?`).run(provider);
+}
+
 export function disableModel(provider, model_id) {
   const db = getDb();
   db.prepare(`INSERT OR IGNORE INTO disabled_models (provider, model_id) VALUES (?, ?)`).run(provider, model_id);

@@ -9,7 +9,10 @@ import {
   disableModel,
   enableModel,
   isModelDisabled,
+  listImportedModels,
+  clearImportedModels,
 } from "../../services/modelOverrides.js";
+import { getImporter, importProviderModels } from "../../services/modelImport.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
@@ -32,6 +35,36 @@ function providerUrl(id) {
 function backTo(providerId) {
   const p = getProvider(providerId);
   return p ? providerUrl(p.id) : "/dashboard/providers";
+}
+
+const IMPORT_MODE_LABELS = {
+  all: "Semua model",
+  free: "Hanya model gratis",
+};
+
+/** Fixed notice texts keyed by the result code in the redirect query; never echo raw input. */
+function importNotice(query = {}) {
+  const count = Number.parseInt(query.count, 10) || 0;
+  const status = Number.parseInt(query.status, 10);
+  switch (query.import) {
+    case "imported":
+      return { ok: true, text: `${count} model berhasil di-import.` };
+    case "cleared":
+      return { ok: true, text: "Model hasil import dihapus." };
+    case "empty":
+      return { ok: false, text: "Tidak ada model yang cocok dengan pilihan import." };
+    case "no_account":
+      return { ok: false, text: "Tambahkan akun dulu. Daftar model provider ini butuh kredensial." };
+    case "upstream_error":
+      return {
+        ok: false,
+        text: `Gagal mengambil daftar model dari provider${Number.isFinite(status) ? ` (HTTP ${status})` : ""}.`,
+      };
+    case "unsupported":
+      return { ok: false, text: "Provider ini belum mendukung import model." };
+    default:
+      return null;
+  }
 }
 
 function formatTokens(n) {
@@ -76,6 +109,11 @@ export function renderProvidersPage(port = 20120) {
     byProvider.get(c.provider).push(c);
   }
 
+  const extraModels = new Map();
+  for (const m of [...listImportedModels(), ...listCustomModels()]) {
+    extraModels.set(m.provider, (extraModels.get(m.provider) || 0) + 1);
+  }
+
   const sections = SECTIONS.map((s) => {
     const providers = getAllProviders()
       .filter((p) => (p.category || "apikey") === s.category)
@@ -96,7 +134,7 @@ export function renderProvidersPage(port = 20120) {
           <h3>${escapeHtml(p.name)}</h3>
           ${statusPill(p, stats)}
         </div>
-        <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${p.models.length} model</p>
+        <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${p.models.length + (extraModels.get(p.id) || 0)} model</p>
         ${s.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       </a>`;
       })
@@ -119,9 +157,11 @@ export function renderProvidersPage(port = 20120) {
  * Provider detail: accounts, models (built-in + custom) with enable/disable.
  * Returns null when the provider id is unknown.
  */
-export function renderProviderDetailPage(port, idOrAlias) {
+export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const p = getProvider(idOrAlias);
   if (!p) return null;
+  const importer = getImporter(p.id);
+  const notice = importNotice(query);
 
   const alias = primaryAlias(p);
   const accounts = getConnections().filter((c) => c.provider === p.id);
@@ -163,14 +203,21 @@ export function renderProviderDetailPage(port, idOrAlias) {
       </table>`;
   }
 
-  const modelRow = (modelId, name, custom, customId) => {
+  const SOURCE_CELL = {
+    builtin: `<span class="hint">Built-in</span>`,
+    custom: `<span class="pill">Custom</span>`,
+    imported: `<span class="pill">Imported</span>`,
+  };
+
+  const modelRow = (modelId, name, source, customId, isFree = false) => {
+    const custom = source === "custom";
     const disabled = isModelDisabled(p.id, modelId);
     const toggleAction = disabled ? "enable" : "disable";
     return `
         <tr${disabled ? ` class="muted"` : ""}>
           <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code></td>
-          <td>${escapeHtml(name || modelId)}</td>
-          <td>${custom ? `<span class="pill">Custom</span>` : `<span class="hint">Built-in</span>`}</td>
+          <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Free</span>` : ""}</td>
+          <td>${SOURCE_CELL[source]}</td>
           <td>${disabled ? `<span class="pill">Disabled</span>` : `<span class="pill pill-success">Enabled</span>`}</td>
           <td class="actions">
             <form action="/dashboard/providers/models/${toggleAction}" method="POST">
@@ -192,15 +239,50 @@ export function renderProviderDetailPage(port, idOrAlias) {
   };
 
   const builtInIds = new Set(p.models.map((m) => m.id));
-  const customModels = listCustomModels().filter((m) => m.provider === p.id && !builtInIds.has(m.model_id));
+  const importedModels = listImportedModels(p.id).filter((m) => !builtInIds.has(m.model_id));
+  const importedIds = new Set(importedModels.map((m) => m.model_id));
+  const customModels = listCustomModels().filter(
+    (m) => m.provider === p.id && !builtInIds.has(m.model_id) && !importedIds.has(m.model_id)
+  );
   const modelRows = [
-    ...p.models.map((m) => modelRow(m.id, m.name, false)),
-    ...customModels.map((m) => modelRow(m.model_id, m.name, true, m.id)),
+    ...p.models.map((m) => modelRow(m.id, m.name, "builtin")),
+    ...importedModels.map((m) => modelRow(m.model_id, m.name, "imported", null, m.is_free === 1)),
+    ...customModels.map((m) => modelRow(m.model_id, m.name, "custom", m.id)),
   ].join("");
-  const totalModels = p.models.length + customModels.length;
+  const totalModels = p.models.length + importedModels.length + customModels.length;
+
+  const importModes = importer?.modes || [];
+  const importModal = importer
+    ? `
+    <div class="modal-backdrop" id="import-models-modal">
+      <div class="modal">
+        <h3>Import Models</h3>
+        <form action="/dashboard/providers/models/import" method="POST">
+          <input type="hidden" name="provider" value="${id}" />
+          ${importModes
+            .map(
+              (mode, i) => `
+          <label class="radio-row">
+            <input type="radio" name="mode" value="${mode}"${i === 0 ? " checked" : ""} />
+            <span>${IMPORT_MODE_LABELS[mode]}</span>
+          </label>`
+            )
+            .join("")}
+          <p class="hint" style="margin-top: 0.75rem;">Daftar model diambil langsung dari provider. Import ulang akan mengganti hasil import sebelumnya. Model built-in dan custom tidak tersentuh.${
+            p.id === "opencode" ? " Model berbayar OpenCode Zen butuh API key, jadi hanya model gratis yang bisa di-import di sini." : ""
+          }</p>
+          <div class="modal-actions">
+            <button type="button" class="btn" data-close-modal="import-models-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Import</button>
+          </div>
+        </form>
+      </div>
+    </div>`
+    : "";
 
   const content = `
     <p class="crumb"><a href="/dashboard/providers">Providers</a> / ${escapeHtml(p.name)}</p>
+    ${notice ? `<div class="notice ${notice.ok ? "notice-ok" : "notice-error"}">${escapeHtml(notice.text)}</div>` : ""}
 
     <div class="card">
       <div class="provider-card-head">
@@ -224,7 +306,18 @@ export function renderProviderDetailPage(port, idOrAlias) {
     <div class="card">
       <div class="card-head">
         <h3>Models (${totalModels})</h3>
-        <button class="btn btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
+        <div class="btn-row">
+          ${
+            importedModels.length > 0
+              ? `<form action="/dashboard/providers/models/import/clear" method="POST">
+            <input type="hidden" name="provider" value="${id}" />
+            <button type="submit" class="btn btn-danger btn-sm">Clear Imported</button>
+          </form>`
+              : ""
+          }
+          ${importer ? `<button class="btn btn-sm" onclick="openModal('import-models-modal')">Import Models</button>` : ""}
+          <button class="btn btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
+        </div>
       </div>
       <table>
         <thead><tr><th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
@@ -263,6 +356,8 @@ export function renderProviderDetailPage(port, idOrAlias) {
         </form>
       </div>
     </div>
+
+    ${importModal}
 
     <div class="modal-backdrop" id="add-model-modal">
       <div class="modal">
@@ -333,6 +428,26 @@ export async function handleDeleteCustomModel(c) {
   const id = Number(body.id);
   if (id) deleteCustomModel(id);
   return c.redirect(backTo(body.provider));
+}
+
+export async function handleImportModels(c) {
+  const body = await c.req.parseBody();
+  const provider = getProvider(String(body.provider || ""));
+  if (!provider) return c.redirect("/dashboard/providers");
+
+  const mode = body.mode === "free" ? "free" : "all";
+  const result = await importProviderModels(provider.id, mode);
+  const params = new URLSearchParams({ import: result.code, count: String(result.count) });
+  if (result.status) params.set("status", String(result.status));
+  return c.redirect(`${providerUrl(provider.id)}?${params}`);
+}
+
+export async function handleClearImported(c) {
+  const body = await c.req.parseBody();
+  const provider = getProvider(String(body.provider || ""));
+  if (!provider) return c.redirect("/dashboard/providers");
+  clearImportedModels(provider.id);
+  return c.redirect(`${providerUrl(provider.id)}?import=cleared`);
 }
 
 export async function handleDisableModel(c) {

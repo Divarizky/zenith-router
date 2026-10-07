@@ -6,7 +6,7 @@ import {
 import { getProvider } from "../providers/index.js";
 import { isConnectionExhausted } from "./quota.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
-import { needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
+import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 
 export function listAvailableConnections(providerId) {
   if (!providerId) return [];
@@ -142,11 +142,7 @@ export async function executeWithFallback({
     }
 
     // Auth failure: refresh once on this account, then decide
-    if (
-      (res.status === 401 || res.status === 403) &&
-      connection.auth_type === "oauth" &&
-      connection.credentials?.refresh_token
-    ) {
+    if ((res.status === 401 || res.status === 403) && canRefresh(connection)) {
       try {
         const refreshed = await refreshOAuthToken(connection);
         if (!refreshed) {

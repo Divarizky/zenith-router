@@ -203,9 +203,37 @@ test("security - applyConnectionAuth follows the connection auth type", () => {
     applyConnectionAuth({}, { provider: "claude", auth_type: "apikey", credentials: { api_key: "sk-ant" } }),
     { "x-api-key": "sk-ant" }
   );
+  const claudeBundle = applyConnectionAuth(
+    {},
+    { provider: "claude", auth_type: "oauth", credentials: { access_token: "tok" } }
+  );
+  assert.strictEqual(claudeBundle.Authorization, "Bearer tok");
+  assert.ok(claudeBundle["anthropic-beta"].includes("oauth-2025-04-20"));
+  assert.ok(claudeBundle["anthropic-beta"].includes("claude-code-20250219"));
+  assert.strictEqual(claudeBundle["X-App"], "cli");
+  assert.ok(claudeBundle["User-Agent"].startsWith("claude-cli/"));
+  // Client beta flags are kept and merged with the Claude Code bundle.
   assert.deepStrictEqual(
-    applyConnectionAuth({}, { provider: "claude", auth_type: "oauth", credentials: { access_token: "tok" } }),
-    { Authorization: "Bearer tok" }
+    applyConnectionAuth(
+      { "anthropic-beta": "tools-2024" },
+      { provider: "claude", auth_type: "oauth", credentials: { access_token: "tok" } }
+    ),
+    {
+      Authorization: "Bearer tok",
+      "anthropic-beta":
+        "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28,tools-2024",
+      "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+      "X-App": "cli",
+      "Anthropic-Dangerous-Direct-Browser-Access": "true",
+    }
+  );
+  assert.deepStrictEqual(
+    applyConnectionAuth({}, { provider: "cline", auth_type: "oauth", credentials: { access_token: "eyJhbGc.eyJzdWIi.sig" } }),
+    { Authorization: "Bearer workos:eyJhbGc.eyJzdWIi.sig" }
+  );
+  assert.deepStrictEqual(
+    applyConnectionAuth({}, { provider: "kilocode", auth_type: "oauth", credentials: { access_token: "k", org_id: "org1" } }),
+    { Authorization: "Bearer k", "X-Kilocode-OrganizationID": "org1" }
   );
   assert.deepStrictEqual(
     applyConnectionAuth({}, { provider: "glm", auth_type: "apikey", credentials: { api_key: "k" } }),
@@ -214,7 +242,7 @@ test("security - applyConnectionAuth follows the connection auth type", () => {
   assert.deepStrictEqual(applyConnectionAuth({}, { provider: "opencode", auth_type: "noauth", credentials: {} }), {});
 });
 
-test("security - dashboard connection form validates provider, proxy, and auth type", async () => {
+test("security - dashboard connection form validates provider, proxy, and derives auth type", async () => {
   initDb(":memory:");
   const submit = (fields) => {
     const fd = new FormData();
@@ -226,9 +254,18 @@ test("security - dashboard connection form validates provider, proxy, and auth t
   await submit({ provider: "glm", name: "Bad proxy", api_key: "k", proxy_url: "javascript:alert(1)" });
   assert.strictEqual(getConnections().length, 0);
 
-  await submit({ provider: "claude", name: "Key", auth_type: "apikey", api_key: "sk-ant" });
-  await submit({ provider: "claude", name: "Token", auth_type: "oauth", api_key: "tok" });
-  const [apiKeyConn, oauthConn] = getConnections();
-  assert.deepStrictEqual(apiKeyConn.credentials, { api_key: "sk-ant" });
-  assert.deepStrictEqual(oauthConn.credentials, { access_token: "tok" });
+  // auth_type comes from the provider and token shape, never from the form.
+  await submit({ provider: "claude", name: "Key", auth_type: "oauth", api_key: "sk-ant-api03-x" });
+  await submit({ provider: "claude", name: "Token", auth_type: "apikey", api_key: "sk-ant-oat01-x", refresh_token: "r" });
+  await submit({ provider: "github", name: "GH", api_key: "gho_abc" });
+  await submit({ provider: "openrouter", name: "OR", api_key: "sk-or-1" });
+  const [apiKeyConn, oauthConn, ghConn, orConn] = getConnections();
+  assert.strictEqual(apiKeyConn.auth_type, "apikey");
+  assert.deepStrictEqual(apiKeyConn.credentials, { api_key: "sk-ant-api03-x" });
+  assert.strictEqual(oauthConn.auth_type, "oauth");
+  assert.deepStrictEqual(oauthConn.credentials, { access_token: "sk-ant-oat01-x", refresh_token: "r" });
+  assert.strictEqual(ghConn.auth_type, "oauth");
+  assert.deepStrictEqual(ghConn.credentials, { github_token: "gho_abc", access_token: "", expires_at: 1 });
+  assert.strictEqual(orConn.auth_type, "apikey");
+  assert.deepStrictEqual(orConn.credentials, { api_key: "sk-or-1" });
 });

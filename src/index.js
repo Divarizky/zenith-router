@@ -22,6 +22,14 @@ import {
   handleDeleteImported,
   handleSyncFreeModels,
 } from "./ui/pages/providers.js";
+import {
+  handleOAuthStart,
+  handleOAuthPoll,
+  handleOAuthManual,
+  handleOAuthCancel,
+  handleOAuthCallback,
+  handleImportLocalLogin,
+} from "./ui/pages/oauth.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
 import { renderTokenSaverPage, handleSaveTokenSaver } from "./ui/pages/tokenSaver.js";
 import {
@@ -68,6 +76,14 @@ app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
 app.get("/dashboard/providers", (c) => c.html(renderProvidersPage(PORT)));
 app.post("/dashboard/providers/accounts/add", handleAddAccount);
 app.post("/dashboard/providers/accounts/delete", handleDeleteAccount);
+app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
+
+// OAuth login flows (9router-style): browser redirect to /callback, or device code polling
+app.post("/dashboard/oauth/start", handleOAuthStart);
+app.post("/dashboard/oauth/poll", handleOAuthPoll);
+app.post("/dashboard/oauth/manual", handleOAuthManual);
+app.post("/dashboard/oauth/cancel", handleOAuthCancel);
+app.get("/callback", handleOAuthCallback);
 app.post("/dashboard/providers/models/custom/add", handleAddCustomModel);
 app.post("/dashboard/providers/models/custom/delete", handleDeleteCustomModel);
 app.post("/dashboard/providers/models/disable", handleDisableModel);

@@ -18,6 +18,8 @@ import {
 } from "../../services/modelOverrides.js";
 import { getImportModes, importProviderModels } from "../../services/modelImport.js";
 import { syncFreeModels, getSyncIntervalMs } from "../../services/modelSync.js";
+import { getOAuthFlow } from "../../services/oauth/providers.js";
+import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
@@ -51,6 +53,9 @@ const IMPORT_MODE_LABELS = {
 function importNotice(query = {}) {
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
   if (query.notice === "account_deleted") return { ok: true, text: "Akun berhasil dihapus." };
+  if (query.notice === "import_failed") {
+    return { ok: false, text: "Import gagal: login tidak ditemukan di aplikasi lokal. Login dulu di CLI/IDE provider ini." };
+  }
   if (query.notice === "custom_added") return { ok: true, text: "Custom model berhasil ditambahkan." };
   if (query.notice === "custom_deleted") return { ok: true, text: "Custom model berhasil dihapus." };
   if (query.notice === "model_disabled") {
@@ -228,6 +233,200 @@ export function renderProvidersPage(port = 20120) {
   }).join("");
 
   return renderLayout({ title: "Providers", activeTab: "providers", content: sections, port });
+}
+
+const LOGIN_LABELS = {
+  claude: "Login dengan Claude",
+  codex: "Login dengan ChatGPT",
+  antigravity: "Login dengan Google",
+  cline: "Login dengan Cline",
+  github: "Login dengan GitHub",
+  kilocode: "Login dengan Kilo",
+  kiro: "Login dengan AWS Builder ID",
+  glm: "Login dengan Z.ai",
+};
+
+const LOCAL_IMPORT = {
+  kiro: { label: "Import dari Kiro IDE", hint: "Memakai login Kiro IDE (Google/GitHub/Builder ID) dari ~/.aws/sso/cache." },
+  freebuff: {
+    label: "Import dari Freebuff CLI",
+    hint: "Memakai login CLI dari ~/.config/manicode/credentials.json. Belum login? Jalankan npm i -g freebuff, lalu freebuff.",
+  },
+};
+
+// What the manual-paste field holds, for providers whose login normally produces it.
+const MANUAL_TOKEN_LABELS = {
+  claude: "OAuth Token atau API Key (sk-ant-api...)",
+  glm: "API Key (Coding Plan)",
+  github: "GitHub Token (gho_/ghu_)",
+  freebuff: "Auth Token",
+};
+
+const REFRESHABLE = new Set(["claude", "codex", "antigravity", "cline", "kiro"]);
+
+/** Accounts for these providers come from a login, so they are stored as oauth. */
+function usesLogin(p) {
+  return Boolean(getOAuthFlow(p.id) || hasLocalImport(p.id) || p.category === "oauth");
+}
+
+/** Inline script for the login buttons: start a flow, open the provider page, poll until saved. */
+const OAUTH_SCRIPT = `
+<script>
+(function () {
+  var flowId = null, timer = null, pollMs = 2000;
+  var statusEl = document.getElementById('oauth-status');
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); }
+  function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+  function show(html, isError) { statusEl.hidden = false; statusEl.className = 'oauth-status' + (isError ? ' error' : ''); statusEl.innerHTML = html; }
+  function post(url, data) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.error) j.error = 'HTTP ' + r.status; return j; }); });
+  }
+  function done() { location.href = location.pathname + '?notice=account_added'; }
+  function schedule() { clearTimeout(timer); timer = setTimeout(tick, pollMs); }
+  function tick() {
+    if (!flowId) return;
+    post('/dashboard/oauth/poll', { flowId: flowId }).then(function (r) {
+      if (r.status === 'done') return done();
+      if (r.status === 'error') { flowId = null; return show('Login gagal: ' + esc(r.error), true); }
+      schedule();
+    }).catch(schedule);
+  }
+  window.zrCopyAccount = function (form) { form.name.value = val('acct-name'); form.proxy_url.value = val('acct-proxy'); return true; };
+  window.zrOAuthStart = function (provider) {
+    window.zrOAuthCancel();
+    // Open the tab inside the click so popup blockers allow it, then point it at the login page.
+    var popup = window.open('about:blank', '_blank');
+    show('Memulai login...');
+    post('/dashboard/oauth/start', { provider: provider, name: val('acct-name'), proxy_url: val('acct-proxy') }).then(function (r) {
+      if (r.error) { if (popup) popup.close(); return show(esc(r.error), true); }
+      flowId = r.flowId;
+      var url = r.flowType === 'device_code' ? r.verificationUri : r.authUrl;
+      if (popup) { popup.opener = null; popup.location.href = url; }
+      var link = '<a href="' + esc(url) + '" target="_blank" rel="noopener">Buka halaman login</a>';
+      if (r.flowType === 'device_code') {
+        pollMs = Math.max(2, r.interval || 5) * 1000;
+        show((r.userCode ? '<p>Masukkan kode ini di halaman login:</p><div class="device-code">' + esc(r.userCode) + '</div>' : '<p>Selesaikan login di tab yang terbuka.</p>') +
+          '<p>' + link + '</p><p class="hint">Menunggu persetujuan...</p>');
+      } else {
+        pollMs = 2000;
+        show('<p>Selesaikan login di tab yang terbuka. ' + link + '</p>' +
+          (r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
+            : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke zenroute, tempel URL callback atau kode di bawah.</p>') +
+          '<div class="field"><input id="oauth-manual" placeholder="http://localhost:.../callback?code=... atau code#state" autocomplete="off" /></div>' +
+          '<button type="button" class="btn btn-sm" onclick="zrOAuthManual()">Submit</button>' +
+          '<p id="oauth-manual-error" class="hint" style="color: var(--danger); margin-top: 0.5rem;"></p>');
+      }
+      schedule();
+    }).catch(function (e) { if (popup) popup.close(); show('Gagal memulai login: ' + esc(e.message), true); });
+  };
+  window.zrOAuthManual = function () {
+    if (!flowId) return;
+    post('/dashboard/oauth/manual', { flowId: flowId, input: val('oauth-manual') }).then(function (r) {
+      if (r.status === 'done') return done();
+      document.getElementById('oauth-manual-error').textContent = r.error || 'Gagal.';
+    });
+  };
+  window.zrOAuthCancel = function () {
+    if (flowId) post('/dashboard/oauth/cancel', { flowId: flowId });
+    flowId = null;
+    clearTimeout(timer);
+    statusEl.hidden = true;
+  };
+})();
+</script>`;
+
+function renderAddAccountModal(p) {
+  const id = escapeHtml(p.id);
+  const title = `<h3>Add ${escapeHtml(p.name)} Account</h3>`;
+
+  if (!usesLogin(p)) {
+    return `
+    <div class="modal-backdrop" id="add-account-modal">
+      <div class="modal">
+        ${title}
+        <form action="/dashboard/providers/accounts/add" method="POST">
+          <input type="hidden" name="provider" value="${id}" />
+          <div class="field">
+            <label for="name">Account Label</label>
+            <input type="text" id="name" name="name" placeholder="e.g. Akun utama" required />
+          </div>
+          <div class="field">
+            <label for="api_key">API Key</label>
+            <input type="password" id="api_key" name="api_key" placeholder="Paste API key..." required />
+          </div>
+          <div class="field">
+            <label for="proxy_url">Proxy URL (Optional)</label>
+            <input type="text" id="proxy_url" name="proxy_url" placeholder="http://127.0.0.1:7890" />
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn" data-close-modal="add-account-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Add Account</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  }
+
+  const login = getOAuthFlow(p.id)
+    ? `<button type="button" class="btn btn-primary" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Login")}</button>`
+    : "";
+  const local = LOCAL_IMPORT[p.id];
+  const importForm = local
+    ? `<form action="/dashboard/providers/accounts/import-local" method="POST" onsubmit="return zrCopyAccount(this)">
+            <input type="hidden" name="provider" value="${id}" />
+            <input type="hidden" name="name" />
+            <input type="hidden" name="proxy_url" />
+            <button type="submit" class="btn">${escapeHtml(local.label)}</button>
+          </form>
+          <p class="hint">${escapeHtml(local.hint)}</p>`
+    : "";
+  const tokenLabel = MANUAL_TOKEN_LABELS[p.id] || "Access Token";
+
+  return `
+    <div class="modal-backdrop" id="add-account-modal">
+      <div class="modal">
+        ${title}
+        <div class="field">
+          <label for="acct-name">Account Label (Optional)</label>
+          <input type="text" id="acct-name" placeholder="Default: email akun" />
+        </div>
+        <div class="field">
+          <label for="acct-proxy">Proxy URL (Optional)</label>
+          <input type="text" id="acct-proxy" placeholder="http://127.0.0.1:7890" />
+        </div>
+        <div class="oauth-actions">
+          ${login}
+          ${importForm}
+        </div>
+        <div id="oauth-status" class="oauth-status" hidden></div>
+        <details class="manual">
+          <summary>Tempel token manual</summary>
+          <form action="/dashboard/providers/accounts/add" method="POST" onsubmit="return zrCopyAccount(this)">
+            <input type="hidden" name="provider" value="${id}" />
+            <input type="hidden" name="name" />
+            <input type="hidden" name="proxy_url" />
+            <div class="field">
+              <label for="api_key">${escapeHtml(tokenLabel)}</label>
+              <input type="password" id="api_key" name="api_key" placeholder="Paste token..." required />
+            </div>
+            ${
+              REFRESHABLE.has(p.id)
+                ? `<div class="field">
+              <label for="refresh_token">Refresh Token (Optional)</label>
+              <input type="password" id="refresh_token" name="refresh_token" placeholder="Agar token diperpanjang otomatis" />
+            </div>`
+                : ""
+            }
+            <button type="submit" class="btn btn-sm">Save Token</button>
+          </form>
+        </details>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel()">Close</button>
+        </div>
+      </div>
+    </div>
+    ${OAUTH_SCRIPT}`;
 }
 
 /**
@@ -441,37 +640,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       </table>
     </div>
 
-    <div class="modal-backdrop" id="add-account-modal">
-      <div class="modal">
-        <h3>Add ${escapeHtml(p.name)} Account</h3>
-        <form action="/dashboard/providers/accounts/add" method="POST">
-          <input type="hidden" name="provider" value="${id}" />
-          <div class="field">
-            <label for="name">Account Label</label>
-            <input type="text" id="name" name="name" placeholder="e.g. Akun utama" required />
-          </div>
-          <div class="field">
-            <label for="auth_type">Auth Type</label>
-            <select id="auth_type" name="auth_type">
-              <option value="apikey"${p.category === "oauth" ? "" : " selected"}>API Key</option>
-              <option value="oauth"${p.category === "oauth" ? " selected" : ""}>OAuth Token</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="api_key">API Key or Token</label>
-            <input type="password" id="api_key" name="api_key" placeholder="Paste credential secret..." required />
-          </div>
-          <div class="field">
-            <label for="proxy_url">Proxy URL (Optional)</label>
-            <input type="text" id="proxy_url" name="proxy_url" placeholder="http://127.0.0.1:7890" />
-          </div>
-          <div class="modal-actions">
-            <button type="button" class="btn" data-close-modal="add-account-modal">Cancel</button>
-            <button type="submit" class="btn btn-primary">Add Account</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    ${p.noAuth ? "" : renderAddAccountModal(p)}
 
     ${importModal}
 
@@ -501,21 +670,32 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   return renderLayout({ title: p.name, activeTab: "providers", content, port });
 }
 
+/** Manual paste: an API key, or a token the provider's login would normally produce. */
 export async function handleAddAccount(c) {
   const body = await c.req.parseBody();
   const provider = getProvider(String(body.provider || "").trim());
   const name = String(body.name || "").trim() || `${provider?.name || "Provider"} Account`;
-  const auth_type = body.auth_type === "oauth" ? "oauth" : "apikey";
   const secret = String(body.api_key || "").trim();
+  const refreshToken = String(body.refresh_token || "").trim();
   const proxy_url = body.proxy_url ? String(body.proxy_url).trim() : "";
   const proxyValid = !proxy_url || /^https?:\/\/[^\s]+$/i.test(proxy_url);
 
   if (provider && !provider.noAuth && secret && proxyValid) {
+    // Anthropic console keys are plain API keys (x-api-key), not OAuth tokens.
+    const oauth = usesLogin(provider) && !(provider.id === "claude" && secret.startsWith("sk-ant-api"));
+    let credentials = { api_key: secret };
+    if (oauth && provider.id === "github" && /^gh[oup]_/.test(secret)) {
+      // A GitHub token only mints Copilot tokens; expiry 1 makes the gateway mint one before the first request.
+      credentials = { github_token: secret, access_token: "", expires_at: 1 };
+    } else if (oauth) {
+      credentials = { access_token: secret };
+      if (refreshToken && REFRESHABLE.has(provider.id)) credentials.refresh_token = refreshToken;
+    }
     addConnection({
       provider: provider.id,
       name,
-      auth_type,
-      credentials: auth_type === "oauth" ? { access_token: secret } : { api_key: secret },
+      auth_type: oauth ? "oauth" : "apikey",
+      credentials,
       proxy_url: proxy_url || null,
     });
     return c.redirect(`${backTo(body.provider)}?notice=account_added`);

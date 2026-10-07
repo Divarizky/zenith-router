@@ -73,7 +73,14 @@ export async function hostGuard(c, next) {
 }
 
 function isControlPlanePath(path) {
-  return path === "/" || path === "/dashboard" || path.startsWith("/dashboard/") || path.startsWith("/api/");
+  // /callback receives OAuth codes, so it is as local-only as the dashboard.
+  return (
+    path === "/" ||
+    path === "/dashboard" ||
+    path === "/callback" ||
+    path.startsWith("/dashboard/") ||
+    path.startsWith("/api/")
+  );
 }
 
 /**

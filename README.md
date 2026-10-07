@@ -25,8 +25,10 @@ Sudah berfungsi:
 - API key gateway (`zr_...`) yang disimpan sebagai hash, akses dashboard hanya dari localhost, proteksi CSRF, DNS rebinding, dan header `Cache-Control: no-store` untuk mencegah stale state.
 - Usage tracking untuk streaming (`stream_options.include_usage` + fallback estimasi) dan non-streaming, status kuota, RTK, Caveman (opt-in), dan halaman terpisah **Token Saver**.
 
+- **Login akun OAuth ala 9router**: Claude, Codex (ChatGPT), Antigravity (Google), dan Cline login lewat browser dengan callback ke zenroute. GitHub Copilot, Kilo Code, Kiro (AWS Builder ID), dan GLM (Z.ai) memakai device code. Kiro dan Freebuff juga bisa import login dari Kiro IDE atau Freebuff CLI di mesin yang sama. Tempel token manual tetap tersedia sebagai cadangan. Token diperpanjang otomatis sesuai cara tiap provider.
+
 Belum berfungsi:
-- Alur login OAuth interaktif di browser (device code login UI / social login web popup).
+- Routing chat untuk Codex (format Responses API), Antigravity (format Cloud Code), dan Kiro (eventstream AWS). Login akunnya sudah bisa, tapi translator request/response untuk ketiga format itu belum ada.
 - Live quota fetcher per vendor pihak ketiga (saat ini masih mock).
 
 ## Instalasi & Menjalankan
@@ -55,7 +57,9 @@ Saat dijalankan di terminal interaktif (TTY), zenroute menampilkan banner status
 
 ## Langkah Pemakaian
 
-1. Buka **Providers** (`http://127.0.0.1:20120/dashboard/providers`), pilih provider lalu tambahkan akun (misalnya API key GLM atau token Claude/Codex). Provider bertanda **Ready** (seperti OpenCode Free) bisa langsung dipakai tanpa akun.
+1. Buka **Providers** (`http://127.0.0.1:20120/dashboard/providers`), pilih provider, lalu klik **Add Account**. Provider OAuth punya tombol login: selesaikan login di tab yang terbuka atau masukkan kode device yang tampil, dan akun tersimpan otomatis. Provider API key cukup diisi key-nya. Provider bertanda **Ready** (seperti OpenCode Free) bisa langsung dipakai tanpa akun.
+
+   Login Codex memakai `http://localhost:1455/auth/callback` (redirect resmi Codex CLI), jadi port 1455 harus kosong selama login. Login lain kembali ke `http://localhost:20120/callback`. Kalau browser tidak kembali otomatis, tempel URL callback di modal.
 2. Buka **API Keys**, buat key gateway untuk tiap coding agent/klien. Key lengkap hanya ditampilkan sekali saat dibuat.
 3. Opsional: aktifkan **Require API Key** di **Settings**, atau atur optimasi prompt di **Token Saver**.
 4. Kirim request dengan model berprefix provider:
@@ -114,7 +118,8 @@ zenroute/
 │   ├── executors/        # base.js (header & idle timeout), proxy.js, freebuff.js
 │   ├── config/           # freeTierCatalog.js
 │   ├── services/         # apiKeys, auth, tokenRefresh, usage, quota, modelOverrides,
-│   │                     # modelImport, modelSync, tokenSaver, rtk, caveman, settings
+│   │                     # modelImport, modelSync, tokenSaver, rtk, caveman, settings,
+│   │                     # oauth/ (alur login per provider + session login)
 │   └── ui/               # layout.js, cliMenu.js, html.js, pages/ (overview, providers, usage, keys, etc.)
 ├── tests/                # Test suite lengkap (129 tests)
 └── package.json

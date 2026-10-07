@@ -96,7 +96,9 @@ test("claude import - OAuth token gets the oauth beta header and only claude-* i
 
   assert.deepStrictEqual(await importProviderModels("claude", "all"), { code: "imported", count: 1 });
   assert.strictEqual(calls[0].headers.Authorization, "Bearer tok");
-  assert.strictEqual(calls[0].headers["anthropic-beta"], "oauth-2025-04-20");
+  assert.ok(calls[0].headers["anthropic-beta"].includes("oauth-2025-04-20"));
+  assert.ok(calls[0].headers["anthropic-beta"].includes("claude-code-20250219"));
+  assert.strictEqual(calls[0].headers["X-App"], "cli");
   assert.strictEqual(calls[0].headers["anthropic-version"], "2023-06-01");
   assert.strictEqual(listImportedModels("claude")[0].name, "Claude New");
   assert.strictEqual((await importProviderModels("claude", "free")).code, "unsupported");

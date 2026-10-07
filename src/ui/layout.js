@@ -147,6 +147,16 @@ tr.muted td { color: var(--text-subtle); }
 .btn-row { display: flex; gap: 0.4rem; align-items: center; }
 .radio-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; cursor: pointer; font-size: 0.88rem; }
 .radio-row input { width: auto; accent-color: var(--text); }
+.oauth-actions { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.9rem; }
+.oauth-actions form .btn, .oauth-actions > .btn { width: 100%; text-align: center; }
+.oauth-actions .hint { margin-top: -0.2rem; }
+.oauth-status { border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; margin-bottom: 0.9rem; font-size: 0.85rem; color: var(--text-muted); }
+.oauth-status p + p { margin-top: 0.4rem; }
+.oauth-status a { color: var(--text); }
+.oauth-status.error { border-color: var(--danger); color: var(--danger); }
+.device-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 1.4rem; letter-spacing: 0.15em; color: var(--text); text-align: center; margin: 0.5rem 0; user-select: all; }
+details.manual { border-top: 1px solid var(--border-subtle); padding-top: 0.75rem; }
+details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.75rem; }
 .notice { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.9rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1.25rem; border: 1px solid var(--border); }
 .notice-ok { color: var(--success); border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.08); }
 .notice-error { color: var(--danger); border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.08); }

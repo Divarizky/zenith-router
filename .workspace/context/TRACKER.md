@@ -23,12 +23,12 @@ features:
     task_count: 3
     task_done: 3
   - id: F-04
-    status: open
+    status: closed
     source: to-requirements
     created: 2026-10-06
     updated: 2026-10-06
     task_count: 3
-    task_done: 2
+    task_done: 3
   - id: F-05
     status: open
     source: to-requirements

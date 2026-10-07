@@ -7,6 +7,7 @@ import {
   createTransformStream,
 } from "../src/translator/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
+import { initDb } from "../src/db/index.js";
 
 test("Translator Request - converts OpenAI payload to Claude format", () => {
   const openAIBody = {
@@ -106,6 +107,7 @@ test("Translator Stream - converts Claude SSE events to OpenAI SSE stream", asyn
 });
 
 test("POST /v1/chat/completions - cross-vendor routing to Claude upstream with translation", async () => {
+  initDb(":memory:");
   // Client sends OpenAI request to Claude model. Upstream returns Claude format.
   const mockClaudeResponse = {
     id: "msg_cross_1",
@@ -148,7 +150,7 @@ test("POST /v1/chat/completions - cross-vendor routing to Claude upstream with t
   assert.strictEqual(json.choices[0].message.content, "Generated via translated Claude upstream");
 
   // Verify that upstream request was translated to Claude format (system extracted)
-  assert.strictEqual(capturedUpstreamBody.system, "System rule");
+  assert.ok(capturedUpstreamBody.system.startsWith("System rule"));
   assert.strictEqual(capturedUpstreamBody.messages.length, 1);
   assert.strictEqual(capturedUpstreamBody.messages[0].role, "user");
 

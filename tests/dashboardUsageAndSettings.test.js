@@ -42,6 +42,16 @@ test("GET /dashboard/settings - renders Settings page with form", async () => {
   const html = await res.text();
   assert.ok(html.includes("Settings"));
   assert.ok(html.includes("require_api_key"));
+});
+
+test("GET /dashboard/token-saver - renders Token Saver page with toggles", async () => {
+  initDb(":memory:");
+
+  const res = await app.request("/dashboard/token-saver");
+  assert.strictEqual(res.status, 200);
+
+  const html = await res.text();
+  assert.ok(html.includes("Token Saver"));
   assert.ok(html.includes("token_saver_rtk"));
   assert.ok(html.includes("token_saver_caveman"));
 });
@@ -51,8 +61,6 @@ test("POST /dashboard/settings - updates settings in SQLite and redirects", asyn
 
   const formData = new FormData();
   formData.append("require_api_key", "true");
-  formData.append("token_saver_rtk", "true");
-  formData.append("token_saver_caveman", "false");
   formData.append("default_fallback_model", "codex/gpt-4o");
 
   const res = await app.request("/dashboard/settings", {
@@ -65,6 +73,22 @@ test("POST /dashboard/settings - updates settings in SQLite and redirects", asyn
 
   // Verify in SQLite
   assert.strictEqual(getSetting("require_api_key"), "true");
-  assert.strictEqual(getSetting("token_saver_caveman"), "false");
   assert.strictEqual(getSetting("default_fallback_model"), "codex/gpt-4o");
+});
+
+test("POST /dashboard/token-saver - updates token saver settings and redirects", async () => {
+  initDb(":memory:");
+
+  const formData = new FormData();
+  formData.append("token_saver_rtk", "true");
+  formData.append("token_saver_caveman", "false");
+
+  const res = await app.request("/dashboard/token-saver", {
+    method: "POST",
+    body: formData,
+  });
+
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(res.headers.get("location"), "/dashboard/token-saver");
+  assert.strictEqual(getSetting("token_saver_caveman"), "false");
 });

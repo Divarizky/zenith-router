@@ -38,8 +38,8 @@ export function renderApiKeysPage(port = 20120, newKey = null) {
   const activeCount = keys.filter((k) => k.is_active === 1).length;
 
   const policy = required
-    ? `<span class="badge badge-success">Required</span>`
-    : `<span class="badge badge-warning">Not required</span>`;
+    ? `<span class="pill pill-success">Required</span>`
+    : `<span class="pill pill-warning">Not required</span>`;
 
   const lockoutWarning =
     required && activeCount === 0
@@ -51,7 +51,7 @@ export function renderApiKeysPage(port = 20120, newKey = null) {
 
     <div class="card" style="margin-bottom: 1.5rem;">
       <h3>Gateway Access Policy</h3>
-      <p style="font-size: 0.9rem; margin-top: 0.5rem;">API key on /v1: ${policy}</p>
+      <p class="hint">API key on /v1: ${policy}</p>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
         Toggle in Settings. Always required when zenroute binds to a non-loopback address.
         These keys only unlock zenroute; provider credentials stay in Connections and are never taken from clients.
@@ -60,21 +60,33 @@ export function renderApiKeysPage(port = 20120, newKey = null) {
     </div>
 
     <div class="card" style="margin-bottom: 1.5rem;">
-      <h3 style="margin-bottom: 1rem;">Create API Key</h3>
-      <form action="/dashboard/keys/create" method="POST" style="display: flex; gap: 0.75rem; align-items: flex-end;">
-        <div class="form-group" style="flex: 1; margin-bottom: 0;">
-          <label for="name">Label</label>
-          <input type="text" id="name" name="name" placeholder="e.g. Claude Code laptop" maxlength="80" required />
-        </div>
-        <button type="submit" class="btn">Create</button>
-      </form>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin-bottom: 0;">Keys (${keys.length})</h3>
+        <button class="btn btn-primary" onclick="openModal('create-key-modal')">Create API Key</button>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="create-key-modal">
+      <div class="modal">
+        <h3>Create API Key</h3>
+        <form action="/dashboard/keys/create" method="POST">
+          <div class="field">
+            <label for="name">Label</label>
+            <input type="text" id="name" name="name" placeholder="e.g. Claude Code laptop" maxlength="80" required />
+          </div>
+          <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
+            <button type="button" class="btn" data-close-modal="create-key-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <div class="card">
       <h3>Keys (${keys.length})</h3>
       ${
         keys.length === 0
-          ? `<p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem;">No keys yet.</p>`
+          ? `<div class="empty"><p class="big">No keys yet</p><p>Buat key pertama lewat tombol Create API Key.</p></div>`
           : `<table>
         <thead>
           <tr>
@@ -97,20 +109,20 @@ export function renderApiKeysPage(port = 20120, newKey = null) {
               <td>${formatTime(k.last_used_at)}</td>
               <td>${
                 k.is_active === 1
-                  ? `<span class="badge badge-success">Active</span>`
-                  : `<span class="badge badge-danger">Disabled</span>`
+                  ? `<span class="pill pill-success">Active</span>`
+                  : `<span class="pill pill-danger">Disabled</span>`
               }</td>
               <td style="display: flex; gap: 0.4rem;">
                 <form action="/dashboard/keys/toggle" method="POST">
                   <input type="hidden" name="id" value="${escapeHtml(k.id)}" />
                   <input type="hidden" name="active" value="${k.is_active === 1 ? "false" : "true"}" />
-                  <button type="submit" class="btn" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">${
+                  <button type="submit" class="btn btn-sm">${
                     k.is_active === 1 ? "Disable" : "Enable"
                   }</button>
                 </form>
                 <form action="/dashboard/keys/delete" method="POST">
                   <input type="hidden" name="id" value="${escapeHtml(k.id)}" />
-                  <button type="submit" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Delete</button>
+                  <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                 </form>
               </td>
             </tr>`

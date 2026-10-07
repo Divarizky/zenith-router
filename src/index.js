@@ -14,6 +14,7 @@ import {
   handleDeleteConnection,
 } from "./ui/pages/connections.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
+import { renderTokenSaverPage, handleSaveTokenSaver } from "./ui/pages/tokenSaver.js";
 import {
   renderSettingsPage,
   handleSaveSettings,
@@ -58,6 +59,8 @@ app.post("/dashboard/connections/delete", handleDeleteConnection);
 
 // Dashboard Usage & Settings UI & Actions
 app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT)));
+app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT)));
+app.post("/dashboard/token-saver", handleSaveTokenSaver);
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT)));
 app.post("/dashboard/settings", handleSaveSettings);
 

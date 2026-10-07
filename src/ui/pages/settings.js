@@ -1,5 +1,6 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
+import { escapeHtml } from "../html.js";
 
 /**
  * Render Settings Control page
@@ -54,7 +55,7 @@ export function renderSettingsPage(port = 20120) {
 
         <div class="form-group" style="margin-bottom: 1.5rem;">
           <label for="default_fallback_model">Default Routing Fallback Model</label>
-          <input type="text" id="default_fallback_model" name="default_fallback_model" value="${fallbackModel}" placeholder="glm/glm-4-flash" required />
+          <input type="text" id="default_fallback_model" name="default_fallback_model" value="${escapeHtml(fallbackModel)}" placeholder="glm/glm-4-flash" required />
         </div>
 
         <div>

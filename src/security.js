@@ -11,6 +11,15 @@ export function getBindHost() {
   return process.env.HOST || "127.0.0.1";
 }
 
+/**
+ * Base URL that local clients should use. Wildcard binds are reached through 127.0.0.1.
+ */
+export function getLocalBaseUrl(port) {
+  const host = getBindHost();
+  const local = host === "0.0.0.0" || host === "::" || isLoopbackHost(host) ? "127.0.0.1" : host;
+  return `http://${local.includes(":") ? `[${local}]` : local}:${port}`;
+}
+
 export function isLoopbackHost(host) {
   if (!host) return false;
   const h = String(host).toLowerCase();

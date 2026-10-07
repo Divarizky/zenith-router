@@ -1,6 +1,7 @@
 import { getUsageStats } from "../../services/usage.js";
 import { getAllQuotaStatus } from "../../services/quota.js";
 import { renderLayout } from "../layout.js";
+import { escapeHtml } from "../html.js";
 
 /**
  * Render Usage Analytics and Quota page
@@ -51,7 +52,7 @@ export function renderUsagePage(port = 20120) {
             .map(
               (m) => `
             <tr>
-              <td><code>${m.model}</code></td>
+              <td><code>${escapeHtml(m.model)}</code></td>
               <td>${m.count}</td>
               <td><strong>${m.total_tokens.toLocaleString()}</strong></td>
             </tr>`
@@ -81,11 +82,11 @@ export function renderUsagePage(port = 20120) {
             .map(
               (q) => `
             <tr>
-              <td><strong>${q.name}</strong></td>
-              <td><span class="badge">${q.provider}</span></td>
+              <td><strong>${escapeHtml(q.name)}</strong></td>
+              <td><span class="badge">${escapeHtml(q.provider)}</span></td>
               <td>${
                 q.quota?.remaining !== null && q.quota?.remaining !== undefined
-                  ? `${q.quota.remaining.toLocaleString()} ${q.quota.unit || ""}`
+                  ? `${escapeHtml(Number(q.quota.remaining).toLocaleString())} ${escapeHtml(q.quota.unit || "")}`
                   : `<span style="color: var(--text-muted);">Unlimited / Unmetered</span>`
               }</td>
               <td>${

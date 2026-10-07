@@ -7,6 +7,7 @@ import { getAllProviders, getProvider } from "../../providers/index.js";
 import { isConnectionInCooldown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import { renderLayout } from "../layout.js";
+import { escapeHtml } from "../html.js";
 
 /**
  * Render Connections Management page
@@ -24,7 +25,7 @@ export function renderConnectionsPage(port = 20120) {
             <label for="provider">Provider</label>
             <select id="provider" name="provider" required>
               ${providers
-                .map((p) => `<option value="${p.id}">${p.name} (${p.id})</option>`)
+                .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} (${escapeHtml(p.id)})</option>`)
                 .join("")}
             </select>
           </div>
@@ -89,15 +90,15 @@ export function renderConnectionsPage(port = 20120) {
 
               return `
             <tr>
-              <td><code>${c.id}</code></td>
-              <td><strong>${c.name}</strong></td>
-              <td><span class="badge">${c.provider}</span></td>
-              <td>${c.auth_type}</td>
-              <td>${c.proxy_url ? `<code>${c.proxy_url}</code>` : `<span style="color: var(--text-muted);">-</span>`}</td>
+              <td><code>${escapeHtml(c.id)}</code></td>
+              <td><strong>${escapeHtml(c.name)}</strong></td>
+              <td><span class="badge">${escapeHtml(c.provider)}</span></td>
+              <td>${escapeHtml(c.auth_type)}</td>
+              <td>${c.proxy_url ? `<code>${escapeHtml(c.proxy_url)}</code>` : `<span style="color: var(--text-muted);">-</span>`}</td>
               <td>${statusBadge}</td>
               <td>
                 <form action="/dashboard/connections/delete" method="POST" style="display:inline;">
-                  <input type="hidden" name="id" value="${c.id}" />
+                  <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
                   <button type="submit" class="btn btn-danger" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Delete</button>
                 </form>
               </td>

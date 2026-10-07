@@ -1,3 +1,5 @@
+import { escapeHtml } from "./html.js";
+
 /**
  * Base HTML Layout for zenroute Minimal Dashboard
  */
@@ -6,6 +8,7 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
     { id: "overview", label: "Overview", href: "/dashboard" },
     { id: "connections", label: "Connections", href: "/dashboard/connections" },
     { id: "usage", label: "Usage", href: "/dashboard/usage" },
+    { id: "keys", label: "API Keys", href: "/dashboard/keys" },
     { id: "settings", label: "Settings", href: "/dashboard/settings" },
   ];
 
@@ -23,7 +26,7 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} &middot; zenroute</title>
+  <title>${escapeHtml(title)} &middot; zenroute</title>
   <style>
     :root {
       --bg: #090d16;
@@ -193,7 +196,7 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
     <header>
       <div class="brand">
         <h1>zenroute</h1>
-        <span class="badge">Port ${port}</span>
+        <span class="badge">Port ${escapeHtml(port)}</span>
       </div>
       <div>
         <span class="badge badge-success">Online &middot; Ready</span>

@@ -18,6 +18,12 @@ import {
   handleSaveSettings,
 } from "./ui/pages/settings.js";
 import {
+  renderApiKeysPage,
+  handleCreateApiKey,
+  handleToggleApiKey,
+  handleDeleteApiKey,
+} from "./ui/pages/apiKeys.js";
+import {
   getBindHost,
   isLoopbackHost,
   hostGuard,
@@ -53,6 +59,12 @@ app.post("/dashboard/connections/delete", handleDeleteConnection);
 app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT)));
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT)));
 app.post("/dashboard/settings", handleSaveSettings);
+
+// Dashboard API Keys UI & Actions
+app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT)));
+app.post("/dashboard/keys/create", (c) => handleCreateApiKey(c, PORT));
+app.post("/dashboard/keys/toggle", handleToggleApiKey);
+app.post("/dashboard/keys/delete", handleDeleteApiKey);
 
 // Models Discovery
 app.get("/v1/models", handleListModels);

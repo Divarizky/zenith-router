@@ -4,6 +4,8 @@ import { isConnectionExhausted } from "../../services/quota.js";
 import { getUsageStats } from "../../services/usage.js";
 import { getAvailableModels } from "../../providers/index.js";
 import { renderLayout } from "../layout.js";
+import { escapeHtml } from "../html.js";
+import { getLocalBaseUrl } from "../../security.js";
 
 /**
  * Render Overview Dashboard page
@@ -16,6 +18,7 @@ export function renderOverviewPage(port = 20120) {
 
   const usageToday = getUsageStats({ days: 1 });
   const models = getAvailableModels();
+  const baseUrl = escapeHtml(getLocalBaseUrl(port));
 
   const content = `
     <div class="grid">
@@ -44,9 +47,9 @@ export function renderOverviewPage(port = 20120) {
     <div class="card" style="margin-bottom: 1.5rem;">
       <h3 style="margin-bottom: 0.75rem;">Client Integration Endpoints</h3>
       <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem;">
-        <div><strong>OpenAI Chat:</strong> <code>http://localhost:${port}/v1/chat/completions</code></div>
-        <div><strong>Claude Messages:</strong> <code>http://localhost:${port}/v1/messages</code></div>
-        <div><strong>Model Discovery:</strong> <code>http://localhost:${port}/v1/models</code></div>
+        <div><strong>OpenAI Chat:</strong> <code>${baseUrl}/v1/chat/completions</code></div>
+        <div><strong>Claude Messages:</strong> <code>${baseUrl}/v1/messages</code></div>
+        <div><strong>Model Discovery:</strong> <code>${baseUrl}/v1/models</code></div>
       </div>
     </div>
 
@@ -65,8 +68,8 @@ export function renderOverviewPage(port = 20120) {
             .map(
               (m) => `
             <tr>
-              <td><code>${m.id}</code></td>
-              <td><span class="badge">${m.owned_by}</span></td>
+              <td><code>${escapeHtml(m.id)}</code></td>
+              <td><span class="badge">${escapeHtml(m.owned_by)}</span></td>
             </tr>`
             )
             .join("")}

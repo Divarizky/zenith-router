@@ -14,6 +14,27 @@ test("Provider Registry - contains 8 core providers", () => {
   }
 });
 
+test("Provider Registry - aligned configs for codex, github, kiro, and antigravity", () => {
+  const codex = getProvider("codex");
+  assert.strictEqual(codex.transport.baseUrl, "https://chatgpt.com/backend-api/codex/responses");
+  assert.strictEqual(codex.transport.headers.originator, "codex_cli_rs");
+  assert.ok(codex.models.some((m) => m.id === "gpt-6.1-sol"));
+
+  const github = getProvider("github");
+  assert.strictEqual(github.transport.baseUrl, "https://api.githubcopilot.com/chat/completions");
+  assert.strictEqual(github.transport.responsesUrl, "https://api.githubcopilot.com/responses");
+  assert.strictEqual(github.transport.messagesUrl, "https://api.githubcopilot.com/v1/messages");
+  assert.ok(github.transport.headers["copilot-integration-id"], "vscode-chat");
+
+  const kiro = getProvider("kiro");
+  assert.ok(Array.isArray(kiro.transport.baseUrls));
+  assert.strictEqual(kiro.transport.headers["Accept"], "application/vnd.amazon.eventstream");
+
+  const ag = getProvider("antigravity");
+  assert.strictEqual(ag.transport.baseUrls[0], "https://daily-cloudcode-pa.googleapis.com");
+  assert.ok(ag.transport.headers["User-Agent"].includes("antigravity/ide"));
+});
+
 test("Provider Registry - getAvailableModels aggregates model list with provider prefixes", () => {
   const models = getAvailableModels();
   assert.ok(Array.isArray(models));

@@ -15,12 +15,12 @@ Detail endpoint per fitur yang belum final disimpan di work card; endpoint appro
 - `x-zenroute-token-saver: false` melewati RTK dan Caveman untuk satu request.
 
 ## Endpoints <!-- auto -->
-- `POST /v1/chat/completions` — format OpenAI; diterjemahkan ke format provider (teks saja, tool calling belum didukung).
-- `POST /v1/messages` — format Anthropic; diteruskan apa adanya, jadi hanya cocok untuk provider berformat Claude.
+- `POST /v1/chat/completions` — format OpenAI; diterjemahkan ke format provider (termasuk tool calling & streaming SSE).
+- `POST /v1/messages` — format Anthropic; jika diarahkan ke provider OpenAI/GLM, payload otomatis diterjemahkan ke format OpenAI dan respons dikembalikan dalam format Anthropic (termasuk tool calling & streaming).
+- `POST /v1/responses` — format OpenAI Responses API (input + instructions); dinormalisasi ke Chat Completions dan dikembalikan dalam format Responses API.
 - `GET /v1/models` — daftar model OpenAI Model List.
 - `GET /api/usage?days=N`, `GET /api/quota` — statistik usage dan status kuota (loopback-only).
 - `GET /health` — status service.
-- Belum ada: `POST /v1/responses`.
 
 ## Errors <!-- auto -->
 - `/v1/chat/completions`, `/v1/models`: `{"error": {"message", "type", "code"}}`.

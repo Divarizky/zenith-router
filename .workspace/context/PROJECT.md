@@ -15,14 +15,16 @@ Precedence: instruksi user saat ini > file ini > CONTEXT.md > asumsi.
 - `src/security.js` — Host guard, akses dashboard loopback-only + CSRF, CORS opt-in, wajib JSON, auth API key `/v1`
 - `src/db/index.js` — `node:sqlite`, skema, CRUD connections
 - `src/gateway/chat.js` — `/v1/chat/completions` (format OpenAI)
-- `src/gateway/messages.js` — `/v1/messages` (format Anthropic, passthrough)
+- `src/gateway/messages.js` — `/v1/messages` (format Anthropic, translasi lintas format)
+- `src/gateway/responses.js` — `/v1/responses` (OpenAI Responses API)
 - `src/gateway/models.js` — `/v1/models`
-- `src/translator/` — Translasi OpenAI ↔ Claude (teks saja)
+- `src/translator/` — Translasi OpenAI ↔ Claude (teks & tool calling)
 - `src/providers/` — Registry 8 provider dan resolusi `prefix/model`
 - `src/executors/base.js` — Fetch upstream dengan headers timeout dan idle timeout
 - `src/executors/proxy.js` — Proxy HTTP/HTTPS (CONNECT) per connection
 - `src/services/apiKeys.js` — API key gateway (hash SHA-256, aktif/nonaktif)
 - `src/services/auth.js` — Pemilihan connection, rotasi, cooldown, header auth upstream
+- `src/services/fallback.js` — Eksekusi upstream dengan failover otomatis ke connection berikutnya pada 429/5xx
 - `src/services/tokenRefresh.js` — Refresh token OAuth (proaktif dan setelah 401/403)
 - `src/services/usage.js`, `src/services/quota.js` — Usage tracking dan status kuota
 - `src/services/tokenSaver.js`, `rtk.js`, `caveman.js` — Token saver

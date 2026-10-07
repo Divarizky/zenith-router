@@ -22,12 +22,16 @@ Single-writer konten requirement: `to-requirements`.
 | F-05 | Minimal Dashboard UI | approved | 2026-10-06 |
 | F-06 | Security Hardening & Gateway API Keys | approved | 2026-10-07 |
 
-## Known Gaps (review 07-10-2026)
-Requirement berikut sudah approved tetapi belum terpenuhi oleh kode saat ini:
-- GR-03 (failover): 429/5xx hanya menandai cooldown, belum mencoba akun berikutnya.
-- F-01 REQ-03: tool calling belum diterjemahkan; `/v1/messages` belum menerjemahkan ke provider non-Claude; `/v1/responses` belum ada.
-- F-02 REQ-11/REQ-12/REQ-16: belum ada alur login OAuth, endpoint refresh token masih tebakan, dan loop refresh di background belum dijadwalkan. Registry `codex`, `github`, `kiro`, `antigravity` belum cocok dengan 9router.
-- F-03 REQ-18: usage streaming tercatat 0 token (stream OpenAI tanpa `include_usage`; translator membuang usage Claude). REQ-21: quota fetcher masih stub.
+## Known Gaps (update 07-10-2026 pasca implementasi paket 4–6)
+Requirement berikut telah diselesaikan:
+- [x] GR-03 (failover): 429/5xx secara otomatis failover ke connection berikutnya sebelum byte pertama dikirim, akun bermasalah diberi cooldown 60s.
+- [x] F-01 REQ-03: tool calling didukung bidirectional (OpenAI <-> Claude); `/v1/messages` diterjemahkan ke provider non-Claude; endpoint `/v1/responses` ditambahkan; `anthropic-beta` diteruskan.
+- [x] F-02 registry: registry `codex`, `github`, `kiro`, `antigravity` telah disinkronkan dengan 9router.
+- [x] F-03 REQ-18: streaming usage mencatat token dengan `stream_options.include_usage` dan fallback estimasi jika upstream tidak mengirim usage chunk.
+
+Sisa gap yang masih ditangguhkan:
+- F-02 REQ-11/REQ-12/REQ-16: alur login interaktif OAuth di browser (device code flow/social login), dan background timer loop mandiri.
+- F-03 REQ-21: live quota fetcher per vendor masih mengembalikan dummy/stub.
 
 ## Feature Requirements
 ### F-01 — Base Gateway & Core Translator

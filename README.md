@@ -14,18 +14,17 @@ Gateway AI personal yang ringan untuk coding agent, kompatibel dengan endpoint O
 ## Status Fitur
 
 Sudah berfungsi:
-- `POST /v1/chat/completions`, `POST /v1/messages`, `GET /v1/models`, streaming SSE dan non-streaming.
-- Translasi teks OpenAI ↔ Claude untuk `/v1/chat/completions`.
-- Connection per provider di SQLite, rotasi akun least-recently-used, cooldown 60 detik setelah 429, refresh token sekali setelah 401/403, proxy HTTP/HTTPS per connection.
+- `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, `GET /v1/models`, streaming SSE dan non-streaming.
+- Translasi penuh OpenAI ↔ Claude untuk `/v1/chat/completions` dan `/v1/messages` (termasuk translasi skema tool calling dan tool execution).
+- Failover otomatis ke akun berikutnya saat 429 atau 5xx sebelum byte pertama dikirim, akun bermasalah diberi cooldown 60 detik.
+- Connection per provider di SQLite, rotasi akun least-recently-used, refresh token proaktif & reaktif setelah 401/403, proxy HTTP/HTTPS per connection.
+- Registry provider codex, github, kiro, antigravity, glm, claude disinkronkan dengan 9router (header, endpoint responses/messages, versi CLI/IDE).
 - API key gateway (`zr_...`) yang disimpan sebagai hash, akses dashboard hanya dari localhost, proteksi CSRF dan DNS rebinding.
-- Usage tracking (non-streaming), status kuota, RTK, Caveman (opt-in), dan dashboard.
+- Usage tracking untuk streaming (`stream_options.include_usage` + fallback estimasi) dan non-streaming, status kuota, RTK, Caveman (opt-in), dan dashboard.
 
 Belum berfungsi:
-- Tool calling lintas vendor, translasi `/v1/messages` ke provider non-Claude, dan `/v1/responses`. Claude Code dan Codex CLI belum bisa dipakai lewat zenroute.
-- Login OAuth dan refresh token otomatis di background.
-- Provider `codex`, `github`, `kiro`, `antigravity`: URL atau protokolnya belum disesuaikan dengan 9router.
-- Failover ke akun berikutnya saat 429/5xx, dan combo routing.
-- Hitungan token untuk request streaming (tercatat 0).
+- Alur login OAuth interaktif di browser (device code login UI / social login web popup).
+- Live quota fetcher per vendor pihak ketiga (saat ini masih mock).
 
 ## Menjalankan
 

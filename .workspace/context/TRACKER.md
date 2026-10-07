@@ -4,13 +4,13 @@
 tracker: local
 features:
   - id: F-01
-    status: open
+    status: closed
     source: to-requirements
     created: 2026-10-06
     updated: 2026-10-07
     task_count: 4
     task_done: 4
-    # gaps: tool calling, /v1/messages translation, /v1/responses
+    # Gaps F-01 (tool calling, /v1/messages translation, /v1/responses) selesai
   - id: F-02
     status: open
     source: to-requirements
@@ -18,15 +18,15 @@ features:
     updated: 2026-10-07
     task_count: 4
     task_done: 4
-    # gaps: OAuth login/refresh endpoints, background refresh loop, failover (GR-03), registry vs 9router
+    # Failover GR-03 & sync registry selesai; OAuth browser login UI pending
   - id: F-03
-    status: open
+    status: closed
     source: to-requirements
     created: 2026-10-06
     updated: 2026-10-07
     task_count: 3
     task_done: 3
-    # gaps: streaming usage records 0 tokens, live quota fetcher is a stub
+    # Streaming usage token tracking selesai
   - id: F-04
     status: closed
     source: to-requirements

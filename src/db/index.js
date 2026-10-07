@@ -71,6 +71,23 @@ CREATE TABLE IF NOT EXISTS api_keys (
   created_at INTEGER NOT NULL,
   last_used_at INTEGER DEFAULT 0
 );
+
+-- Custom models added by the operator; merged into the model route table.
+CREATE TABLE IF NOT EXISTS custom_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  name TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(provider, model_id)
+);
+
+-- Per-provider model disable list; filtered from /v1/models and routing.
+CREATE TABLE IF NOT EXISTS disabled_models (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  PRIMARY KEY (provider, model_id)
+);
 `;
 
 /**

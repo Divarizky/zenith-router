@@ -6,6 +6,7 @@ import antigravity from "./registry/antigravity.js";
 import glm from "./registry/glm.js";
 import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
+import { listCustomModels, isModelDisabled } from "../services/modelOverrides.js";
 
 const REGISTRY = [claude, codex, github, kiro, antigravity, glm, opencode, kilocode];
 
@@ -50,27 +51,33 @@ export function resolveModel(modelStr) {
   const colonIdx = modelStr.indexOf(":");
   const sepIdx = slashIdx !== -1 ? slashIdx : colonIdx;
 
+  const checkDisabled = (provider, targetModel) =>
+    provider && !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
+
   if (sepIdx !== -1) {
     const prefix = modelStr.slice(0, sepIdx);
     const targetModel = modelStr.slice(sepIdx + 1);
     const provider = getProvider(prefix);
     if (provider) {
-      return { provider, targetModel, rawModel: modelStr };
+      return checkDisabled(provider, targetModel) || null;
     }
   }
 
+  const guess = (provider, targetModel) =>
+    provider && !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
+
   // Guess provider by model name prefix if no slash given
   if (modelStr.startsWith("claude-")) {
-    return { provider: getProvider("claude"), targetModel: modelStr, rawModel: modelStr };
+    return guess(getProvider("claude"), modelStr);
   }
   if (modelStr.startsWith("gpt-") || modelStr.startsWith("o1") || modelStr.startsWith("o3")) {
-    return { provider: getProvider("codex"), targetModel: modelStr, rawModel: modelStr };
+    return guess(getProvider("codex"), modelStr);
   }
   if (modelStr.startsWith("gemini-")) {
-    return { provider: getProvider("antigravity"), targetModel: modelStr, rawModel: modelStr };
+    return guess(getProvider("antigravity"), modelStr);
   }
   if (modelStr.startsWith("glm-") || modelStr.startsWith("codegeex")) {
-    return { provider: getProvider("glm"), targetModel: modelStr, rawModel: modelStr };
+    return guess(getProvider("glm"), modelStr);
   }
 
   return null;
@@ -83,10 +90,13 @@ export function getAvailableModels() {
   const result = [];
   const now = Math.floor(Date.now() / 1000);
 
+  // Disabled registry models are filtered out.
   for (const p of REGISTRY) {
     const primaryAlias = Array.isArray(p.alias) ? p.alias[0] : (p.alias || p.id);
 
     for (const m of p.models) {
+      if (isModelDisabled(p.id, m.id)) continue;
+
       // Direct prefixed model: e.g. "glm/glm-4-flash"
       result.push({
         id: `${primaryAlias}/${m.id}`,
@@ -108,6 +118,28 @@ export function getAvailableModels() {
         root: m.id,
         parent: null,
       });
+    }
+  }
+
+  // Custom models ride along with caps derived from a simple cloud default.
+  const seenIds = new Set(result.map((r) => r.id));
+  for (const cm of listCustomModels()) {
+    const provider = getProvider(cm.provider);
+    const primaryAlias = provider ? (Array.isArray(provider.alias) ? provider.alias[0] : (provider.alias || provider.id)) : cm.provider;
+    if (isModelDisabled(cm.provider, cm.model_id)) continue;
+    const id = `${primaryAlias}/${cm.model_id}`;
+    if (!seenIds.has(id)) {
+      result.push({
+        id,
+        object: "model",
+        created: now,
+        owned_by: cm.provider,
+        permission: [],
+        root: cm.model_id,
+        parent: null,
+        custom: true,
+      });
+      seenIds.add(id);
     }
   }
 

@@ -16,6 +16,13 @@ import {
 import { renderUsagePage } from "./ui/pages/usage.js";
 import { renderTokenSaverPage, handleSaveTokenSaver } from "./ui/pages/tokenSaver.js";
 import {
+  renderModelsPage,
+  handleAddCustomModel,
+  handleDeleteCustomModel,
+  handleDisableModel,
+  handleEnableModel,
+} from "./ui/pages/models.js";
+import {
   renderSettingsPage,
   handleSaveSettings,
 } from "./ui/pages/settings.js";
@@ -63,6 +70,11 @@ app.post("/dashboard/connections/delete", handleDeleteConnection);
 app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT)));
 app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT)));
 app.post("/dashboard/token-saver", handleSaveTokenSaver);
+app.get("/dashboard/models", (c) => c.html(renderModelsPage(PORT)));
+app.post("/dashboard/models/custom/add", handleAddCustomModel);
+app.post("/dashboard/models/custom/delete", handleDeleteCustomModel);
+app.post("/dashboard/models/disable", handleDisableModel);
+app.post("/dashboard/models/enable", handleEnableModel);
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT)));
 app.post("/dashboard/settings", handleSaveSettings);
 

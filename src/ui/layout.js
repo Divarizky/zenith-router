@@ -127,15 +127,28 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
 .crumb { color: var(--text-subtle); font-size: 0.82rem; margin-bottom: 1rem; }
 .crumb a { color: var(--text-muted); text-decoration: none; }
 .crumb a:hover { color: var(--text); }
+.back-nav { margin-bottom: 1.25rem; }
+.back-link {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  color: var(--text-muted); text-decoration: none;
+  font-size: 0.85rem; font-weight: 500;
+  padding: 0.35rem 0.65rem; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.back-link:hover { color: var(--text); background: var(--surface-3); border-color: var(--text-subtle); }
+.back-link svg { flex-shrink: 0; }
 td.actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
 tr.muted td { color: var(--text-subtle); }
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
 .btn-row { display: flex; gap: 0.4rem; align-items: center; }
 .radio-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; cursor: pointer; font-size: 0.88rem; }
 .radio-row input { width: auto; accent-color: var(--text); }
-.notice { padding: 0.65rem 0.9rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1rem; border: 1px solid var(--border); }
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.9rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1.25rem; border: 1px solid var(--border); }
 .notice-ok { color: var(--success); border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.08); }
 .notice-error { color: var(--danger); border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.08); }
+.notice-close { background: none; border: none; color: inherit; font-size: 1.15rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; opacity: 0.7; }
+.notice-close:hover { opacity: 1; }
 .stat .value { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; }
     .stat .label { color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .stat .sub { color: var(--text-subtle); font-size: 0.78rem; margin-top: 0.2rem; }
@@ -197,10 +210,42 @@ tr.muted td { color: var(--text-subtle); }
     ${content}
   </main>
   <script>
-    function openModal(id){document.getElementById(id).classList.add('open')}
-    function closeModal(id){document.getElementById(id).classList.remove('open')}
-    document.querySelectorAll('[data-close-modal]').forEach(function(el){el.addEventListener('click',function(){closeModal(el.getAttribute('data-close-modal'))})});
-    document.querySelectorAll('.modal-backdrop').forEach(function(m){m.addEventListener('click',function(e){if(e.target===m)m.classList.remove('open')})});
+    // Force reload if page was restored from browser bfcache on back/forward
+    window.addEventListener('pageshow', function(event) {
+      if (event.persisted) {
+        window.location.reload();
+      }
+    });
+
+    // Clean transient query parameters from the address bar after render
+    if (window.location.search && /[?&](import|saved|status|notice)=/.test(window.location.search)) {
+      try {
+        var url = new URL(window.location.href);
+        ['import', 'saved', 'status', 'notice', 'count'].forEach(function(k) { url.searchParams.delete(k); });
+        var clean = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '');
+        window.history.replaceState({}, document.title, clean);
+      } catch (e) {}
+    }
+
+    function openModal(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.add('open');
+    }
+    function closeModal(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.remove('open');
+    }
+    document.querySelectorAll('[data-close-modal]').forEach(function(el) {
+      el.addEventListener('click', function() { closeModal(el.getAttribute('data-close-modal')); });
+    });
+    document.querySelectorAll('.modal-backdrop').forEach(function(m) {
+      m.addEventListener('click', function(e) { if (e.target === m) m.classList.remove('open'); });
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-backdrop.open').forEach(function(m) { m.classList.remove('open'); });
+      }
+    });
   </script>
 </body>
 </html>`;

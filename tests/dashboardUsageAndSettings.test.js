@@ -56,7 +56,7 @@ test("GET /dashboard/token-saver - renders Token Saver page with toggles", async
   assert.ok(html.includes("token_saver_caveman"));
 });
 
-test("POST /dashboard/settings - updates settings in SQLite and redirects", async () => {
+test("POST /dashboard/settings - updates settings in SQLite and redirects with saved notice", async () => {
   initDb(":memory:");
 
   const formData = new FormData();
@@ -69,14 +69,17 @@ test("POST /dashboard/settings - updates settings in SQLite and redirects", asyn
   });
 
   assert.strictEqual(res.status, 302);
-  assert.strictEqual(res.headers.get("location"), "/dashboard/settings");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/settings?saved=1");
 
   // Verify in SQLite
   assert.strictEqual(getSetting("require_api_key"), "true");
   assert.strictEqual(getSetting("default_fallback_model"), "codex/gpt-4o");
+
+  const html = await (await app.request(res.headers.get("location"))).text();
+  assert.ok(html.includes("Pengaturan Gateway berhasil disimpan."));
 });
 
-test("POST /dashboard/token-saver - updates token saver settings and redirects", async () => {
+test("POST /dashboard/token-saver - updates token saver settings and redirects with saved notice", async () => {
   initDb(":memory:");
 
   const formData = new FormData();
@@ -89,6 +92,9 @@ test("POST /dashboard/token-saver - updates token saver settings and redirects",
   });
 
   assert.strictEqual(res.status, 302);
-  assert.strictEqual(res.headers.get("location"), "/dashboard/token-saver");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/token-saver?saved=1");
   assert.strictEqual(getSetting("token_saver_caveman"), "false");
+
+  const html = await (await app.request(res.headers.get("location"))).text();
+  assert.ok(html.includes("Pengaturan Token Saver berhasil disimpan."));
 });

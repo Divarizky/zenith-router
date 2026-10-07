@@ -85,6 +85,11 @@ export async function controlPlaneGuard(c, next) {
     return next();
   }
 
+  // Dashboard & control-plane responses must never be cached by browser or proxy.
+  c.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  c.header("Pragma", "no-cache");
+  c.header("Expires", "0");
+
   // In-process requests (app.request in tests) have no socket.
   const remote = c.env?.incoming?.socket?.remoteAddress;
   if (remote && !isLoopbackAddress(remote)) {

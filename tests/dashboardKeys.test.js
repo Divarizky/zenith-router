@@ -51,13 +51,31 @@ test("POST /dashboard/keys/toggle and /delete - manage key status", async () => 
 
   const off = await app.request("/dashboard/keys/toggle", { method: "POST", body: form({ id: String(key.id), active: "false" }) });
   assert.strictEqual(off.status, 302);
+  assert.strictEqual(off.headers.get("location"), "/dashboard/keys?status=toggled");
   assert.strictEqual(listApiKeys()[0].is_active, 0);
 
-  await app.request("/dashboard/keys/toggle", { method: "POST", body: form({ id: String(key.id), active: "true" }) });
+  const on = await app.request("/dashboard/keys/toggle", { method: "POST", body: form({ id: String(key.id), active: "true" }) });
+  assert.strictEqual(on.status, 302);
+  assert.strictEqual(on.headers.get("location"), "/dashboard/keys?status=toggled");
   assert.strictEqual(listApiKeys()[0].is_active, 1);
 
-  await app.request("/dashboard/keys/delete", { method: "POST", body: form({ id: String(key.id) }) });
+  const del = await app.request("/dashboard/keys/delete", { method: "POST", body: form({ id: String(key.id) }) });
+  assert.strictEqual(del.status, 302);
+  assert.strictEqual(del.headers.get("location"), "/dashboard/keys?status=deleted");
   assert.strictEqual(listApiKeys().length, 0);
+
+  const html = await (await app.request(del.headers.get("location"))).text();
+  assert.ok(html.includes("API key berhasil dihapus."));
+});
+
+test("dashboard pages - set no-store, no-cache headers to prevent stale bfcache", async () => {
+  initDb(":memory:");
+  for (const path of ["/dashboard", "/dashboard/providers", "/dashboard/usage", "/dashboard/token-saver", "/dashboard/settings", "/dashboard/keys"]) {
+    const res = await app.request(path);
+    assert.strictEqual(res.status, 200);
+    const cc = res.headers.get("cache-control") || "";
+    assert.ok(cc.includes("no-store"), `${path} must have no-store in Cache-Control`);
+  }
 });
 
 test("dashboard - stored values are escaped (no stored XSS)", async () => {

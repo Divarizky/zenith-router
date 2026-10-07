@@ -32,10 +32,14 @@ function renderNewKeyNotice(newKey, port) {
 /**
  * Render API Keys page. `newKey` is passed only right after creation.
  */
-export function renderApiKeysPage(port = 20120, newKey = null) {
+export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
   const keys = listApiKeys();
   const required = isApiKeyRequired();
   const activeCount = keys.filter((k) => k.is_active === 1).length;
+
+  let noticeText = null;
+  if (query.status === "deleted") noticeText = "API key berhasil dihapus.";
+  else if (query.status === "toggled") noticeText = "Status API key diperbarui.";
 
   const policy = required
     ? `<span class="pill pill-success">Required</span>`
@@ -47,6 +51,13 @@ export function renderApiKeysPage(port = 20120, newKey = null) {
       : "";
 
   const content = `
+    ${
+      noticeText
+        ? `<div class="notice notice-ok"><span>${escapeHtml(
+            noticeText
+          )}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+        : ""
+    }
     ${renderNewKeyNotice(newKey, port)}
 
     <div class="card" style="margin-bottom: 1.5rem;">
@@ -167,7 +178,7 @@ export async function handleToggleApiKey(c) {
   if (id) {
     setApiKeyActive(id, body.active === "true");
   }
-  return c.redirect("/dashboard/keys");
+  return c.redirect("/dashboard/keys?status=toggled");
 }
 
 /**
@@ -179,5 +190,5 @@ export async function handleDeleteApiKey(c) {
   if (id) {
     deleteApiKey(id);
   }
-  return c.redirect("/dashboard/keys");
+  return c.redirect("/dashboard/keys?status=deleted");
 }

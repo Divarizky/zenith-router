@@ -81,13 +81,13 @@ app.get("/dashboard/models", (c) => c.redirect("/dashboard/providers"));
 
 // Dashboard Usage & Settings UI & Actions
 app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT)));
-app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT)));
+app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT, c.req.query())));
 app.post("/dashboard/token-saver", handleSaveTokenSaver);
-app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT)));
+app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query())));
 app.post("/dashboard/settings", handleSaveSettings);
 
 // Dashboard API Keys UI & Actions
-app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT)));
+app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT, null, c.req.query())));
 app.post("/dashboard/keys/create", (c) => handleCreateApiKey(c, PORT));
 app.post("/dashboard/keys/toggle", handleToggleApiKey);
 app.post("/dashboard/keys/delete", handleDeleteApiKey);

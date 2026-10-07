@@ -1,12 +1,18 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
 
-export function renderTokenSaverPage(port = 20120) {
+export function renderTokenSaverPage(port = 20120, query = {}) {
   const settings = getAllSettings();
   const isRtkEnabled = settings.token_saver_rtk !== "false";
   const isCavemanEnabled = settings.token_saver_caveman === "true";
+  const isSaved = query.saved === "1" || query.saved === "true";
 
   const content = `
+    ${
+      isSaved
+        ? `<div class="notice notice-ok"><span>Pengaturan Token Saver berhasil disimpan.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+        : ""
+    }
     <div class="card">
       <h3>Token Saver</h3>
       <p class="hint" style="margin-bottom: 1.25rem;">Kurangi pemakaian token tanpa mengubah struktur tool. Tool result dan pesan asisten tidak disentuh.</p>
@@ -50,5 +56,5 @@ export async function handleSaveTokenSaver(c) {
   const caveman = body.token_saver_caveman === "true" || body.token_saver_caveman === "on" ? "true" : "false";
   setSetting("token_saver_rtk", rtk);
   setSetting("token_saver_caveman", caveman);
-  return c.redirect("/dashboard/token-saver");
+  return c.redirect("/dashboard/token-saver?saved=1");
 }

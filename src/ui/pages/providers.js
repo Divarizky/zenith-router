@@ -44,6 +44,13 @@ const IMPORT_MODE_LABELS = {
 
 /** Fixed notice texts keyed by the result code in the redirect query; never echo raw input. */
 function importNotice(query = {}) {
+  if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
+  if (query.notice === "account_deleted") return { ok: true, text: "Akun berhasil dihapus." };
+  if (query.notice === "custom_added") return { ok: true, text: "Custom model berhasil ditambahkan." };
+  if (query.notice === "custom_deleted") return { ok: true, text: "Custom model berhasil dihapus." };
+  if (query.notice === "model_disabled") return { ok: true, text: "Model dinonaktifkan." };
+  if (query.notice === "model_enabled") return { ok: true, text: "Model diaktifkan kembali." };
+
   const count = Number.parseInt(query.count, 10) || 0;
   const status = Number.parseInt(query.status, 10);
   switch (query.import) {
@@ -281,8 +288,22 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     : "";
 
   const content = `
-    <p class="crumb"><a href="/dashboard/providers">Providers</a> / ${escapeHtml(p.name)}</p>
-    ${notice ? `<div class="notice ${notice.ok ? "notice-ok" : "notice-error"}">${escapeHtml(notice.text)}</div>` : ""}
+    <div class="back-nav">
+      <a href="/dashboard/providers" class="back-link">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Back to Providers</span>
+      </a>
+    </div>
+    ${
+      notice
+        ? `<div class="notice ${notice.ok ? "notice-ok" : "notice-error"}"><span>${escapeHtml(
+            notice.text
+          )}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+        : ""
+    }
 
     <div class="card">
       <div class="provider-card-head">
@@ -402,6 +423,7 @@ export async function handleAddAccount(c) {
       credentials: auth_type === "oauth" ? { access_token: secret } : { api_key: secret },
       proxy_url: proxy_url || null,
     });
+    return c.redirect(`${backTo(body.provider)}?notice=account_added`);
   }
   return c.redirect(backTo(body.provider));
 }
@@ -410,7 +432,7 @@ export async function handleDeleteAccount(c) {
   const body = await c.req.parseBody();
   const id = Number(body.id);
   if (id) deleteConnection(id);
-  return c.redirect(backTo(body.provider));
+  return c.redirect(`${backTo(body.provider)}?notice=account_deleted`);
 }
 
 export async function handleAddCustomModel(c) {
@@ -419,6 +441,7 @@ export async function handleAddCustomModel(c) {
   const modelId = String(body.model_id || "").trim();
   if (provider && modelId) {
     addCustomModel({ provider: provider.id, model_id: modelId, name: String(body.name || "").trim() || null });
+    return c.redirect(`${backTo(body.provider)}?notice=custom_added`);
   }
   return c.redirect(backTo(body.provider));
 }
@@ -427,7 +450,7 @@ export async function handleDeleteCustomModel(c) {
   const body = await c.req.parseBody();
   const id = Number(body.id);
   if (id) deleteCustomModel(id);
-  return c.redirect(backTo(body.provider));
+  return c.redirect(`${backTo(body.provider)}?notice=custom_deleted`);
 }
 
 export async function handleImportModels(c) {
@@ -454,12 +477,12 @@ export async function handleDisableModel(c) {
   const body = await c.req.parseBody();
   const provider = getProvider(String(body.provider || ""));
   if (provider && body.model_id) disableModel(provider.id, String(body.model_id));
-  return c.redirect(backTo(body.provider));
+  return c.redirect(`${backTo(body.provider)}?notice=model_disabled`);
 }
 
 export async function handleEnableModel(c) {
   const body = await c.req.parseBody();
   const provider = getProvider(String(body.provider || ""));
   if (provider && body.model_id) enableModel(provider.id, String(body.model_id));
-  return c.redirect(backTo(body.provider));
+  return c.redirect(`${backTo(body.provider)}?notice=model_enabled`);
 }

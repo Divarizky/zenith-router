@@ -7,13 +7,14 @@ import { countActiveApiKeys } from "../../services/apiKeys.js";
 /**
  * Render Settings Control page
  */
-export function renderSettingsPage(port = 20120) {
+export function renderSettingsPage(port = 20120, query = {}) {
   const settings = getAllSettings();
 
   const isRequireAuth = settings.require_api_key === "true";
   const fallbackModel = settings.default_fallback_model || "glm/glm-4-flash";
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
+  const isSaved = query.saved === "1" || query.saved === "true";
 
   let authNote = "";
   if (forcedByBind) {
@@ -23,6 +24,11 @@ export function renderSettingsPage(port = 20120) {
   }
 
   const content = `
+    ${
+      isSaved
+        ? `<div class="notice notice-ok"><span>Pengaturan Gateway berhasil disimpan.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+        : ""
+    }
     <div class="card" style="max-width: 640px;">
       <h3 style="margin-bottom: 1.25rem;">Global Gateway Settings</h3>
       <form action="/dashboard/settings" method="POST">
@@ -71,5 +77,5 @@ export async function handleSaveSettings(c) {
   setSetting("require_api_key", requireKey);
   setSetting("default_fallback_model", fallbackModel);
 
-  return c.redirect("/dashboard/settings");
+  return c.redirect("/dashboard/settings?saved=1");
 }

@@ -73,11 +73,12 @@ test("POST /dashboard/providers/accounts/add - creates account and redirects to 
     }),
   });
   assert.strictEqual(res.status, 302);
-  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/claude");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/claude?notice=account_added");
 
-  const html = await (await app.request("/dashboard/providers/claude")).text();
+  const html = await (await app.request(res.headers.get("location"))).text();
   assert.ok(html.includes("Claude Work"));
   assert.ok(html.includes("127.0.0.1:1080"));
+  assert.ok(html.includes("Akun berhasil ditambahkan."));
 });
 
 test("POST /dashboard/providers/accounts/delete - deletes account and redirects", async () => {
@@ -89,7 +90,7 @@ test("POST /dashboard/providers/accounts/delete - deletes account and redirects"
     body: form({ id: String(conn.id), provider: "codex" }),
   });
   assert.strictEqual(res.status, 302);
-  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/codex");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/codex?notice=account_deleted");
   assert.strictEqual(getConnectionById(conn.id), null);
 });
 
@@ -100,19 +101,21 @@ test("POST /dashboard/providers/models/* - disable, enable, and custom model act
     method: "POST",
     body: form({ provider: "glm", model_id: "glm-4-flash" }),
   });
-  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm?notice=model_disabled");
   assert.ok(isModelDisabled("glm", "glm-4-flash"));
 
-  await app.request("/dashboard/providers/models/enable", {
+  res = await app.request("/dashboard/providers/models/enable", {
     method: "POST",
     body: form({ provider: "glm", model_id: "glm-4-flash" }),
   });
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm?notice=model_enabled");
   assert.ok(!isModelDisabled("glm", "glm-4-flash"));
 
-  await app.request("/dashboard/providers/models/custom/add", {
+  res = await app.request("/dashboard/providers/models/custom/add", {
     method: "POST",
     body: form({ provider: "glm", model_id: "glm-4-thinking", name: "GLM 4 Thinking" }),
   });
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm?notice=custom_added");
   const custom = listCustomModels();
   assert.strictEqual(custom.length, 1);
   const html = await (await app.request("/dashboard/providers/glm")).text();
@@ -122,7 +125,7 @@ test("POST /dashboard/providers/models/* - disable, enable, and custom model act
     method: "POST",
     body: form({ id: String(custom[0].id), provider: "glm" }),
   });
-  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm?notice=custom_deleted");
   assert.strictEqual(listCustomModels().length, 0);
 });
 

@@ -28,13 +28,17 @@ Belum berfungsi:
 
 ## Menjalankan
 
+Bisa dijalankan langsung dengan mengetikkan `zenroute` di terminal:
+
 ```powershell
-cd zenroute
-npm install
-npm start          # atau: npm run dev
+zenroute
 ```
 
-Kalau PowerShell memblokir `npm.ps1`, pakai `npm.cmd start`. Dashboard ada di `http://127.0.0.1:20120/dashboard`.
+Atau cara alternatif:
+
+```powershell
+npm start          # atau: npm run dev
+```
 
 ## Langkah Pemakaian
 

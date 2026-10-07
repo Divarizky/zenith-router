@@ -17,7 +17,7 @@ Single-writer konten requirement: `to-requirements`.
 | F-01 | Base Gateway & Core Translator | approved | 2026-10-06 |
 | F-02 | Provider Connections & OAuth | approved | 2026-10-06 |
 | F-03 | Usage Tracking & Quota Sync | approved | 2026-10-06 |
-| F-04 | Token Saver Engine | draft | 2026-10-06 |
+| F-04 | Token Saver Engine | approved | 2026-10-06 |
 | F-05 | Minimal Dashboard UI | draft | 2026-10-06 |
 
 ## Feature Requirements
@@ -55,3 +55,14 @@ Single-writer konten requirement: `to-requirements`.
 - **REQ-22 (Non-Blocking Failure):** IF persistensi usage mengalami error THEN sistem SHALL tidak menggagalkan respons utama chat ke client. (Ref: AC-06)
 - **REQ-23 (Exhausted Account Exclusion):** WHEN kuota akun terdeteksi 0 atau habis THEN sistem SHALL mengabaikan akun tersebut dari pemilihan rute aktif. (Ref: AC-07)
 - **Verification:** Unit tests penulisan `usage_history` via SQLite `:memory:`, streaming SSE usage tap test, dan endpoint testing `/api/usage`.
+
+### F-04 — Token Saver Engine
+- **Scope:** Pipeline pemadatan prompt in-memory: algoritma RTK untuk deduplikasi log terminal & tool outputs, penyisipan instruksi efisiensi Caveman ke system prompt, dan prinsip fail-open request.
+- **REQ-24 (RTK Compaction):** WHEN RTK aktif THEN sistem SHALL memadatkan log dan tool results berulang di dalam pesan input tanpa merusak struktur sintaks kode. (Ref: AC-01)
+- **REQ-25 (Caveman Injection):** WHEN Caveman aktif THEN sistem SHALL menyisipkan aturan instruksi efisiensi jawaban ke system prompt. (Ref: AC-02)
+- **REQ-26 (Fail-Open Guarantee):** IF pemadatan token mengalami exception THEN sistem SHALL mengembalikan payload asli secara fail-open tanpa menggagalkan request HTTP. (Ref: AC-03)
+- **REQ-27 (Toggle Settings):** WHEN RTK atau Caveman dinonaktifkan THEN sistem SHALL meneruskan payload tanpa modifikasi. (Ref: AC-04)
+- **REQ-28 (Code Integrity):** WHILE memadatkan konten THEN sistem SHALL menjaga keutuhan blok kode markdown (` ``` `) dan struktur JSON. (Ref: AC-05)
+- **REQ-29 (Per-Request Override):** WHEN request menyertakan header `x-zenroute-token-saver: false` THEN sistem SHALL melewati pipeline pemadatan. (Ref: AC-06)
+- **REQ-30 (Savings Metrics):** WHEN pemadatan selesai THEN sistem SHALL menghitung estimasi karakter/token yang dihemat untuk keperluan monitoring audit. (Ref: AC-07)
+- **Verification:** Unit tests pemadatan log berulang (RTK), verifikasi penyisipan Caveman pada format OpenAI & Anthropic, dan simulasi fail-open.

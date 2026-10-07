@@ -46,12 +46,14 @@ export function renderOverviewPage(port = 20120) {
 
     <div class="card">
       <h3>Client Integration Endpoints</h3>
-      <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem; margin-top: 0.5rem;">
-        <div><strong>OpenAI Chat:</strong> <code>${baseUrl}/v1/chat/completions</code></div>
-        <div><strong>Claude Messages:</strong> <code>${baseUrl}/v1/messages</code></div>
-        <div><strong>Responses API:</strong> <code>${baseUrl}/v1/responses</code></div>
-        <div><strong>Model Discovery:</strong> <code>${baseUrl}/v1/models</code></div>
-      </div>
+      <table style="margin-top: 0.5rem;">
+        <tbody>
+          <tr><td style="width: 160px;"><strong>OpenAI Chat</strong></td><td><code>${baseUrl}/v1/chat/completions</code></td></tr>
+          <tr><td><strong>Claude Messages</strong></td><td><code>${baseUrl}/v1/messages</code></td></tr>
+          <tr><td><strong>Responses API</strong></td><td><code>${baseUrl}/v1/responses</code></td></tr>
+          <tr><td><strong>Model Discovery</strong></td><td><code>${baseUrl}/v1/models</code></td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="card">
@@ -78,7 +80,7 @@ export function renderOverviewPage(port = 20120) {
             models.length > 10
               ? `<tr><td colspan="2" style="text-align: center; color: var(--text-muted);">... and ${
                   models.length - 10
-                } more models</td></tr>`
+                } more models &mdash; <a href="/v1/models" target="_blank">lihat /v1/models</a></td></tr>`
               : ""
           }
         </tbody>

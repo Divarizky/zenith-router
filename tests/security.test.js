@@ -93,14 +93,14 @@ test("security - dashboard POSTs reject cross-site requests (CSRF)", async () =>
     return fd;
   };
 
-  const evilOrigin = await app.request("/dashboard/connections/delete", {
+  const evilOrigin = await app.request("/dashboard/providers/accounts/delete", {
     method: "POST",
     headers: { Origin: "https://evil.example" },
     body: form(),
   });
   assert.strictEqual(evilOrigin.status, 403);
 
-  const crossSite = await app.request("/dashboard/connections/delete", {
+  const crossSite = await app.request("/dashboard/providers/accounts/delete", {
     method: "POST",
     headers: { "Sec-Fetch-Site": "cross-site" },
     body: form(),
@@ -108,7 +108,7 @@ test("security - dashboard POSTs reject cross-site requests (CSRF)", async () =>
   assert.strictEqual(crossSite.status, 403);
   assert.strictEqual(getConnections().length, 1, "Connection must survive blocked requests");
 
-  const sameOrigin = await app.request("/dashboard/connections/delete", {
+  const sameOrigin = await app.request("/dashboard/providers/accounts/delete", {
     method: "POST",
     headers: { Origin: "http://localhost", "Sec-Fetch-Site": "same-origin" },
     body: form(),
@@ -219,7 +219,7 @@ test("security - dashboard connection form validates provider, proxy, and auth t
   const submit = (fields) => {
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-    return app.request("/dashboard/connections/add", { method: "POST", body: fd });
+    return app.request("/dashboard/providers/accounts/add", { method: "POST", body: fd });
   };
 
   await submit({ provider: "not-a-provider", name: "X", api_key: "k" });

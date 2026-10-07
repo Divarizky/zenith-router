@@ -40,7 +40,7 @@ export function renderOverviewPage(port = 20120) {
       <div class="card stat">
         <div class="label">Available Models</div>
         <div class="value">${models.length}</div>
-        <div class="sub">Routed models</div>
+        <div class="sub"><a href="/dashboard/providers" style="color: inherit;">Kelola di Providers</a></div>
       </div>
     </div>
 
@@ -52,37 +52,6 @@ export function renderOverviewPage(port = 20120) {
           <tr><td><strong>Claude Messages</strong></td><td><code>${baseUrl}/v1/messages</code></td></tr>
           <tr><td><strong>Responses API</strong></td><td><code>${baseUrl}/v1/responses</code></td></tr>
           <tr><td><strong>Model Discovery</strong></td><td><code>${baseUrl}/v1/models</code></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="card">
-      <h3>Active Routed Models</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Model ID</th>
-            <th>Provider</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${models
-            .slice(0, 10)
-            .map(
-              (m) => `
-            <tr>
-              <td><code>${escapeHtml(m.id)}</code></td>
-              <td><span class="pill">${escapeHtml(m.owned_by)}</span></td>
-            </tr>`
-            )
-            .join("")}
-          ${
-            models.length > 10
-              ? `<tr><td colspan="2" style="text-align: center; color: var(--text-muted);">... and ${
-                  models.length - 10
-                } more models &mdash; <a href="/v1/models" target="_blank">lihat /v1/models</a></td></tr>`
-              : ""
-          }
         </tbody>
       </table>
     </div>

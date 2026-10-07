@@ -67,7 +67,7 @@ test("dashboard - stored values are escaped (no stored XSS)", async () => {
   recordUsage({ model: payload, inputTokens: 1, outputTokens: 1 });
   await app.request("/dashboard/keys/create", { method: "POST", body: form({ name: payload }) });
 
-  for (const path of ["/dashboard/connections", "/dashboard/usage", "/dashboard/keys"]) {
+  for (const path of ["/dashboard/providers/glm", "/dashboard/usage", "/dashboard/keys"]) {
     const html = await (await app.request(path)).text();
     assert.ok(!html.includes(payload), `${path} must escape stored values`);
     assert.ok(html.includes("&lt;script&gt;"), `${path} must render the escaped value`);

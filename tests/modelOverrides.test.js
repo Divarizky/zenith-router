@@ -32,6 +32,22 @@ test("disabled models are filtered from route table and resolveModel", () => {
   assert.ok(resolveModel("glm/glm-4-flash"));
 });
 
+test("live model catalogs from modelsFetcher merge into route table", async () => {
+  initDb(":memory:");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => ({
+    json: async () => ({ object: "list", data: [{ id: "claude-fable-5", object: "model" }] }),
+  });
+  try {
+    const { refreshModelFetchers } = await import("../src/services/modelFetchers.js");
+    await refreshModelFetchers();
+    const models = getAvailableModels();
+    assert.ok(models.find((m) => m.id === "oc/claude-fable-5"), "live model should appear");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("free tier catalog mirrors Omni shape", async () => {
   const { FREE_TIER_BUDGETS, FREE_TIER_TOS, computeFreeTierTotals } = await import(
     "../src/config/freeTierCatalog.js"

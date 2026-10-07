@@ -7,13 +7,16 @@ import {
   isConnectionInCooldown,
 } from "../src/services/auth.js";
 
-test("auth service - returns virtual connection for free/noauth provider if no DB record", () => {
+test("auth service - returns virtual connection for noAuth provider only", () => {
   initDb(":memory:");
 
   const conn = getActiveConnection("opencode");
   assert.ok(conn, "Must return a virtual connection");
   assert.strictEqual(conn.auth_type, "noauth");
   assert.strictEqual(conn.provider, "opencode");
+
+  // Free tier but requires login: no virtual connection without a real account.
+  assert.strictEqual(getActiveConnection("kiro"), null);
 });
 
 test("auth service - picks available connection and rotates by least-used", () => {

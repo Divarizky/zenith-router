@@ -18,7 +18,7 @@ export function listAvailableConnections(providerId) {
   );
   available.sort((a, b) => (a.last_used_at || 0) - (b.last_used_at || 0));
 
-  if (available.length === 0 && providerDef?.category === "free") {
+  if (available.length === 0 && providerDef?.noAuth) {
     available.push({
       id: null,
       provider: providerId,

@@ -2,10 +2,9 @@ import { escapeHtml } from "./html.js";
 
 const NAV = [
   { id: "overview", label: "Overview", href: "/dashboard", icon: "home" },
-  { id: "connections", label: "Connections", href: "/dashboard/connections", icon: "link" },
+  { id: "providers", label: "Providers", href: "/dashboard/providers", icon: "link" },
   { id: "usage", label: "Usage & Quota", href: "/dashboard/usage", icon: "chart" },
   { id: "tokensaver", label: "Token Saver", href: "/dashboard/token-saver", icon: "bolt" },
-  { id: "models", label: "Models", href: "/dashboard/models", icon: "grid" },
   { id: "keys", label: "API Keys", href: "/dashboard/keys", icon: "key" },
   { id: "settings", label: "Settings", href: "/dashboard/settings", icon: "gear" },
 ];
@@ -16,7 +15,6 @@ const ICONS = {
   chart: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
   bolt: '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m16 7 3 3"/>',
-  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1c-.6 0-1.2.4-1.5 1z"/>',
 };
 
@@ -115,7 +113,24 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
     .card .hint { color: var(--text-muted); font-size: 0.82rem; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
     .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-    .stat .value { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+.card-head h3 { margin-bottom: 0; }
+.section { margin-bottom: 1.75rem; }
+.section-head { margin-bottom: 0.75rem; }
+.section-head h3 { font-size: 1rem; font-weight: 600; }
+.section-head .hint { color: var(--text-muted); font-size: 0.82rem; }
+.provider-card { display: block; margin-bottom: 0; color: inherit; text-decoration: none; transition: border-color 0.12s, background 0.12s; }
+.provider-card:hover { border-color: var(--text-subtle); background: var(--surface-2); }
+.provider-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.35rem; }
+.provider-card-head h3 { margin-bottom: 0; }
+.pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
+.crumb { color: var(--text-subtle); font-size: 0.82rem; margin-bottom: 1rem; }
+.crumb a { color: var(--text-muted); text-decoration: none; }
+.crumb a:hover { color: var(--text); }
+td.actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
+tr.muted td { color: var(--text-subtle); }
+.modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+.stat .value { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; }
     .stat .label { color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .stat .sub { color: var(--text-subtle); font-size: 0.78rem; margin-top: 0.2rem; }
     /* Buttons */

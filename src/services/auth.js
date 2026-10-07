@@ -46,9 +46,10 @@ export function getActiveConnection(providerId) {
     return picked;
   }
 
-  // If no DB connection exists, check if provider is free/noauth
+  // If no DB connection exists, only no-auth providers can run without an account.
+  // category "free" alone is not enough: kiro is free but still requires a login token.
   const providerDef = getProvider(providerId);
-  if (providerDef && (providerDef.category === "free" || providerDef.noAuth)) {
+  if (providerDef && providerDef.noAuth) {
     return {
       id: null,
       provider: providerId,

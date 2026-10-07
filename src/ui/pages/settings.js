@@ -1,6 +1,8 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
+import { getBindHost, isLoopbackHost } from "../../security.js";
+import { countActiveApiKeys } from "../../services/apiKeys.js";
 
 /**
  * Render Settings Control page
@@ -10,8 +12,17 @@ export function renderSettingsPage(port = 20120) {
 
   const isRequireAuth = settings.require_api_key === "true";
   const isRtkEnabled = settings.token_saver_rtk !== "false";
-  const isCavemanEnabled = settings.token_saver_caveman !== "false";
+  const isCavemanEnabled = settings.token_saver_caveman === "true";
   const fallbackModel = settings.default_fallback_model || "glm/glm-4-flash";
+  const forcedByBind = !isLoopbackHost(getBindHost());
+  const activeKeys = countActiveApiKeys();
+
+  let authNote = "";
+  if (forcedByBind) {
+    authNote = `<p style="font-size: 0.8rem; color: var(--warning); margin-top: 0.25rem;">Always enforced: zenroute is bound to ${escapeHtml(getBindHost())}.</p>`;
+  } else if (isRequireAuth && activeKeys === 0) {
+    authNote = `<p style="font-size: 0.8rem; color: var(--danger); margin-top: 0.25rem;">No active API key: every /v1 request is rejected. Create one in API Keys.</p>`;
+  }
 
   const content = `
     <div class="card" style="max-width: 600px;">
@@ -24,7 +35,8 @@ export function renderSettingsPage(port = 20120) {
             } style="width: auto; margin: 0;" />
             <div>
               <strong>Require API Key for Gateway Access</strong>
-              <p style="font-size: 0.8rem; color: var(--text-muted);">When enabled, clients must supply an Authorization header to access /v1 endpoints.</p>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Clients must send a zenroute key from the API Keys page (Authorization: Bearer or x-api-key) to use /v1.</p>
+              ${authNote}
             </div>
           </label>
         </div>
@@ -36,7 +48,7 @@ export function renderSettingsPage(port = 20120) {
             } style="width: auto; margin: 0;" />
             <div>
               <strong>Enable RTK (Reduced Token Kit)</strong>
-              <p style="font-size: 0.8rem; color: var(--text-muted);">Condenses repetitive terminal output and git logs in conversation context.</p>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Condenses repeated lines in text you type. Tool results and assistant turns are left untouched.</p>
             </div>
           </label>
         </div>
@@ -48,13 +60,14 @@ export function renderSettingsPage(port = 20120) {
             } style="width: auto; margin: 0;" />
             <div>
               <strong>Enable Caveman Conciseness Compactor</strong>
-              <p style="font-size: 0.8rem; color: var(--text-muted);">Directs models to omit preambles, apologies, and conversational pleasantries.</p>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Appends a conciseness rule to the system prompt. Off by default because it changes how your agent behaves.</p>
             </div>
           </label>
         </div>
 
         <div class="form-group" style="margin-bottom: 1.5rem;">
           <label for="default_fallback_model">Default Routing Fallback Model</label>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Not used by the gateway yet (reserved for failover).</p>
           <input type="text" id="default_fallback_model" name="default_fallback_model" value="${escapeHtml(fallbackModel)}" placeholder="glm/glm-4-flash" required />
         </div>
 

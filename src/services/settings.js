@@ -34,30 +34,26 @@ export function setSetting(key, value) {
   }
 }
 
+const DEFAULT_SETTINGS = {
+  require_api_key: "false",
+  token_saver_rtk: "true",
+  token_saver_caveman: "false",
+  default_fallback_model: "glm/glm-4-flash",
+};
+
 /**
  * Get all settings as key-value dictionary
  */
 export function getAllSettings() {
   try {
     const db = getDb();
-    const stmt = db.prepare(`SELECT key, value FROM settings`);
-    const rows = stmt.all();
-    const result = {
-      require_api_key: "false",
-      token_saver_rtk: "true",
-      token_saver_caveman: "true",
-      default_fallback_model: "glm/glm-4-flash",
-    };
+    const rows = db.prepare(`SELECT key, value FROM settings`).all();
+    const result = { ...DEFAULT_SETTINGS };
     for (const r of rows) {
       result[r.key] = r.value;
     }
     return result;
   } catch {
-    return {
-      require_api_key: "false",
-      token_saver_rtk: "true",
-      token_saver_caveman: "true",
-      default_fallback_model: "glm/glm-4-flash",
-    };
+    return { ...DEFAULT_SETTINGS };
   }
 }

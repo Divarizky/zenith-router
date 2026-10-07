@@ -89,7 +89,9 @@ export function condenseContent(text) {
 }
 
 /**
- * Condense an array of messages
+ * Condense an array of messages.
+ * Only user-typed text is touched: tool results carry raw file contents that agents
+ * later match exactly when editing, and assistant turns are the model's own output.
  */
 export function condenseMessages(messages) {
   if (!Array.isArray(messages)) {
@@ -99,7 +101,7 @@ export function condenseMessages(messages) {
   let totalSavedChars = 0;
 
   const newMessages = messages.map((msg) => {
-    if (!msg || !msg.content) return msg;
+    if (!msg || !msg.content || msg.role !== "user") return msg;
 
     if (typeof msg.content === "string") {
       const res = condenseContent(msg.content);
@@ -109,7 +111,7 @@ export function condenseMessages(messages) {
 
     if (Array.isArray(msg.content)) {
       const newContent = msg.content.map((part) => {
-        if (part && typeof part.text === "string") {
+        if (part && (part.type === "text" || part.type === undefined) && typeof part.text === "string") {
           const res = condenseContent(part.text);
           totalSavedChars += res.savedChars;
           return { ...part, text: res.condensedText };

@@ -19,7 +19,8 @@ import {
   recordUsage,
   createUsageTapStream,
 } from "../services/usage.js";
-import { applyTokenSaver } from "../services/tokenSaver.js";
+import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
+import { getAllSettings } from "../services/settings.js";
 
 /**
  * Handle POST /v1/chat/completions (OpenAI client format)
@@ -76,11 +77,12 @@ export async function handleChat(c) {
   const targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
   const translatedPayload = translateRequest(FORMATS.OPENAI, targetFormat, body, targetModel);
 
-  // Apply in-process Token Saver (RTK + Caveman) with fail-open
-  const disableTokenSaver = c.req.header("x-zenroute-token-saver") === "false";
-  const upstreamPayload = applyTokenSaver(translatedPayload, targetFormat, {
-    headerDisabled: disableTokenSaver,
-  });
+  // Apply in-process Token Saver (RTK + Caveman) with fail-open, as configured in Settings
+  const upstreamPayload = applyTokenSaver(
+    translatedPayload,
+    targetFormat,
+    tokenSaverOptions(getAllSettings(), c.req.header("x-zenroute-token-saver"))
+  );
 
   const upstreamUrl = provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
   const upstreamHeaders = {

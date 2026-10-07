@@ -13,7 +13,8 @@ import {
   recordUsage,
   createUsageTapStream,
 } from "../services/usage.js";
-import { applyTokenSaver } from "../services/tokenSaver.js";
+import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
+import { getAllSettings } from "../services/settings.js";
 
 function isWarmupOrNamingRequest(body, userAgent = "") {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
@@ -173,11 +174,12 @@ export async function handleMessages(c) {
     model: targetModel,
   };
 
-  // Apply in-process Token Saver (RTK + Caveman) with fail-open
-  const disableTokenSaver = c.req.header("x-zenroute-token-saver") === "false";
-  const upstreamPayload = applyTokenSaver(basePayload, "claude", {
-    headerDisabled: disableTokenSaver,
-  });
+  // Apply in-process Token Saver (RTK + Caveman) with fail-open, as configured in Settings
+  const upstreamPayload = applyTokenSaver(
+    basePayload,
+    "claude",
+    tokenSaverOptions(getAllSettings(), c.req.header("x-zenroute-token-saver"))
+  );
 
   const upstreamUrl = provider.transport?.baseUrl || "https://api.anthropic.com/v1/messages";
   const upstreamHeaders = {

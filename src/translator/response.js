@@ -25,7 +25,7 @@ function claudeContentToOpenAIFinish(content, stopReason) {
 
   return {
     message,
-    finish_reason: stopReason === "end_turn" || stopReason === "tool_use" ? "stop" : (stopReason || "stop"),
+    finish_reason: stopReason === "tool_use" || stopReason === "tool_calls" ? "tool_calls" : (stopReason === "end_turn" ? "stop" : (stopReason || "stop")),
     tool_calls: toolCalls,
   };
 }
@@ -67,8 +67,8 @@ export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
     for (const tc of msg.tool_calls) {
       content.push({
         type: "tool_use",
-        id: tc.id,
-        name: tc.function?.name,
+        id: tc.id || `call_${Date.now()}`,
+        name: tc.function?.name || "tool_call",
         input: typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments || "{}") : (tc.function?.arguments || {}),
       });
     }
@@ -80,7 +80,7 @@ export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
     role: msg.role || "assistant",
     model: data.model || defaultModel,
     content,
-    stop_reason: choice.finish_reason === "stop" ? "end_turn" : (choice.finish_reason || "end_turn"),
+    stop_reason: choice.finish_reason === "stop" || choice.finish_reason === "end_turn" ? "end_turn" : (choice.finish_reason === "tool_calls" ? "tool_use" : (choice.finish_reason || "end_turn")),
     usage: {
       input_tokens: data.usage?.prompt_tokens || 0,
       output_tokens: data.usage?.completion_tokens || 0,
@@ -102,6 +102,38 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
   const chunkId = `chatcmpl-${Date.now()}`;
   const textDecoder = new TextDecoder();
   const textEncoder = new TextEncoder();
+  let claudeStarted = false;
+  let claudeUsage = null;
+  let nextContentIndex = 0;
+  let textBlockOpen = false;
+  let textBlockIndex = null;
+  const toolBlockIndexByOpenAI = new Map();
+
+  function claudeEvent(type, data) {
+    return textEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+
+  function ensureClaudeStart(controller) {
+    if (claudeStarted) return;
+    claudeStarted = true;
+    controller.enqueue(claudeEvent("message_start", {
+      type: "message_start",
+      message: { id: chunkId, type: "message", role: "assistant", model: model || "unknown", content: [], stop_reason: null, usage: claudeUsage || { input_tokens: 0, output_tokens: 0 } },
+    }));
+  }
+
+  function closeTextBlock(controller) {
+    if (!textBlockOpen) return;
+    controller.enqueue(claudeEvent("content_block_stop", { type: "content_block_stop", index: textBlockIndex }));
+    textBlockOpen = false;
+  }
+
+  function closeToolBlocks(controller) {
+    for (const idx of toolBlockIndexByOpenAI.values()) {
+      controller.enqueue(claudeEvent("content_block_stop", { type: "content_block_stop", index: idx }));
+    }
+    toolBlockIndexByOpenAI.clear();
+  }
 
   return new TransformStream({
     transform(chunk, controller) {
@@ -183,17 +215,17 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
           else if (sourceFormat === "openai" && targetFormat === "claude") {
             if (dataStr === "[DONE]") {
               if (!doneSent) {
+                ensureClaudeStart(controller);
+                closeTextBlock(controller);
+                closeToolBlocks(controller);
                 controller.enqueue(
-                  textEncoder.encode(
-                    `event: message_delta\ndata: ${JSON.stringify({
-                      type: "message_delta",
-                      delta: { stop_reason: "end_turn", stop_sequence: null },
-                    })}\n\n`
-                  )
+                  claudeEvent("message_delta", {
+                    type: "message_delta",
+                    delta: { stop_reason: "end_turn", stop_sequence: null },
+                    ...(claudeUsage ? { usage: claudeUsage } : {}),
+                  })
                 );
-                controller.enqueue(
-                  textEncoder.encode(`event: message_stop\ndata: {"type":"message_stop"}\n\n`)
-                );
+                controller.enqueue(claudeEvent("message_stop", { type: "message_stop" }));
                 doneSent = true;
               }
               continue;
@@ -203,18 +235,47 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
               const parsed = JSON.parse(dataStr);
               const choice = parsed.choices?.[0] || {};
               const delta = choice.delta || {};
+              if (parsed.usage) claudeUsage = { input_tokens: parsed.usage.prompt_tokens || 0, output_tokens: parsed.usage.completion_tokens || 0 };
+              ensureClaudeStart(controller);
+
               const deltaText = delta.content;
               if (deltaText) {
-                const claudeEvent = {
-                  type: "content_block_delta",
-                  index: 0,
-                  delta: { type: "text_delta", text: deltaText },
-                };
-                controller.enqueue(
-                  textEncoder.encode(
-                    `event: content_block_delta\ndata: ${JSON.stringify(claudeEvent)}\n\n`
-                  )
-                );
+                if (!textBlockOpen) {
+                  textBlockOpen = true;
+                  textBlockIndex = nextContentIndex++;
+                  controller.enqueue(claudeEvent("content_block_start", { type: "content_block_start", index: textBlockIndex, content_block: { type: "text", text: "" } }));
+                }
+                controller.enqueue(claudeEvent("content_block_delta", { type: "content_block_delta", index: textBlockIndex, delta: { type: "text_delta", text: deltaText } }));
+              }
+
+              if (Array.isArray(delta.tool_calls)) {
+                closeTextBlock(controller);
+                for (const tc of delta.tool_calls) {
+                  const key = tc.index ?? 0;
+                  let idx = toolBlockIndexByOpenAI.get(key);
+                  if (idx === undefined) {
+                    idx = nextContentIndex++;
+                    toolBlockIndexByOpenAI.set(key, idx);
+                    controller.enqueue(claudeEvent("content_block_start", {
+                      type: "content_block_start",
+                      index: idx,
+                      content_block: { type: "tool_use", id: tc.id || `toolu_${idx}`, name: tc.function?.name || "tool_call", input: {} },
+                    }));
+                  }
+                  const args = tc.function?.arguments;
+                  if (args) {
+                    controller.enqueue(claudeEvent("content_block_delta", { type: "content_block_delta", index: idx, delta: { type: "input_json_delta", partial_json: args } }));
+                  }
+                }
+              }
+
+              if (choice.finish_reason) {
+                closeTextBlock(controller);
+                closeToolBlocks(controller);
+                const stop = choice.finish_reason === "tool_calls" ? "tool_use" : (choice.finish_reason === "stop" ? "end_turn" : (choice.finish_reason === "length" ? "max_tokens" : "end_turn"));
+                controller.enqueue(claudeEvent("message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, ...(claudeUsage ? { usage: claudeUsage } : {}) }));
+                controller.enqueue(claudeEvent("message_stop", { type: "message_stop" }));
+                doneSent = true;
               }
             } catch {}
           }
@@ -228,6 +289,14 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
           controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
           doneSent = true;
         }
+      }
+      if (sourceFormat === "openai" && targetFormat === "claude" && !doneSent) {
+        ensureClaudeStart(controller);
+        closeTextBlock(controller);
+        closeToolBlocks(controller);
+        controller.enqueue(claudeEvent("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, ...(claudeUsage ? { usage: claudeUsage } : {}) }));
+        controller.enqueue(claudeEvent("message_stop", { type: "message_stop" }));
+        doneSent = true;
       }
     },
   });

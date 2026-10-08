@@ -18,7 +18,9 @@ export function setCustomTokenRefresher(fn) {
 export function canRefresh(connection) {
   if (!connection || connection.auth_type !== "oauth") return false;
   const creds = connection.credentials || {};
-  if (connection.provider === "github") return Boolean(creds.github_token);
+  if (connection.provider === "github") {
+    return Boolean(creds.github_token || (typeof creds.access_token === "string" && /^gh[oup]_/.test(creds.access_token)));
+  }
   return Boolean(creds.refresh_token);
 }
 
@@ -155,8 +157,9 @@ const REFRESHERS = {
   },
 
   async github(creds, proxyUrl) {
-    const copilot = await fetchCopilotToken(creds.github_token, { proxyUrl });
-    return { access_token: copilot.token, expires_at: copilot.expiresAt };
+    const ghToken = creds.github_token || creds.access_token;
+    const copilot = await fetchCopilotToken(ghToken, { proxyUrl });
+    return { access_token: copilot.token, expires_at: copilot.expiresAt, github_token: ghToken };
   },
 };
 

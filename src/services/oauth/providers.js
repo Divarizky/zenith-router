@@ -341,14 +341,17 @@ const antigravity = {
 
 const cline = {
   flowType: "authorization_code",
+  stateless: true,
   buildAuthUrl({ redirectUri }) {
     const params = new URLSearchParams({ client_type: "extension", callback_url: redirectUri, redirect_uri: redirectUri });
     return `${OAUTH_CONFIG.cline.authorizeUrl}?${params}`;
   },
   async exchange({ code, redirectUri, proxyUrl = null }) {
     // Cline hands the token back base64-encoded in `code`; older builds need an exchange call.
+    // URLSearchParams turns "+" in the base64 payload into a space; undo that.
+    code = String(code).trim().replace(/ /g, "+");
     try {
-      const decoded = Buffer.from(String(code), "base64").toString("utf8");
+      const decoded = Buffer.from(code, "base64").toString("utf8");
       const data = JSON.parse(decoded.slice(0, decoded.lastIndexOf("}") + 1));
       if (data.accessToken) {
         return {

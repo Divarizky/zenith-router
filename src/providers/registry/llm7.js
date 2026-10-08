@@ -3,6 +3,7 @@ export default {
   name: "LLM7",
   alias: ["llm7", "l7"],
   category: "apikey",
+  keyUrl: "https://token.llm7.io",
   format: "openai",
   transport: {
     baseUrl: "https://api.llm7.io/v1/chat/completions",

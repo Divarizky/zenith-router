@@ -3,6 +3,7 @@ export default {
   name: "Ollama Cloud",
   alias: ["ol", "ollama", "ollama-cloud"],
   category: "apikey",
+  keyUrl: "https://ollama.com/settings/keys",
   // /v1/models is public; chat completions require an API key from https://ollama.com/settings/keys.
   freeModelSync: "merge",
   format: "openai",

@@ -91,7 +91,7 @@ test("Provider Registry - new providers use expected configs", () => {
   const ovh = getProvider("ovhcloud");
   assert.strictEqual(ovh.category, "free");
   assert.strictEqual(ovh.noAuth, true);
-  assert.strictEqual(ovh.freeModelSync, "replace");
+  assert.strictEqual(ovh.freeModelSync, undefined, "free access is account-level credit, not per-model");
   assert.strictEqual(ovh.transport.baseUrl, "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions");
 
   const xkr = getProvider("xkiro");

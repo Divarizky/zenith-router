@@ -1,15 +1,18 @@
 import { resolveModel } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
+import { opencodePathForModel } from "../executors/opencode.js";
 import {
   translateRequest,
   translateResponse,
   createTransformStream,
   FORMATS,
 } from "../translator/index.js";
+import { captureLine } from "../services/logger.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
 import { getAllSettings } from "../services/settings.js";
 import { executeWithFallback } from "../services/fallback.js";
+import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 
 export async function handleChat(c) {
   let body;
@@ -56,12 +59,24 @@ export async function handleChat(c) {
   }
 
   const { provider, targetModel } = resolved;
-  console.info(`[CHAT] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
+  captureLine(`[CHAT] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
   const startTime = Date.now();
   const executor = getExecutor(provider);
 
-  const targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
-  const translatedPayload = translateRequest(FORMATS.OPENAI, targetFormat, body, targetModel);
+  let targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
+  if (provider.id === "opencode") {
+    const path = opencodePathForModel(targetModel);
+    if (path.endsWith("/responses")) targetFormat = FORMATS.OPENAI_RESPONSES;
+    else if (path.endsWith("/messages")) targetFormat = FORMATS.CLAUDE;
+  }
+  const clientStream = Boolean(body.stream);
+  const upstreamStream = clientStream || Boolean(provider.transport?.forceStream);
+  const translatedPayload = translateRequest(
+    FORMATS.OPENAI,
+    targetFormat,
+    { ...body, stream: upstreamStream },
+    targetModel
+  );
 
   const upstreamPayload = applyTokenSaver(
     translatedPayload,
@@ -69,7 +84,7 @@ export async function handleChat(c) {
     tokenSaverOptions(getAllSettings(), c.req.header("x-zenroute-token-saver"))
   );
 
-  if (body.stream && targetFormat === FORMATS.OPENAI) {
+  if (upstreamStream && targetFormat === FORMATS.OPENAI) {
     upstreamPayload.stream_options = { include_usage: true, ...(body.stream_options || {}) };
   }
 
@@ -92,6 +107,8 @@ export async function handleChat(c) {
       baseHeaders,
       executor,
       signal: c.req.raw.signal,
+      stream: upstreamStream,
+      targetModel,
       resolveUrl: (conn) => {
         let url = upstreamUrlBase;
         if (url.includes("{accountId}") && conn?.credentials) {
@@ -142,8 +159,7 @@ export async function handleChat(c) {
       });
     }
 
-    const rawResData = await upstreamRes.json();
-    const finalData = translateResponse(targetFormat, FORMATS.OPENAI, rawResData, targetModel);
+    const finalData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
 
     const durationMs = Date.now() - startTime;
     const inputTokens = finalData.usage?.prompt_tokens || finalData.usage?.input_tokens || 0;

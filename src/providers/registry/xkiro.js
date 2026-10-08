@@ -3,6 +3,7 @@ export default {
   name: "xKiro",
   alias: ["xkr", "xkiro"],
   category: "apikey",
+  keyUrl: "https://xkiro.com/dashboard/api/keys",
   // 5M tokens/day (~150M/mo) free pool across models tagged access_tier: "free".
   // Public models endpoint allows syncing without an account.
   freeModelSync: "merge",
@@ -13,10 +14,9 @@ export default {
   },
   models: [
     { id: "qwen/qwen3-coder-plus:free", name: "Qwen3 Coder Plus" },
-    { id: "minimax/minimax-m3:free", name: "MiniMax M3" },
     { id: "qwen/qwen3.6-plus:free", name: "Qwen 3.6 Plus" },
-    { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
-    { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+    { id: "deepseek/deepseek-v4-pro-0813", name: "DeepSeek V4 Pro" },
+    { id: "deepseek/deepseek-v4-flash-0731", name: "DeepSeek V4 Flash" },
     { id: "mistralai/mistral-large-2512", name: "Mistral Large 3" },
     { id: "mistralai/mistral-small-2603", name: "Mistral Small 4" },
     { id: "mistralai/codestral-2508", name: "Codestral" },

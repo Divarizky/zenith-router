@@ -122,19 +122,46 @@ const IMPORTERS = {
   mistral: {
     url: "https://api.mistral.ai/v1/models",
     modes: ["all"],
-    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: true })),
+    // /v1/models returns no pricing fields. The free Experiment tier covers every
+    // chat model with a shared monthly quota, so free-ness comes from the tier,
+    // not the payload. Only routable chat models are listed (no embeddings/OCR),
+    // and deprecated models are skipped.
+    parse: (json) =>
+      listOf(json)
+        .filter((m) => m.capabilities?.completion_chat === true && !m.deprecation)
+        .map((m) => ({ id: m.id, name: m.name || m.id, isFree: true })),
   },
   ollama: {
     url: "https://ollama.com/v1/models",
     public: true,
     modes: ["all", "free"],
+    // Zen serves the listed models on the free tier and returns no pricing
+    // fields, so every listed model counts as free.
     parse: (json) => listOf(json).map((m) => ({ id: m.id || m.name, name: m.name || m.id, isFree: true })),
   },
   ovhcloud: {
     url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models",
     public: true,
-    modes: ["all", "free"],
-    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: true })),
+    // Free access is account-level credit, not a per-model free tier, so there
+    // is nothing honest to sync as "free"; import offers the full chat list.
+    modes: ["all"],
+    parse: (json) =>
+      listOf(json)
+        // OVH returns embeddings, TTS, ASR, image and safety-guard models too;
+        // only routable chat models expose a positive completion/context budget.
+        .filter((m) => {
+          if (/guard/i.test(m.id)) return false;
+          // If a provider returns context/completion budgets, require a positive chat budget.
+          // Older fixture payloads without those fields remain importable.
+          const hasBudget = m.context_length !== undefined || m.max_completion_tokens !== undefined;
+          return !hasBudget || (Number(m.context_length) > 0 && Number(m.max_completion_tokens) > 0);
+        })
+        .map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
+  },
+  nvidia: {
+    url: "https://integrate.api.nvidia.com/v1/models",
+    modes: ["all"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
   },
   xkiro: {
     url: "https://api.xkiro.com/v1/models",

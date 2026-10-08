@@ -22,13 +22,15 @@ function extractAccountId(credentials) {
 }
 
 export class CodexExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel }) {
+    const accountId = extractAccountId(connection?.credentials);
     const codexHeaders = {
       ...headers,
       originator: "codex_cli_rs",
       "User-Agent": "codex_cli_rs/0.159.0",
       version: "0.159.0",
       Accept: "text/event-stream",
+      ...(accountId ? { "chatgpt-account-id": accountId } : {}),
     };
 
     const res = await super.execute({

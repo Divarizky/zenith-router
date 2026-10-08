@@ -172,10 +172,19 @@ function findByState(state) {
   return null;
 }
 
+// Cline's redirect carries only `code` (no `state`), so match the newest pending stateless flow.
+function findStatelessFlow() {
+  let found = null;
+  for (const flow of flows.values()) {
+    if (flow.impl.stateless && flow.status === "pending" && flow.state) found = flow;
+  }
+  return found;
+}
+
 /** Handle the provider redirect: /callback?code=&state= (or ?error=). */
 export async function completeCallback(params = {}) {
   prune();
-  const flow = params.state ? findByState(params.state) : null;
+  const flow = params.state ? findByState(params.state) : findStatelessFlow();
   if (!flow) return { ok: false, error: "Sesi login tidak ditemukan atau sudah kedaluwarsa. Ulangi dari dashboard." };
   if (params.error) {
     finish(flow, { status: "error", error: params.error_description || params.error });
@@ -198,10 +207,11 @@ export async function completeManual(flowId, input) {
   const raw = String(input || "").trim();
   let code = raw;
   let state = flow.state;
+  const stateless = Boolean(flow.impl.stateless);
   if (/^https?:\/\//i.test(raw)) {
     const url = new URL(raw);
     code = url.searchParams.get("code") || "";
-    state = url.searchParams.get("state") || "";
+    state = url.searchParams.get("state") || (stateless ? flow.state : "");
     if (url.searchParams.get("error")) return { ok: false, error: url.searchParams.get("error") };
   } else if (raw.includes("#")) {
     state = raw.split("#")[1];

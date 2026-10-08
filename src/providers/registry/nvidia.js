@@ -3,6 +3,7 @@ export default {
   name: "NVIDIA NIM",
   alias: ["nv", "nvidia"],
   category: "apikey",
+  keyUrl: "https://build.nvidia.com/settings/api-keys",
   format: "openai",
   transport: {
     baseUrl: "https://integrate.api.nvidia.com/v1/chat/completions",

@@ -7,11 +7,11 @@ export default {
   category: "free",
   format: "kiro",
   transport: {
-    baseUrl: "https://runtime.us-east-1.kiro.dev/generateAssistantResponse",
+    baseUrl: "https://q.us-east-1.amazonaws.com/generateAssistantResponse",
     baseUrls: [
-      "https://runtime.us-east-1.kiro.dev/generateAssistantResponse",
-      "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse",
       "https://q.us-east-1.amazonaws.com/generateAssistantResponse",
+      "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse",
+      "https://runtime.us-east-1.kiro.dev/generateAssistantResponse",
     ],
     format: "kiro",
     headers: {

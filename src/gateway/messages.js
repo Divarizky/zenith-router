@@ -1,9 +1,12 @@
 import { resolveModel } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
+import { opencodePathForModel } from "../executors/opencode.js";
+import { captureLine } from "../services/logger.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
 import { getAllSettings } from "../services/settings.js";
 import { executeWithFallback } from "../services/fallback.js";
+import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 import {
   translateRequest,
   translateResponse,
@@ -83,6 +86,22 @@ function createSyntheticWarmupStream(model) {
   });
 }
 
+function sanitizeClaudeMessages(messages) {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((msg) => {
+    if (!msg || !Array.isArray(msg.content)) return msg;
+    const sanitizedContent = msg.content.map((part) => {
+      if (part && typeof part === "object" && part.type === "tool_use") {
+        if (!part.name || typeof part.name !== "string" || part.name.trim() === "") {
+          return { ...part, name: "tool_call" };
+        }
+      }
+      return part;
+    });
+    return { ...msg, content: sanitizedContent };
+  });
+}
+
 /**
  * Handle POST /v1/messages (Anthropic Claude format)
  */
@@ -115,6 +134,8 @@ export async function handleMessages(c) {
       400
     );
   }
+
+  body.messages = sanitizeClaudeMessages(body.messages);
 
   const userAgent = c.req.header("user-agent") || "";
 
@@ -161,12 +182,24 @@ export async function handleMessages(c) {
   }
 
   const { provider, targetModel } = resolved;
-  console.info(`[MESSAGES] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
+  captureLine(`[MESSAGES] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
   const startTime = Date.now();
   const executor = getExecutor(provider);
 
-  const targetFormat = provider.format || provider.transport?.format || FORMATS.CLAUDE;
-  const translatedPayload = translateRequest(FORMATS.CLAUDE, targetFormat, body, targetModel);
+  let targetFormat = provider.format || provider.transport?.format || FORMATS.CLAUDE;
+  if (provider.id === "opencode") {
+    const path = opencodePathForModel(targetModel);
+    if (path.endsWith("/responses")) targetFormat = FORMATS.OPENAI_RESPONSES;
+    else if (path.endsWith("/messages")) targetFormat = FORMATS.CLAUDE;
+  }
+  const clientStream = Boolean(body.stream);
+  const upstreamStream = clientStream || Boolean(provider.transport?.forceStream);
+  const translatedPayload = translateRequest(
+    FORMATS.CLAUDE,
+    targetFormat,
+    { ...body, stream: upstreamStream },
+    targetModel
+  );
 
   // Apply in-process Token Saver (RTK + Caveman) with fail-open, as configured in Settings
   const upstreamPayload = applyTokenSaver(
@@ -200,6 +233,8 @@ export async function handleMessages(c) {
       baseHeaders,
       executor,
       signal: c.req.raw.signal,
+      stream: upstreamStream,
+      targetModel,
       resolveUrl: (conn) => {
         let url = upstreamUrl;
         if (url.includes("{accountId}") && conn?.credentials) {
@@ -250,8 +285,8 @@ export async function handleMessages(c) {
       });
     }
 
-    const rawResData = await upstreamRes.json();
-    const finalData = translateResponse(targetFormat, FORMATS.CLAUDE, rawResData, targetModel);
+    const openAIData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
+    const finalData = translateResponse(FORMATS.OPENAI, FORMATS.CLAUDE, openAIData, targetModel);
 
     const durationMs = Date.now() - startTime;
     const inputTokens = finalData.usage?.input_tokens || finalData.usage?.prompt_tokens || 0;

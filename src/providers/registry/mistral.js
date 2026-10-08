@@ -3,8 +3,10 @@ export default {
   name: "Mistral AI",
   alias: ["mis", "mistral", "mistralai"],
   category: "apikey",
-  // Mistral Experiment free tier gives 1B tokens/month across organization.
-  // Model sync runs when an API key is connected.
+  keyUrl: "https://console.mistral.ai/api-keys",
+  // Mistral Experiment (free) tier: 1B tokens/month shared across the org.
+  // Every chat model on /v1/models is usable on that tier, so sync marks all
+  // chat models free (Mistral returns no pricing fields).
   freeModelSync: "merge",
   format: "openai",
   transport: {

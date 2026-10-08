@@ -1,15 +1,18 @@
 import { resolveModel } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
+import { opencodePathForModel } from "../executors/opencode.js";
 import {
   translateRequest,
   translateResponse,
   createTransformStream,
   FORMATS,
 } from "../translator/index.js";
+import { captureLine } from "../services/logger.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
 import { getAllSettings } from "../services/settings.js";
 import { executeWithFallback } from "../services/fallback.js";
+import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 
 function convertResponsesToChatBody(body) {
   const messages = [];
@@ -101,12 +104,24 @@ export async function handleResponses(c) {
   }
 
   const { provider, targetModel } = resolved;
-  console.info(`[RESPONSES] model=${chatBody.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(chatBody.stream)}`);
+  captureLine(`[RESPONSES] model=${chatBody.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(chatBody.stream)}`);
   const startTime = Date.now();
   const executor = getExecutor(provider);
 
-  const targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
-  const translatedPayload = translateRequest(FORMATS.OPENAI, targetFormat, chatBody, targetModel);
+  let targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
+  if (provider.id === "opencode") {
+    const path = opencodePathForModel(targetModel);
+    if (path.endsWith("/responses")) targetFormat = FORMATS.OPENAI_RESPONSES;
+    else if (path.endsWith("/messages")) targetFormat = FORMATS.CLAUDE;
+  }
+  const clientStream = Boolean(chatBody.stream);
+  const upstreamStream = clientStream || Boolean(provider.transport?.forceStream);
+  const translatedPayload = translateRequest(
+    FORMATS.OPENAI,
+    targetFormat,
+    { ...chatBody, stream: upstreamStream },
+    targetModel
+  );
 
   const upstreamPayload = applyTokenSaver(
     translatedPayload,
@@ -114,7 +129,7 @@ export async function handleResponses(c) {
     tokenSaverOptions(getAllSettings(), c.req.header("x-zenroute-token-saver"))
   );
 
-  if (chatBody.stream && targetFormat === FORMATS.OPENAI) {
+  if (upstreamStream && targetFormat === FORMATS.OPENAI) {
     upstreamPayload.stream_options = { include_usage: true, ...(rawBody.stream_options || {}) };
   }
 
@@ -137,6 +152,8 @@ export async function handleResponses(c) {
       baseHeaders,
       executor,
       signal: c.req.raw.signal,
+      stream: upstreamStream,
+      targetModel,
       resolveUrl: (conn) => {
         let url = upstreamUrlBase;
         if (url.includes("{accountId}") && conn?.credentials) {
@@ -161,9 +178,9 @@ export async function handleResponses(c) {
 
     if (chatBody.stream) {
       let responseStream = upstreamRes.body;
-      if (targetFormat !== FORMATS.OPENAI) {
+      if (targetFormat !== FORMATS.OPENAI_RESPONSES) {
         responseStream = responseStream.pipeThrough(
-          createTransformStream(targetFormat, FORMATS.OPENAI, targetModel)
+          createTransformStream(targetFormat, FORMATS.OPENAI_RESPONSES, targetModel)
         );
       }
 
@@ -187,8 +204,7 @@ export async function handleResponses(c) {
       });
     }
 
-    const rawResData = await upstreamRes.json();
-    const finalData = translateResponse(targetFormat, FORMATS.OPENAI, rawResData, targetModel);
+    const finalData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
 
     const durationMs = Date.now() - startTime;
     const inputTokens = finalData.usage?.prompt_tokens || finalData.usage?.input_tokens || 0;

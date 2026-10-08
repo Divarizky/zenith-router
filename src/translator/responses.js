@@ -259,6 +259,259 @@ export function createResponsesToOpenAITransformStream(model = "codex") {
 }
 
 /**
+ * Transform OpenAI Chat Completion chunks to Responses API SSE events
+ */
+export function createOpenAIToResponsesTransformStream(model = "codex") {
+  const state = {
+    seq: 0,
+    responseId: `resp_${randomUUID().slice(0, 12)}`,
+    created: Math.floor(Date.now() / 1000),
+    started: false,
+    msgTextBuf: {},
+    msgItemAdded: {},
+    msgContentAdded: {},
+    msgItemDone: {},
+    funcArgsBuf: {},
+    funcNames: {},
+    funcCallIds: {},
+    funcArgsDone: {},
+    funcItemDone: {},
+    buffer: "",
+    completedSent: false,
+  };
+
+  const textEncoder = new TextEncoder();
+  const textDecoder = new TextDecoder();
+  const nextSeq = () => ++state.seq;
+
+  const emit = (controller, eventType, data) => {
+    data.sequence_number = nextSeq();
+    controller.enqueue(textEncoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`));
+  };
+
+  const closeMessage = (controller, idx) => {
+    if (state.msgItemAdded[idx] && !state.msgItemDone[idx]) {
+      state.msgItemDone[idx] = true;
+      const fullText = state.msgTextBuf[idx] || "";
+      const msgId = `msg_${state.responseId}_${idx}`;
+
+      emit(controller, "response.output_text.done", {
+        type: "response.output_text.done",
+        item_id: msgId,
+        output_index: parseInt(idx, 10),
+        content_index: 0,
+        text: fullText,
+        logprobs: [],
+      });
+
+      emit(controller, "response.output_item.done", {
+        type: "response.output_item.done",
+        output_index: parseInt(idx, 10),
+        item: {
+          id: msgId,
+          type: "message",
+          content: [{ type: "output_text", annotations: [], logprobs: [], text: fullText }],
+          role: "assistant",
+        },
+      });
+    }
+  };
+
+  const closeToolCall = (controller, idx) => {
+    const callId = state.funcCallIds[idx];
+    if (callId && !state.funcItemDone[idx]) {
+      const args = state.funcArgsBuf[idx] || "{}";
+
+      emit(controller, "response.function_call_arguments.done", {
+        type: "response.function_call_arguments.done",
+        item_id: `fc_${callId}`,
+        output_index: parseInt(idx, 10),
+        arguments: args,
+      });
+
+      emit(controller, "response.output_item.done", {
+        type: "response.output_item.done",
+        output_index: parseInt(idx, 10),
+        item: {
+          id: `fc_${callId}`,
+          type: "function_call",
+          arguments: args,
+          call_id: callId,
+          name: state.funcNames[idx] || "",
+        },
+      });
+
+      state.funcItemDone[idx] = true;
+      state.funcArgsDone[idx] = true;
+    }
+  };
+
+  const sendCompleted = (controller) => {
+    if (!state.completedSent) {
+      state.completedSent = true;
+      emit(controller, "response.completed", {
+        type: "response.completed",
+        response: {
+          id: state.responseId,
+          object: "response",
+          model,
+          created_at: state.created,
+          status: "completed",
+          background: false,
+          error: null,
+        },
+      });
+    }
+  };
+
+  return new TransformStream({
+    transform(chunk, controller) {
+      const text = typeof chunk === "string" ? chunk : textDecoder.decode(chunk, { stream: true });
+      state.buffer += text;
+
+      const lines = state.buffer.split("\n\n");
+      state.buffer = lines.pop() || "";
+
+      for (const msg of lines) {
+        if (!msg.trim()) continue;
+
+        const dataMatch = msg.match(/^data:\s*(.+)$/m);
+        if (!dataMatch) continue;
+
+        const dataStr = dataMatch[1].trim();
+        if (dataStr === "[DONE]") continue;
+
+        let parsed;
+        try {
+          parsed = JSON.parse(dataStr);
+        } catch {
+          continue;
+        }
+
+        if (!parsed.choices?.length) continue;
+
+        const choice = parsed.choices[0];
+        const idx = choice.index || 0;
+        const delta = choice.delta || {};
+
+        if (!state.started) {
+          state.started = true;
+          state.responseId = parsed.id ? `resp_${parsed.id}` : state.responseId;
+
+          emit(controller, "response.created", {
+            type: "response.created",
+            response: {
+              id: state.responseId,
+              object: "response",
+              model,
+              created_at: state.created,
+              status: "in_progress",
+              background: false,
+              error: null,
+              output: [],
+            },
+          });
+        }
+
+        if (delta.content) {
+          const content = delta.content;
+          if (!state.msgItemAdded[idx]) {
+            state.msgItemAdded[idx] = true;
+            const msgId = `msg_${state.responseId}_${idx}`;
+
+            emit(controller, "response.output_item.added", {
+              type: "response.output_item.added",
+              output_index: idx,
+              item: { id: msgId, type: "message", content: [], role: "assistant" },
+            });
+          }
+
+          if (!state.msgContentAdded[idx]) {
+            state.msgContentAdded[idx] = true;
+            emit(controller, "response.content_part.added", {
+              type: "response.content_part.added",
+              item_id: `msg_${state.responseId}_${idx}`,
+              output_index: idx,
+              content_index: 0,
+              part: { type: "output_text", annotations: [], logprobs: [], text: "" },
+            });
+          }
+
+          emit(controller, "response.output_text.delta", {
+            type: "response.output_text.delta",
+            item_id: `msg_${state.responseId}_${idx}`,
+            output_index: idx,
+            content_index: 0,
+            delta: content,
+            logprobs: [],
+          });
+
+          if (!state.msgTextBuf[idx]) state.msgTextBuf[idx] = "";
+          state.msgTextBuf[idx] += content;
+        }
+
+        if (Array.isArray(delta.tool_calls)) {
+          closeMessage(controller, idx);
+
+          for (const tc of delta.tool_calls) {
+            const tcIdx = tc.index ?? 0;
+            const newCallId = tc.id;
+            const funcName = tc.function?.name;
+
+            if (funcName) state.funcNames[tcIdx] = funcName;
+
+            if (!state.funcCallIds[tcIdx] && newCallId) {
+              state.funcCallIds[tcIdx] = newCallId;
+
+              emit(controller, "response.output_item.added", {
+                type: "response.output_item.added",
+                output_index: tcIdx,
+                item: {
+                  id: `fc_${newCallId}`,
+                  type: "function_call",
+                  arguments: "",
+                  call_id: newCallId,
+                  name: state.funcNames[tcIdx] || "",
+                },
+              });
+            }
+
+            if (!state.funcArgsBuf[tcIdx]) state.funcArgsBuf[tcIdx] = "";
+
+            if (tc.function?.arguments) {
+              const refCallId = state.funcCallIds[tcIdx] || newCallId;
+              if (refCallId) {
+                emit(controller, "response.function_call_arguments.delta", {
+                  type: "response.function_call_arguments.delta",
+                  item_id: `fc_${refCallId}`,
+                  output_index: tcIdx,
+                  delta: tc.function.arguments,
+                });
+              }
+              state.funcArgsBuf[tcIdx] += tc.function.arguments;
+            }
+          }
+        }
+
+        if (choice.finish_reason) {
+          for (const i in state.msgItemAdded) closeMessage(controller, i);
+          for (const i in state.funcCallIds) closeToolCall(controller, i);
+          sendCompleted(controller);
+        }
+      }
+    },
+
+    flush(controller) {
+      for (const i in state.msgItemAdded) closeMessage(controller, i);
+      for (const i in state.funcCallIds) closeToolCall(controller, i);
+      sendCompleted(controller);
+      controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+    },
+  });
+}
+
+
+/**
  * Aggregate Responses API SSE stream into single OpenAI Chat Completion response (non-streaming)
  */
 export async function responsesToOpenAIResponse(streamOrData, model = "codex") {

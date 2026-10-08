@@ -3,6 +3,7 @@ export default {
   name: "Bazaarlink",
   alias: ["bzl", "bazaarlink"],
   category: "apikey",
+  keyUrl: "https://bazaarlink.ai",
   // Sync needs an account; without one it reports no_account and keeps the static list.
   freeModelSync: "merge",
   format: "openai",

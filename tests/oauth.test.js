@@ -380,3 +380,29 @@ test("dashboard - login buttons for OAuth providers, API key form for the rest",
   });
   assert.strictEqual(badProxy.status, 400);
 });
+
+test("cline callback - redirect without state still completes the pending login", async () => {
+  initDb(":memory:");
+  resetOAuthFlows();
+  const started = await startOAuthFlow({ providerId: "cline", origin: "http://127.0.0.1:20120" });
+  assert.ok(started.authUrl.includes("callback_url="));
+
+  const payload = Buffer.from(
+    JSON.stringify({ accessToken: "eyJhbGciOi.payload+/sig", refreshToken: "rt-1", email: "a@b.c", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }) + "pad",
+  ).toString("base64");
+  // Browser query parsing turns "+" into " "; the code must survive that.
+  const res = await app.request(`/callback?code=${payload.replace(/\+/g, "+")}`);
+  assert.strictEqual(res.status, 200);
+  const conn = getConnections().find((c) => c.provider === "cline");
+  assert.ok(conn, "cline connection saved");
+  assert.strictEqual(conn.credentials.refresh_token, "rt-1");
+});
+
+test("cline manual paste - callback URL without state is accepted", async () => {
+  initDb(":memory:");
+  resetOAuthFlows();
+  const { flowId } = await startOAuthFlow({ providerId: "cline", origin: "http://127.0.0.1:20120" });
+  const code = Buffer.from(JSON.stringify({ accessToken: "tok", refreshToken: "rt-2", email: "x@y.z" })).toString("base64");
+  const out = await completeManual(flowId, `http://localhost:20120/callback?code=${encodeURIComponent(code)}`);
+  assert.strictEqual(out.ok, true);
+});

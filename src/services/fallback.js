@@ -8,6 +8,7 @@ import { isConnectionExhausted } from "./quota.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { getSetting } from "./settings.js";
+import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 
 export function listAvailableConnections(providerId, { rotation = null } = {}) {
@@ -129,8 +130,25 @@ export async function executeWithFallback({
   executor,
   signal,
   resolveUrl,
+  stream = false,
+  targetModel = "",
 }) {
   const bodyText = JSON.stringify(upstreamPayload);
+
+  function bodyForConnection(connection) {
+    const format = String(targetFormat || "").toLowerCase();
+    if (format !== "kiro" && format !== "codewhisperer") return bodyText;
+    const profileArn = connection?.credentials?.profile_arn || connection?.credentials?.profileArn;
+    if (!profileArn) return bodyText;
+    try {
+      const parsed = JSON.parse(bodyText);
+      if (!parsed.profileArn) parsed.profileArn = profileArn;
+      return JSON.stringify(parsed);
+    } catch {
+      return bodyText;
+    }
+  }
+
   const triedIds = [];
   const available = listAvailableConnections(provider.id);
   const maxAttempts = Math.max(1, available.length);
@@ -170,9 +188,13 @@ export async function executeWithFallback({
         url,
         method: "POST",
         headers,
-        body: bodyText,
+        body: bodyForConnection(connection),
         signal,
         proxyUrl: connection?.proxy_url,
+        connection,
+        stream,
+        targetModel,
+        targetFormat,
       });
     } catch (err) {
       if (releaseSlot) releaseSlot();
@@ -194,13 +216,17 @@ export async function executeWithFallback({
     const errText = await res.text();
     lastFailureResponse = buildErrorResponse(res, errText, targetFormat);
 
-    console.warn(
+    captureLine(
       `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
     );
 
     // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
-      if (connection.id) setConnectionCooldown(connection.id, Date.now() + 60000);
+      if (connection.id) {
+        const retryAfterSec = Number(res.headers?.get?.("retry-after"));
+        const cooldownMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec * 1000 : 60000 * attempt;
+        setConnectionCooldown(connection.id, Date.now() + cooldownMs);
+      }
       await applyReactiveJitter(signal);
       continue;
     }
@@ -210,6 +236,8 @@ export async function executeWithFallback({
       try {
         const refreshed = await refreshOAuthToken(connection, { force: true });
         if (!refreshed) {
+          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          if (attempt < maxAttempts) continue;
           return { ok: false, response: lastFailureResponse };
         }
         connection = refreshed;
@@ -224,9 +252,13 @@ export async function executeWithFallback({
             url,
             method: "POST",
             headers,
-            body: bodyText,
+            body: bodyForConnection(connection),
             signal,
             proxyUrl: connection?.proxy_url,
+            connection,
+            stream,
+            targetModel,
+            targetFormat,
           });
         } catch (err) {
           if (releaseSlot) releaseSlot();
@@ -248,11 +280,19 @@ export async function executeWithFallback({
       } catch (err) {
         if (releaseSlot) releaseSlot();
         console.error(`[zenroute] Reactive refresh error for ${connection.id}:`, err.message);
+        if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+        if (attempt < maxAttempts) continue;
         return { ok: false, response: lastFailureResponse };
       }
     }
 
-    // Other non-ok status (400, 404, 422, etc.) — return immediately
+    // Account-level failures can be isolated to this credential; try the next one.
+    if (res.status === 401 || res.status === 402 || res.status === 403) {
+      if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+      if (attempt < maxAttempts) continue;
+    }
+
+    // Other non-ok status (400, 422, etc.) — return immediately
     return { ok: false, response: lastFailureResponse };
   }
 
@@ -260,7 +300,7 @@ export async function executeWithFallback({
     return { ok: false, response: lastFailureResponse };
   }
 
-  console.error(`[ROUTING] No available connection for provider '${provider.id}'`);
+  captureLine(`[ROUTING] No available connection for provider '${provider.id}'`);
 
   const shape = targetFormat === "claude"
     ? { type: "error", error: { type: "overloaded_error", message: `No available connection for provider '${provider.id}'.` } }

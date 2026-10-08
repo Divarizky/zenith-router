@@ -3,10 +3,12 @@ export default {
   name: "OVHcloud AI Endpoints",
   alias: ["ovh", "ovhcloud"],
   category: "free",
+  keyUrl: "https://endpoints.ai.cloud.ovh.net",
   noAuth: true,
   // Anonymous tier answers /chat/completions without API key (2 req/min per IP).
   // An optional OVHcloud key raises the limit to 400 req/min.
-  freeModelSync: "replace",
+  // Free access is account-level credit, not a per-model free tier, so there
+  // is no free-model sync; use Import for the live chat list.
   format: "openai",
   transport: {
     baseUrl: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",

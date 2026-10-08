@@ -144,7 +144,7 @@ test("dashboard import flow - modal, redirect notice, selection column, and clea
   // OpenCode syncs its free models: no import button, a Sync Now button instead.
   const oc = await (await app.request("/dashboard/providers/opencode")).text();
   assert.ok(!oc.includes("openModal('import-models-modal')"));
-  assert.ok(oc.includes("Sync Now"));
+  assert.ok(oc.includes("Sinkron Sekarang"));
 
   const res = await app.request("/dashboard/providers/models/import", {
     method: "POST",
@@ -156,11 +156,11 @@ test("dashboard import flow - modal, redirect notice, selection column, and clea
   html = await (await app.request(res.headers.get("location"))).text();
   assert.ok(html.includes("5 model berhasil di-import."));
   assert.ok(html.includes("kc/vendor/paid"));
-  assert.ok(html.includes("Imported"));
-  assert.ok(html.includes(">Free</span>"));
+  assert.ok(html.includes("Impor"));
+  assert.ok(html.includes(">Gratis</span>"));
   assert.ok(html.includes(`data-select-all="models"`));
-  assert.ok(html.includes("Delete Selected"));
-  assert.ok(html.includes("Clear Imported"));
+  assert.ok(html.includes("Hapus Terpilih"));
+  assert.ok(html.includes("Bersihkan Impor"));
 
   // Unknown notice codes are ignored rather than echoed.
   const bogus = await (await app.request("/dashboard/providers/kilocode?import=%3Cscript%3E")).text();

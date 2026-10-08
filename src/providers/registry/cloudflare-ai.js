@@ -3,6 +3,7 @@ export default {
   name: "Cloudflare Workers AI",
   alias: ["cf", "cloudflare", "cloudflare-ai"],
   category: "apikey",
+  keyUrl: "https://dash.cloudflare.com/profile/api-tokens",
   format: "openai",
   transport: {
     baseUrl: "https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1/chat/completions",

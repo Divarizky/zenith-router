@@ -9,6 +9,7 @@ import {
   openaiToResponsesRequest,
   responsesToOpenAIResponse,
   createResponsesToOpenAITransformStream,
+  createOpenAIToResponsesTransformStream,
 } from "./responses.js";
 import {
   openaiToGeminiRequest,
@@ -20,7 +21,7 @@ import {
   createKiroToOpenAITransformStream,
 } from "./kiro.js";
 
-export { FORMATS };
+export { FORMATS, normalizeFormat };
 
 /**
  * Translate incoming request body from sourceFormat to targetFormat
@@ -105,5 +106,53 @@ export function createTransformStream(sourceFormat, targetFormat, model) {
     return createKiroToOpenAITransformStream(model);
   }
 
+  if (tgt === FORMATS.OPENAI_RESPONSES && src !== FORMATS.OPENAI_RESPONSES) {
+    if (src === FORMATS.OPENAI) {
+      return createOpenAIToResponsesTransformStream(model);
+    }
+    return composeTransformStreams(
+      createTransformStream(src, FORMATS.OPENAI, model),
+      createOpenAIToResponsesTransformStream(model),
+    );
+  }
+
+  if (tgt === FORMATS.CLAUDE && src !== FORMATS.CLAUDE) {
+    return composeTransformStreams(
+      createTransformStream(src, FORMATS.OPENAI, model),
+      createResponseTransformStream(FORMATS.OPENAI, FORMATS.CLAUDE, model),
+    );
+  }
+
   return createResponseTransformStream(src, tgt, model);
+}
+
+function composeTransformStreams(...streams) {
+  let inputController;
+  const input = new ReadableStream({ start(controller) { inputController = controller; } });
+  const piped = streams.reduce((readable, stream) => readable.pipeThrough(stream), input);
+  const reader = piped.getReader();
+  let done;
+
+  return new TransformStream({
+    start(controller) {
+      done = (async () => {
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+        } catch (err) {
+          controller.error(err);
+        }
+      })();
+    },
+    transform(chunk) {
+      inputController.enqueue(chunk);
+    },
+    async flush() {
+      inputController.close();
+      await done;
+    },
+  });
 }

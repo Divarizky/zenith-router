@@ -3,6 +3,8 @@ export default {
   name: "Zai GLM Coding",
   alias: ["glm", "zai"],
   category: "oauth",
+  keyUrl: "https://z.ai/manage-apikey/apikey-list",
+  authMethods: ["oauth", "apikey"],
   // Sync needs an account; without one it reports no_account and keeps the static list.
   freeModelSync: "merge",
   format: "openai",
@@ -10,6 +12,7 @@ export default {
     baseUrl: "https://api.z.ai/api/coding/paas/v4/chat/completions",
     messagesUrl: "https://api.z.ai/api/coding/paas/v4/messages",
     format: "openai",
+    auth: { header: "x-api-key" },
   },
   models: [
     { id: "glm-4-plus", name: "GLM-4 Plus" },

@@ -9,6 +9,7 @@ import {
   startModelSyncScheduler,
 } from "../src/services/modelSync.js";
 import { listSyncedModels, listImportedModels, getModelSyncState, disableModel } from "../src/services/modelOverrides.js";
+import { importProviderModels, getImportModes } from "../src/services/modelImport.js";
 import { getAvailableModels, getProvider, getProviderModels } from "../src/providers/index.js";
 import { app } from "../src/index.js";
 
@@ -77,8 +78,11 @@ const OPENROUTER = {
 const MISTRAL = {
   payload: {
     data: [
-      { id: "mistral-large-latest" },
-      { id: "devstral-latest" },
+      // Real /v1/models shape: no pricing fields, free-ness comes from capabilities.
+      { id: "mistral-large-latest", name: "Mistral Large 3", capabilities: { completion_chat: true } },
+      { id: "devstral-latest", name: "Devstral 2", capabilities: { completion_chat: true } },
+      { id: "mistral-embed", capabilities: { completion_chat: false } },
+      { id: "mistral-retired-latest", capabilities: { completion_chat: true }, deprecation: "2026-01-01" },
     ],
   },
 };
@@ -86,8 +90,8 @@ const MISTRAL = {
 const OLLAMA = {
   payload: {
     data: [
-      { id: "llama3.3:latest" },
-      { id: "qwen2.5-coder:32b" },
+      { id: "llama3.3:latest", pricing: { prompt: "0", completion: "0" } },
+      { id: "qwen2.5-coder:32b", pricing: { prompt: "0", completion: "0" } },
     ],
   },
 };
@@ -95,8 +99,10 @@ const OLLAMA = {
 const OVH = {
   payload: {
     data: [
-      { id: "gpt-oss-120b" },
-      { id: "Qwen3.6-27B" },
+      { id: "gpt-oss-120b", context_length: 131072, max_completion_tokens: 131072, pricing: { prompt: "0", completion: "0" } },
+      { id: "Qwen3.5-397B-A17B", context_length: 262144, max_completion_tokens: 262144, pricing: { prompt: "0.00000071", completion: "0.00000425" } },
+      // Not a chat endpoint: guard models carry a budget but are no chat models.
+      { id: "Qwen3Guard-Gen-0.6B", context_length: 32768, max_completion_tokens: 16384, pricing: { prompt: "0", completion: "0" } },
     ],
   },
 };
@@ -117,7 +123,7 @@ test("opencode sync - live free list replaces the hardcoded list; paid Zen model
   initDb(":memory:");
 
   // Before any sync the hardcoded list is the fallback.
-  assert.ok(ids().includes("oc/union-alpha"));
+  assert.ok(ids().includes("oc/big-pickle"));
   assert.strictEqual(getProviderModels(getProvider("opencode"))[0].source, "builtin");
 
   const calls = mockUpstream({ "opencode.ai": OPENCODE });
@@ -144,7 +150,7 @@ test("kilocode sync - free models merge into the hardcoded list (9router kiloFre
 
   assert.deepStrictEqual(await syncFreeModels("kilocode"), { code: "synced", count: 3 });
   const routed = ids();
-  assert.ok(routed.includes("kc/deepseek-chat"), "hardcoded models stay");
+  assert.ok(routed.includes("kc/deepseek/deepseek-chat"), "hardcoded models stay");
   assert.ok(routed.includes("kc/kilo-auto/free"));
   assert.ok(routed.includes("kc/vendor/b"), "zero price counts as free");
   assert.ok(!routed.includes("kc/vendor/c:free"), "explicit isFree:false wins over the suffix");
@@ -214,7 +220,7 @@ test("cline sync - public feed merges free models without requiring an account",
 
   assert.deepStrictEqual(await syncFreeModels("cline"), { code: "synced", count: 2 });
   const routed = ids();
-  assert.ok(routed.includes("cl/z-ai/glm-5.2"), "hardcoded models stay in merge mode");
+  assert.ok(routed.includes("cl/anthropic/claude-sonnet-5.5"), "hardcoded models stay in merge mode");
   assert.ok(routed.includes("cl/cline-free/solar-mini4"));
   assert.ok(routed.includes("cl/cline-free/mimo-v2.6-flash"));
 });
@@ -226,7 +232,7 @@ test("openrouter sync - public model list merges free models without requiring a
 
   assert.deepStrictEqual(await syncFreeModels("openrouter"), { code: "synced", count: 2 });
   const routed = ids();
-  assert.ok(routed.includes("or/auto"), "hardcoded models stay");
+  assert.ok(routed.includes("or/openrouter/auto"), "hardcoded models stay");
   assert.ok(routed.includes("or/google/gemini-2.0-flash-exp:free"));
   assert.ok(routed.includes("or/meta-llama/llama-3.3-70b-instruct"), "zero pricing counted as free");
   assert.ok(!routed.includes("or/other/paid-model"));
@@ -235,7 +241,7 @@ test("openrouter sync - public model list merges free models without requiring a
 test("ollama sync - public cloud model list merges free cloud models without requiring an account", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
-  mockUpstream({ "ollama.com": { payload: { data: [{ id: "gpt-oss:120b" }, { id: "mistral-large-4" }] } } });
+  mockUpstream({ "ollama.com": { payload: { data: [{ id: "gpt-oss:120b", pricing: { prompt: "0", completion: "0" } }, { id: "mistral-large-4", pricing: { prompt: "0", completion: "0" } }] } } });
 
   assert.deepStrictEqual(await syncFreeModels("ollama"), { code: "synced", count: 2 });
   const routed = ids();
@@ -244,15 +250,20 @@ test("ollama sync - public cloud model list merges free cloud models without req
   assert.ok(routed.includes("ol/mistral-large-4"));
 });
 
-test("ovhcloud sync - public anonymous endpoint replaces models without requiring an account", async (t) => {
+test("ovhcloud - free access is account-level credit, so sync is unsupported", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
   mockUpstream({ "ovh.net": OVH });
 
-  assert.deepStrictEqual(await syncFreeModels("ovhcloud"), { code: "synced", count: 2 });
-  const routed = ids();
-  assert.ok(routed.includes("ovh/gpt-oss-120b"));
-  assert.ok(routed.includes("ovh/Qwen3.6-27B"));
+  assert.deepStrictEqual(await syncFreeModels("ovhcloud"), { code: "unsupported", count: 0 });
+  // Import still offers the live chat list.
+  assert.deepStrictEqual(getImportModes(getProvider("ovhcloud")), ["all"]);
+  const imported = await importProviderModels("ovhcloud", "all");
+  assert.strictEqual(imported.code, "imported");
+  // gpt-oss-120b is built-in; the rest are imported (chat only, guard models dropped).
+  assert.strictEqual(imported.count, 1);
+  assert.ok(ids().includes("ovh/Qwen3.5-397B-A17B"));
+  assert.ok(!ids().includes("ovh/Qwen3Guard-Gen-0.6B"), "guard models are not chat models");
 });
 
 test("xkiro sync - public free model list merges free models without requiring an account", async (t) => {
@@ -304,7 +315,6 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "api.cline.bot": CLINE,
     "openrouter.ai": OPENROUTER,
     "ollama.com": { payload: { data: [{ id: "gpt-oss:120b" }] } },
-    "ovh.net": OVH,
     "xkiro.com": XKIRO,
   });
 
@@ -323,11 +333,10 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "ollama",
     "opencode",
     "openrouter",
-    "ovhcloud",
     "xkiro",
   ]);
-  // 7 public providers make calls; bazaarlink, freebuff, glm, and mistral return no_account without making calls
-  assert.strictEqual(calls.length, 7);
+  // 6 public providers make calls; bazaarlink, freebuff, glm, and mistral return no_account without making calls
+  assert.strictEqual(calls.length, 6);
 
   disableModel("opencode", "exo-free");
   assert.ok(!ids().includes("oc/exo-free"));
@@ -367,7 +376,7 @@ test("dashboard - Sync Now redirects with a notice and the page shows synced row
 
   html = await (await app.request(res.headers.get("location"))).text();
   assert.ok(html.includes("Sinkron selesai: 3 model gratis."));
-  assert.ok(html.includes("Synced"));
+  assert.ok(html.includes("Sinkron"));
   assert.match(html, /Terakhir sinkron \d{2}-\d{2}-\d{4} \d{2}:\d{2} WIB \(3 model\)/);
   assert.ok(!html.includes("oc/union-alpha"));
 

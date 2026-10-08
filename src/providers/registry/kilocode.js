@@ -11,8 +11,7 @@ export default {
     format: "openai",
   },
   models: [
-    { id: "deepseek-chat", name: "DeepSeek Chat (Kilo)" },
-    { id: "deepseek-coder", name: "DeepSeek Coder (Kilo)" },
-    { id: "anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4 (Kilo)" },
+    { id: "deepseek/deepseek-chat", name: "DeepSeek Chat" },
+    { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
   ],
 };

@@ -3,6 +3,7 @@ export default {
   name: "Together AI",
   alias: ["together", "tg"],
   category: "apikey",
+  keyUrl: "https://api.together.ai/settings/api-keys",
   format: "openai",
   transport: {
     baseUrl: "https://api.together.xyz/v1/chat/completions",

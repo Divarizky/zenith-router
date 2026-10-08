@@ -1,8 +1,7 @@
-// Cline quirks (from 9router/OmniRoute), not yet handled by the gateway:
-// - Non-streaming responses are wrapped in {"success":true,"data":{...}}.
-// - Non-streaming requests fail upstream; they need forceStream + SSE-to-JSON
-//   conversion. Stream requests work without changes.
-// ponytail: add `forceStream` + envelope unwrap when non-stream Cline support is needed.
+// Cline quirks (from 9router/OmniRoute): non-streaming requests are forced to
+// stream upstream, then SSE is aggregated back into a normal completion. Some
+// non-streaming responses are wrapped in {"success":true,"data":{...}} and are
+// unwrapped by the gateway.
 export default {
   id: "cline",
   name: "Cline",
@@ -14,6 +13,7 @@ export default {
   format: "openai",
   transport: {
     baseUrl: "https://api.cline.bot/api/v1/chat/completions",
+    forceStream: true,
     format: "openai",
     headers: {
       "HTTP-Referer": "https://cline.bot",
@@ -21,18 +21,14 @@ export default {
     },
   },
   models: [
-    { id: "z-ai/glm-5.2", name: "GLM 5.2" },
-    { id: "x-ai/grok-4.5", name: "Grok 4.5" },
-    { id: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol" },
+    { id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5" },
+    { id: "anthropic/claude-opus-5.5", name: "Claude Opus 5.5" },
+    { id: "spacexai/grok-4.7", name: "Grok 4.7" },
+    { id: "openai/gpt-6-astra", name: "GPT-6 Astra" },
+    { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol" },
     { id: "moonshotai/kimi-k3", name: "Kimi K3" },
-    { id: "anthropic/claude-opus-4.8", name: "Claude Opus 4.8" },
-    { id: "openrouter/free", name: "Free Models Router" },
-    { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash (Free)" },
-    { id: "tencent/hy3:free", name: "Tencent Hy3 (Free)" },
-    { id: "stepfun/step-3.7-flash", name: "Step 3.7 Flash (Free)" },
-    { id: "poolside/laguna-m.1:free", name: "Laguna M.1 (Free)" },
-    { id: "google/gemma-4-31b-it:free", name: "Gemma 4 31B (Free)" },
-    { id: "nvidia/nemotron-3-ultra-550b-a55b:free", name: "Nemotron 3 Ultra (Free)" },
-    { id: "minimax/minimax-m3", name: "MiniMax M3 (Free)" },
+    { id: "cline-free/solar-mini4", name: "Solar Mini 4 (Free)" },
+    { id: "cline-free/mimo-v2.6-flash", name: "Mimo V2.6 Flash (Free)" },
+    { id: "cline-free/muse-spark-1.3-contributor", name: "Muse Spark 1.3 (Free)" },
   ],
 };

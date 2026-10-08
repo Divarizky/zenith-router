@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
 
+// Keys Gemini's Schema proto rejects ("Unknown name ... Cannot find field").
+const UNSUPPORTED_SCHEMA_KEYS = [
+  "$schema", "$id", "$ref", "$defs", "definitions", "additionalProperties", "default",
+  "patternProperties", "propertyNames", "unevaluatedProperties", "const", "not", "if", "then", "else",
+  "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "examples", "contentEncoding", "contentMediaType",
+];
+
 function cleanJsonSchema(schema) {
   if (!schema || typeof schema !== "object") return schema;
-  const copy = Array.isArray(schema) ? [...schema] : { ...schema };
-  delete copy.$schema;
-  delete copy.additionalProperties;
-  delete copy.default;
+  if (Array.isArray(schema)) return schema.map(cleanJsonSchema);
+  const copy = { ...schema };
+  if ("const" in copy && !copy.enum) copy.enum = [copy.const];
+  for (const key of UNSUPPORTED_SCHEMA_KEYS) delete copy[key];
 
   if (copy.properties && typeof copy.properties === "object") {
     const newProps = {};
@@ -14,9 +21,13 @@ function cleanJsonSchema(schema) {
     }
     copy.properties = newProps;
   }
-  if (copy.items) {
-    copy.items = cleanJsonSchema(copy.items);
+  if (copy.items) copy.items = cleanJsonSchema(copy.items);
+  if (Array.isArray(copy.oneOf)) {
+    copy.anyOf = [...(copy.anyOf || []), ...copy.oneOf];
+    delete copy.oneOf;
   }
+  if (Array.isArray(copy.anyOf)) copy.anyOf = copy.anyOf.map(cleanJsonSchema);
+  if (Array.isArray(copy.enum)) copy.enum = copy.enum.map(String);
   return copy;
 }
 

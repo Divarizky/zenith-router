@@ -93,6 +93,12 @@ export function initConsoleLogCapture() {
   state.patched = true;
 }
 
+export function captureLine(text) {
+  try {
+    appendLine("log", [String(text)]);
+  } catch {}
+}
+
 export function getConsoleLogs() {
   return state.logs;
 }

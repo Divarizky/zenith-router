@@ -55,8 +55,8 @@ function openaiMessageToClaude(msg) {
     for (const tc of msg.tool_calls) {
       content.push({
         type: "tool_use",
-        id: tc.id,
-        name: tc.function?.name,
+        id: tc.id || `call_${Date.now()}`,
+        name: tc.function?.name || "tool_call",
         input: typeof tc.function?.arguments === "string"
           ? JSON.parse(tc.function.arguments || "{}")
           : (tc.function?.arguments || {}),

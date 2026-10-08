@@ -19,11 +19,11 @@ test("GET /dashboard - returns Overview HTML page with tabs and status", async (
   const html = await res.text();
   assert.ok(html.includes("zenroute"));
   assert.ok(html.includes("Overview"));
-  assert.ok(html.includes("Connections"));
-  assert.ok(html.includes("Usage"));
+  assert.ok(html.includes("Providers"));
+  assert.ok(html.includes("Usage & Quota"));
   assert.ok(html.includes("Settings"));
   assert.ok(html.includes("20120"));
-  assert.ok(html.includes("Active Connections"));
+  assert.ok(html.includes("Koneksi Aktif"));
   assert.ok(html.includes("Console Log"));
   assert.ok(html.includes("console-terminal"));
 });

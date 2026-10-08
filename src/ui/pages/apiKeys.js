@@ -9,7 +9,7 @@ import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 
 function formatTime(ms) {
-  if (!ms) return `<span style="color: var(--text-muted);">never</span>`;
+  if (!ms) return `<span style="color: var(--text-muted);">belum pernah</span>`;
   return escapeHtml(new Date(Number(ms)).toISOString().replace("T", " ").slice(0, 16));
 }
 
@@ -20,11 +20,11 @@ function renderNewKeyNotice(newKey, port) {
     <div class="card" style="margin-bottom: 1.5rem; border-color: var(--warning);">
       <h3 style="color: var(--warning);">New key: copy it now</h3>
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-        This is the only time the full key is shown. zenroute stores only its SHA-256 hash.
+        Ini satu-satunya waktu kunci penuh ditampilkan. zenroute hanya menyimpan hash SHA-256.
       </p>
       <code style="display: block; padding: 0.75rem; word-break: break-all; font-size: 0.95rem;">${escapeHtml(newKey.key)}</code>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem;">
-        Send it as <code>Authorization: Bearer &lt;key&gt;</code> or <code>x-api-key: &lt;key&gt;</code> to <code>${baseUrl}/v1</code>.
+        Kirim sebagai <code>Authorization: Bearer &lt;key&gt;</code> or <code>x-api-key: &lt;key&gt;</code> to <code>${baseUrl}/v1</code>.
       </p>
     </div>`;
 }
@@ -42,12 +42,12 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
   else if (query.status === "toggled") noticeText = "Status API key diperbarui.";
 
   const policy = required
-    ? `<span class="pill pill-success">Required</span>`
-    : `<span class="pill pill-warning">Not required</span>`;
+    ? `<span class="pill pill-success">Wajib</span>`
+    : `<span class="pill pill-warning">Tidak wajib</span>`;
 
   const lockoutWarning =
     required && activeCount === 0
-      ? `<p style="color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem;">No active key: every /v1 request is rejected until you create one.</p>`
+      ? `<p style="color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem;">Tidak ada kunci aktif: semua request /v1 ditolak sampai kamu membuat satu.</p>`
       : "";
 
   const content = `
@@ -62,10 +62,10 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
 
     <div class="card" style="margin-bottom: 1.5rem;">
       <h3>Gateway Access Policy</h3>
-      <p class="hint">API key on /v1: ${policy}</p>
+      <p class="hint">Kunci API di /v1: ${policy}</p>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
-        Toggle in Settings. Always required when zenroute binds to a non-loopback address.
-        These keys only unlock zenroute; provider credentials stay in Connections and are never taken from clients.
+        Ubah di Pengaturan. Selalu wajib saat zenroute terikat ke alamat non-loopback.
+        Kunci ini hanya membuka zenroute; kredensial penyedia tetap di Koneksi dan tidak diambil dari klien.
       </p>
       ${lockoutWarning}
     </div>
@@ -83,11 +83,11 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
         <form action="/dashboard/keys/create" method="POST">
           <div class="field">
             <label for="name">Label</label>
-            <input type="text" id="name" name="name" placeholder="e.g. Claude Code laptop" maxlength="80" required />
+            <input type="text" id="name" name="name" placeholder="mis. Claude Code laptop" maxlength="80" required />
           </div>
           <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
-            <button type="button" class="btn" data-close-modal="create-key-modal">Cancel</button>
-            <button type="submit" class="btn btn-primary">Create</button>
+            <button type="button" class="btn" data-close-modal="create-key-modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Buat</button>
           </div>
         </form>
       </div>
@@ -97,16 +97,16 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
       <h3>Keys (${keys.length})</h3>
       ${
         keys.length === 0
-          ? `<div class="empty"><p class="big">No keys yet</p><p>Buat key pertama lewat tombol Create API Key.</p></div>`
+          ? `<div class="empty"><p class="big">Belum ada kunci</p><p>Buat kunci pertama lewat tombol Buat Kunci API.</p></div>`
           : `<table>
         <thead>
           <tr>
             <th>Label</th>
-            <th>Key</th>
-            <th>Created</th>
-            <th>Last Used</th>
+            <th>Kunci</th>
+            <th>Dibuat</th>
+            <th>Terakhir Dipakai</th>
             <th>Status</th>
-            <th>Action</th>
+            <th>Aksi</th>
           </tr>
         </thead>
         <tbody>
@@ -120,20 +120,20 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
               <td>${formatTime(k.last_used_at)}</td>
               <td>${
                 k.is_active === 1
-                  ? `<span class="pill pill-success">Active</span>`
-                  : `<span class="pill pill-danger">Disabled</span>`
+                  ? `<span class="pill pill-success">Aktif</span>`
+                  : `<span class="pill pill-danger">Nonaktif</span>`
               }</td>
               <td style="display: flex; gap: 0.4rem;">
                 <form action="/dashboard/keys/toggle" method="POST">
                   <input type="hidden" name="id" value="${escapeHtml(k.id)}" />
                   <input type="hidden" name="active" value="${k.is_active === 1 ? "false" : "true"}" />
                   <button type="submit" class="btn btn-sm">${
-                    k.is_active === 1 ? "Disable" : "Enable"
+                    k.is_active === 1 ? "Nonaktifkan" : "Aktifkan"
                   }</button>
                 </form>
                 <form action="/dashboard/keys/delete" method="POST">
                   <input type="hidden" name="id" value="${escapeHtml(k.id)}" />
-                  <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                  <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
                 </form>
               </td>
             </tr>`

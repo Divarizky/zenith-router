@@ -21,9 +21,9 @@ export function renderSettingsPage(port = 20120, query = {}) {
 
   let authNote = "";
   if (forcedByBind) {
-    authNote = `<p style="font-size: 0.8rem; color: var(--warning); margin-top: 0.25rem;">Always enforced: zenroute is bound to ${escapeHtml(getBindHost())}.</p>`;
+    authNote = `<p style="font-size: 0.8rem; color: var(--warning); margin-top: 0.25rem;">Selalu ditegakkan: zenroute terikat ke ${escapeHtml(getBindHost())}.</p>`;
   } else if (isRequireAuth && activeKeys === 0) {
-    authNote = `<p style="font-size: 0.8rem; color: var(--danger); margin-top: 0.25rem;">No active API key: every /v1 request is rejected. Create one in API Keys.</p>`;
+    authNote = `<p style="font-size: 0.8rem; color: var(--danger); margin-top: 0.25rem;">Tidak ada kunci API aktif: semua request /v1 ditolak. Buat satu di Kunci API.</p>`;
   }
 
   const content = `
@@ -35,63 +35,76 @@ export function renderSettingsPage(port = 20120, query = {}) {
     <div class="card" style="max-width: 640px;">
       <h3 style="margin-bottom: 1.25rem;">Global Gateway Settings</h3>
       <form action="/dashboard/settings" method="POST">
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); margin-bottom: 1.25rem;">
-          <div>
-            <strong>Require API Key for Gateway Access</strong>
-            <p class="hint">Clients must send a zenroute key from the API Keys page (Authorization: Bearer or x-api-key) to use /v1.</p>
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Wajibkan Kunci API untuk Akses Gateway</strong>
+            <p class="hint">Klien harus mengirim kunci zenroute dari halaman Kunci API (Authorization: Bearer atau x-api-key) untuk memakai /v1.</p>
             ${authNote}
           </div>
-          <label class="switch">
-            <input type="checkbox" name="require_api_key" value="true" ${isRequireAuth ? "checked" : ""} />
-            <span class="slider"></span>
-          </label>
+          <div class="setting-action">
+            <label class="switch" aria-label="Wajibkan Kunci API">
+              <input type="checkbox" name="require_api_key" value="true" ${isRequireAuth ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
 
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); margin-bottom: 1.25rem;">
-          <div>
-            <strong>Account Rotation Strategy</strong>
-            <p class="hint">How zenroute chooses between multiple active accounts for the same provider.</p>
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Strategi Rotasi Akun</strong>
+            <p class="hint">Cara zenroute memilih antar akun aktif untuk penyedia yang sama.</p>
           </div>
-          <div>
-            <select name="account_rotation" class="input-select" style="min-width: 140px; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-subtle);">
-              <option value="lru" ${rotationStrategy === "lru" ? "selected" : ""}>LRU (Round-Robin)</option>
-              <option value="sticky" ${rotationStrategy === "sticky" ? "selected" : ""}>Sticky (Same Account)</option>
+          <div class="setting-action">
+            <select name="account_rotation" class="input-select">
+              <option value="lru" ${rotationStrategy === "lru" ? "selected" : ""}>LRU (Giliran Akun)</option>
+              <option value="sticky" ${rotationStrategy === "sticky" ? "selected" : ""}>Sticky (Akun Sama)</option>
             </select>
           </div>
         </div>
 
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); margin-bottom: 1.25rem;">
-          <div>
-            <strong>Account Traffic Guard (Concurrency Cap)</strong>
-            <p class="hint">Limits concurrent requests per OAuth account to avoid bot detection and rate limits.</p>
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Penjaga Lalu Lintas Akun (Traffic Guard)</strong>
+            <p class="hint">Membatasi request bersamaan per akun OAuth agar tidak terdeteksi bot dan kena rate limit.</p>
           </div>
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <select name="max_account_concurrency" class="input-select" style="padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-subtle);">
-              <option value="1" ${maxConcurrency === "1" ? "selected" : ""}>Max 1 in-flight</option>
-              <option value="2" ${maxConcurrency === "2" ? "selected" : ""}>Max 2 in-flight</option>
-              <option value="3" ${maxConcurrency === "3" ? "selected" : ""}>Max 3 in-flight</option>
-              <option value="5" ${maxConcurrency === "5" ? "selected" : ""}>Max 5 in-flight</option>
-            </select>
-            <label class="switch">
+          <div class="setting-action">
+            <label class="switch" aria-label="Penjaga Lalu Lintas Akun">
               <input type="checkbox" name="traffic_guard_enabled" value="true" ${isTrafficGuard ? "checked" : ""} />
               <span class="slider"></span>
             </label>
           </div>
         </div>
 
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); margin-bottom: 1.25rem;">
-          <div>
-            <strong>Human-like Request Pacing & Jitter</strong>
-            <p class="hint">Applies a small random delay (100–300ms) between back-to-back requests to break bot burst patterns.</p>
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Batas Konkurensi per Akun</strong>
+            <p class="hint">Jumlah maksimum request in-flight bersamaan untuk satu akun saat Penjaga Lalu Lintas aktif.</p>
           </div>
-          <label class="switch">
-            <input type="checkbox" name="request_jitter_enabled" value="true" ${isJitter ? "checked" : ""} />
-            <span class="slider"></span>
-          </label>
+          <div class="setting-action">
+            <select name="max_account_concurrency" class="input-select">
+              <option value="1" ${maxConcurrency === "1" ? "selected" : ""}>Maks 1 bersamaan</option>
+              <option value="2" ${maxConcurrency === "2" ? "selected" : ""}>Maks 2 bersamaan</option>
+              <option value="3" ${maxConcurrency === "3" ? "selected" : ""}>Maks 3 bersamaan</option>
+              <option value="5" ${maxConcurrency === "5" ? "selected" : ""}>Maks 5 bersamaan</option>
+            </select>
+          </div>
         </div>
 
-        <div style="margin-top: 1.25rem;">
-          <button type="submit" class="btn btn-primary">Save Settings</button>
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Jeda & Jitter Seperti Manusia</strong>
+            <p class="hint">Memberi jeda acak kecil (100–300ms) antar request berurutan untuk memutus pola burst bot.</p>
+          </div>
+          <div class="setting-action">
+            <label class="switch" aria-label="Jeda & Jitter Seperti Manusia">
+              <input type="checkbox" name="request_jitter_enabled" value="true" ${isJitter ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
         </div>
       </form>
     </div>

@@ -25,7 +25,7 @@ test("GET /dashboard/keys - renders policy, form, and API Keys tab", async () =>
   const html = await res.text();
   assert.ok(html.includes("API Keys"));
   assert.ok(html.includes("/dashboard/keys/create"));
-  assert.ok(html.includes("Not required"));
+  assert.ok(html.includes("Tidak wajib"));
 });
 
 test("POST /dashboard/keys/create - shows the plaintext key once and lists only the prefix after", async () => {

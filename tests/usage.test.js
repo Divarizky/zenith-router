@@ -152,3 +152,20 @@ test("usage service - records apiKeyId and aggregates by_api_key", () => {
   assert.strictEqual(anon.count, 1);
   assert.strictEqual(anon.total_tokens, 100);
 });
+
+test("usage service - getUsageStats aggregates by_provider via connections", () => {
+  initDb(":memory:");
+
+  const c1 = addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "k1" } });
+  const c2 = addConnection({ provider: "glm", name: "GLM Acc 2", credentials: { api_key: "k2" } });
+
+  recordUsage({ connectionId: c1.id, model: "glm-4-flash", inputTokens: 100, outputTokens: 50 });
+  recordUsage({ connectionId: c2.id, model: "glm-4-flash", inputTokens: 200, outputTokens: 100 });
+
+  const stats = getUsageStats();
+  assert.ok(Array.isArray(stats.by_provider));
+  const glm = stats.by_provider.find((p) => p.provider === "glm");
+  assert.ok(glm);
+  assert.strictEqual(glm.count, 2);
+  assert.strictEqual(glm.total_tokens, 450);
+});

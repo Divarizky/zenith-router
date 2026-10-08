@@ -22,8 +22,8 @@ test("GET /dashboard/providers - groups providers by category and marks noAuth a
   assert.ok(html.includes("OAuth Providers"));
   assert.ok(html.includes("Free Tier Providers"));
   assert.ok(html.includes("OpenCode Free"));
-  assert.ok(html.includes("Ready"));
-  assert.ok(html.includes("1 Connected"));
+  assert.ok(html.includes("Siap"));
+  assert.ok(html.includes("1 Terhubung"));
   assert.ok(html.includes("/dashboard/providers/opencode"));
 });
 
@@ -43,7 +43,7 @@ test("GET /dashboard/providers/:id - shows accounts and models for one provider"
   assert.strictEqual(res.status, 200);
   const html = await res.text();
   assert.ok(html.includes("GLM Main"));
-  assert.ok(html.includes("Add Account"));
+  assert.ok(html.includes("Tambah Akun"));
   assert.ok(html.includes("glm/glm-4-flash"));
   assert.ok(html.includes("Add Custom Model"));
 
@@ -136,4 +136,22 @@ test("POST actions with an unknown provider redirect to the providers list", asy
     body: form({ provider: "https://evil.example", name: "x", api_key: "y" }),
   });
   assert.strictEqual(res.headers.get("location"), "/dashboard/providers");
+});
+
+test("Provider detail pages link to the vendor API key page", async () => {
+  initDb(":memory:");
+  const expected = {
+    xkiro: "https://xkiro.com/dashboard/api/keys",
+    openrouter: "https://openrouter.ai/keys",
+    mistral: "https://console.mistral.ai/api-keys",
+    glm: "https://z.ai/manage-apikey/apikey-list",
+  };
+  for (const [id, url] of Object.entries(expected)) {
+    const html = await (await app.request(`/dashboard/providers/${id}`)).text();
+    assert.ok(html.includes(`href="${url}"`), `${id} harus punya link ${url}`);
+    assert.ok(html.includes('target="_blank"') && html.includes('rel="noopener noreferrer"'));
+  }
+  // Provider tanpa keyUrl tidak menampilkan link.
+  const kiro = await (await app.request("/dashboard/providers/kiro")).text();
+  assert.ok(!kiro.includes(`class="key-link"`));
 });

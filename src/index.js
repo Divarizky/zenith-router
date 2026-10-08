@@ -10,7 +10,7 @@ import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
 import { handleGetUsage } from "./services/usage.js";
-import { handleGetQuota } from "./services/quota.js";
+import { handleGetQuota, handleSyncQuotaForm } from "./services/quota.js";
 import {
   initConsoleLogCapture,
   getConsoleLogs,
@@ -160,6 +160,7 @@ app.post("/v1/responses", handleResponses);
 // Analytics & Usage
 app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
+app.post("/dashboard/quota/sync", handleSyncQuotaForm);
 
 // Console Logs API
 app.get("/api/console-logs", (c) => c.json({ logs: getConsoleLogs() }));

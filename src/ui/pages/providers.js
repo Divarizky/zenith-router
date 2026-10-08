@@ -26,12 +26,18 @@ import { escapeHtml } from "../html.js";
 
 const SECTIONS = [
   { category: "oauth", title: "OAuth Providers", hint: "Login dengan akun langganan, lalu tempel token di sini." },
-  { category: "free", title: "Free Tier Providers", hint: "Provider gratis. Yang berlabel Ready bisa dipakai tanpa akun." },
+  { category: "free", title: "Free Tier Providers", hint: "Provider gratis. Yang berlabel Siap bisa dipakai tanpa akun." },
   { category: "apikey", title: "API Key Providers", hint: "Butuh API key dari vendor." },
 ];
 
 function primaryAlias(p) {
   return Array.isArray(p.alias) ? p.alias[0] : p.alias || p.id;
+}
+
+/** Link to the vendor page where an API key is created (only providers that declare keyUrl). */
+function keyLink(p, label = "Buat API key") {
+  if (!p.keyUrl) return "";
+  return `<a class="key-link" href="${escapeHtml(p.keyUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)} di ${escapeHtml(p.name)} &#8599;</a>`;
 }
 
 function providerUrl(id) {
@@ -159,7 +165,7 @@ function freeTierPills(providerId) {
   const budget = FREE_TIER_BUDGETS[providerId];
   if (budget) pills.push(`<span class="pill">${formatTokens(budget)} token/bulan</span>`);
   const tos = FREE_TIER_TOS[providerId];
-  if (tos === "avoid") pills.push(`<span class="pill pill-warning">ToS: avoid</span>`);
+  if (tos === "avoid") pills.push(`<span class="pill pill-warning">ToS: hindari</span>`);
   else if (tos) pills.push(`<span class="pill">ToS: ${escapeHtml(tos)}</span>`);
   return pills.join("");
 }
@@ -172,8 +178,8 @@ function accountStats(list) {
 }
 
 function statusPill(p, stats) {
-  if (p.noAuth) return `<span class="pill pill-success">Ready</span>`;
-  if (stats.healthy > 0) return `<span class="pill pill-success">${stats.healthy} Connected</span>`;
+  if (p.noAuth) return `<span class="pill pill-success">Siap</span>`;
+  if (stats.healthy > 0) return `<span class="pill pill-success">${stats.healthy} Terhubung</span>`;
   if (stats.total > 0) return `<span class="pill pill-warning">${stats.total} tidak aktif</span>`;
   return `<span class="pill">Belum ada akun</span>`;
 }
@@ -324,7 +330,7 @@ const OAUTH_SCRIPT = `
           (r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
             : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke zenroute, tempel URL callback atau kode di bawah.</p>') +
           '<div class="field"><input id="oauth-manual" placeholder="http://localhost:.../callback?code=... atau code#state" autocomplete="off" /></div>' +
-          '<button type="button" class="btn btn-sm" onclick="zrOAuthManual()">Submit</button>' +
+          '<button type="button" class="btn btn-sm" onclick="zrOAuthManual()">Kirim</button>' +
           '<p id="oauth-manual-error" class="hint" style="color: var(--danger); margin-top: 0.5rem;"></p>');
       }
       schedule();
@@ -358,20 +364,21 @@ function renderAddAccountModal(p) {
         <form action="/dashboard/providers/accounts/add" method="POST">
           <input type="hidden" name="provider" value="${id}" />
           <div class="field">
-            <label for="name">Account Label</label>
-            <input type="text" id="name" name="name" placeholder="e.g. Akun utama" required />
+            <label for="name">Label Akun</label>
+            <input type="text" id="name" name="name" placeholder="mis. Akun utama" required />
           </div>
           <div class="field">
             <label for="api_key">API Key</label>
-            <input type="password" id="api_key" name="api_key" placeholder="Paste API key..." required />
+            <input type="password" id="api_key" name="api_key" placeholder="Tempel API key..." required />
+            ${p.keyUrl ? `<p class="hint">Belum punya key? ${keyLink(p)}</p>` : ""}
           </div>
           <div class="field">
-            <label for="proxy_url">Proxy URL (Optional)</label>
+            <label for="proxy_url">URL Proxy (Opsional)</label>
             <input type="text" id="proxy_url" name="proxy_url" placeholder="http://127.0.0.1:7890" />
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn" data-close-modal="add-account-modal">Cancel</button>
-            <button type="submit" class="btn btn-primary">Add Account</button>
+            <button type="button" class="btn" data-close-modal="add-account-modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Tambah Akun</button>
           </div>
         </form>
       </div>
@@ -379,7 +386,7 @@ function renderAddAccountModal(p) {
   }
 
   const login = getOAuthFlow(p.id)
-    ? `<button type="button" class="btn btn-primary" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Login")}</button>`
+    ? `<button type="button" class="btn btn-primary" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Masuk")}</button>`
     : "";
   const local = LOCAL_IMPORT[p.id];
   const importForm = local
@@ -398,11 +405,11 @@ function renderAddAccountModal(p) {
       <div class="modal">
         ${title}
         <div class="field">
-          <label for="acct-name">Account Label (Optional)</label>
+          <label for="acct-name">Label Akun (Opsional)</label>
           <input type="text" id="acct-name" placeholder="Default: email akun" />
         </div>
         <div class="field">
-          <label for="acct-proxy">Proxy URL (Optional)</label>
+          <label for="acct-proxy">URL Proxy (Opsional)</label>
           <input type="text" id="acct-proxy" placeholder="http://127.0.0.1:7890" />
         </div>
         ${
@@ -425,21 +432,22 @@ function renderAddAccountModal(p) {
             <input type="hidden" name="proxy_url" />
             <div class="field">
               <label for="api_key">${escapeHtml(tokenLabel)}</label>
-              <input type="password" id="api_key" name="api_key" placeholder="Paste token..." required />
+              <input type="password" id="api_key" name="api_key" placeholder="Tempel token..." required />
+              ${p.keyUrl ? `<p class="hint">Belum punya key? ${keyLink(p)}</p>` : ""}
             </div>
             ${
               REFRESHABLE.has(p.id)
                 ? `<div class="field">
-              <label for="refresh_token">Refresh Token (Optional)</label>
+              <label for="refresh_token">Refresh Token (Opsional)</label>
               <input type="password" id="refresh_token" name="refresh_token" placeholder="Agar token diperpanjang otomatis" />
             </div>`
                 : ""
             }
-            <button type="submit" class="btn btn-sm">Save Token</button>
+            <button type="submit" class="btn btn-sm">Simpan Token</button>
           </form>
         </details>
         <div class="modal-actions">
-          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel()">Close</button>
+          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel()">Tutup</button>
         </div>
       </div>
     </div>
@@ -463,10 +471,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 
   const accountRows = accounts
     .map((c) => {
-      let status = `<span class="pill pill-success">Active</span>`;
-      if (c.is_active !== 1) status = `<span class="pill">Disabled</span>`;
+      let status = `<span class="pill pill-success">Aktif</span>`;
+      if (c.is_active !== 1) status = `<span class="pill">Nonaktif</span>`;
       else if (isConnectionInCooldown(c)) status = `<span class="pill pill-warning">Cooldown</span>`;
-      else if (isConnectionExhausted(c)) status = `<span class="pill pill-danger">Exhausted</span>`;
+      else if (isConnectionExhausted(c)) status = `<span class="pill pill-danger">Habis Kuota</span>`;
       return `
         <tr>
           <td><strong>${escapeHtml(c.name)}</strong></td>
@@ -477,7 +485,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
             <form action="/dashboard/providers/accounts/delete" method="POST">
               <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
               <input type="hidden" name="provider" value="${id}" />
-              <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+              <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
             </form>
           </td>
         </tr>`;
@@ -491,7 +499,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     accountsBody = `<div class="empty"><p class="big">Belum ada akun</p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
     accountsBody = `<table>
-        <thead><tr><th>Name</th><th>Auth</th><th>Proxy</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th></th></tr></thead>
         <tbody>${accountRows}</tbody>
       </table>`;
   }
@@ -507,10 +515,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const hasImported = importedModels.length > 0;
 
   const SOURCE_CELL = {
-    builtin: `<span class="hint">Built-in</span>`,
-    synced: `<span class="pill">Synced</span>`,
-    custom: `<span class="pill">Custom</span>`,
-    imported: `<span class="pill">Imported</span>`,
+    builtin: `<span class="hint">Bawaan</span>`,
+    synced: `<span class="pill">Sinkron</span>`,
+    custom: `<span class="pill">Kustom</span>`,
+    imported: `<span class="pill">Impor</span>`,
   };
 
   const modelRow = (modelId, name, source, customId, isFree = false) => {
@@ -526,21 +534,21 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         <tr${disabled ? ` class="muted"` : ""}>
           <td class="select-cell">${selectCell}</td>
           <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code></td>
-          <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Free</span>` : ""}</td>
+          <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Gratis</span>` : ""}</td>
           <td>${SOURCE_CELL[source]}</td>
-          <td>${disabled ? `<span class="pill">Disabled</span>` : `<span class="pill pill-success">Enabled</span>`}</td>
+          <td>${disabled ? `<span class="pill">Nonaktif</span>` : `<span class="pill pill-success">Aktif</span>`}</td>
           <td class="actions">
             <form action="/dashboard/providers/models/${toggleAction}" method="POST">
               <input type="hidden" name="provider" value="${id}" />
               <input type="hidden" name="model_id" value="${escapeHtml(modelId)}" />
-              <button type="submit" class="btn btn-sm">${disabled ? "Enable" : "Disable"}</button>
+              <button type="submit" class="btn btn-sm">${disabled ? "Aktifkan" : "Nonaktifkan"}</button>
             </form>
             ${
               custom
                 ? `<form action="/dashboard/providers/models/custom/delete" method="POST">
               <input type="hidden" name="id" value="${escapeHtml(customId)}" />
               <input type="hidden" name="provider" value="${id}" />
-              <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+              <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
             </form>`
                 : ""
             }
@@ -575,8 +583,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
             p.freeModelSync ? " Model gratis provider ini sudah disinkron otomatis, jadi tidak perlu di-import." : ""
           }</p>
           <div class="modal-actions">
-            <button type="button" class="btn" data-close-modal="import-models-modal">Cancel</button>
-            <button type="submit" class="btn btn-primary">Import</button>
+            <button type="button" class="btn" data-close-modal="import-models-modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Impor</button>
           </div>
         </form>
       </div>
@@ -605,33 +613,34 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       <div class="provider-card-head">
         <div>
           <h3 style="font-size: 1.1rem;">${escapeHtml(p.name)}</h3>
-          <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${escapeHtml(p.category || "apikey")}</p>
+          <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : "API Key"}</p>
         </div>
         ${statusPill(p, stats)}
       </div>
       ${p.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
+      ${p.keyUrl ? `<p class="hint" style="margin-top: 10px;">${keyLink(p, p.noAuth ? "Buat API key (opsional)" : "Buat API key")}</p>` : ""}
     </div>
 
     <div class="card">
       <div class="card-head">
         <h3>Accounts${p.noAuth ? "" : ` (${accounts.length})`}</h3>
-        ${p.noAuth ? "" : `<button class="btn btn-primary btn-sm" onclick="openModal('add-account-modal')">Add Account</button>`}
+        ${p.noAuth ? "" : `<button class="btn btn-primary btn-sm" onclick="openModal('add-account-modal')">Tambah Akun</button>`}
       </div>
       ${accountsBody}
     </div>
 
     <div class="card">
       <div class="card-head">
-        <h3>Models (${totalModels})</h3>
+        <h3>Model (${totalModels})</h3>
         <div class="btn-row">
-          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Disable Selected (<span data-selected-count="models">0</span>)</button>
-          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Enable Selected (<span data-selected-count="models">0</span>)</button>
+          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
+          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Aktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
           ${
             hasImported
-              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled onclick="return confirmSelected(document.getElementById('models-bulk-form'), 'model_ids', 'model hasil import')">Delete Selected (<span data-selected-count="models">0</span>)</button>
+              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled onclick="return confirmSelected(document.getElementById('models-bulk-form'), 'model_ids', 'model hasil import')">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>
           <form action="/dashboard/providers/models/import/clear" method="POST" onsubmit="return confirm('Hapus semua model hasil import?')">
             <input type="hidden" name="provider" value="${id}" />
-            <button type="submit" class="btn btn-danger btn-sm">Clear Imported</button>
+            <button type="submit" class="btn btn-danger btn-sm">Bersihkan Impor</button>
           </form>`
               : ""
           }
@@ -639,7 +648,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
             p.freeModelSync
               ? `<form action="/dashboard/providers/models/sync" method="POST">
             <input type="hidden" name="provider" value="${id}" />
-            <button type="submit" class="btn btn-sm">Sync Now</button>
+            <button type="submit" class="btn btn-sm">Sinkron Sekarang</button>
           </form>`
               : ""
           }
@@ -676,7 +685,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           </div>
           <p class="hint">Dipanggil lewat <code>${escapeHtml(alias)}/&lt;model-id&gt;</code>.</p>
           <div class="modal-actions">
-            <button type="button" class="btn" data-close-modal="add-model-modal">Cancel</button>
+            <button type="button" class="btn" data-close-modal="add-model-modal">Batal</button>
             <button type="submit" class="btn btn-primary">Add Model</button>
           </div>
         </form>

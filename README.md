@@ -76,6 +76,93 @@ Prefix menentukan provider (`cc`, `cx`, `gh`, `kr`, `ag`, `glm`, `oc`, `kc`, `nv
 
 Key zenroute hanya membuka akses ke gateway dan tidak pernah diteruskan ke provider. Kredensial provider selalu diambil dari database lokal; tanpa connection aktif (kecuali provider no-auth/free), gateway membalas 503.
 
+## Topologi
+
+Tiga diagram di bawah meniru pola `docs/diagrams/` OmniRoute (`request-pipeline.mmd`, `authz-pipeline.mmd`, `db-schema-overview.mmd`), tetapi isinya disesuaikan dengan kode zenroute yang sebenarnya.
+
+### Alur request gateway
+
+```mermaid
+flowchart LR
+  Client["coding agent<br/>OpenAI / Claude / Responses"] --> Guard["security.js<br/>hostGuard + gatewayAuth"]
+  Guard --> Handler["gateway/<br/>chat - messages - responses"]
+  Handler --> Resolve["resolveModel<br/>prefix - provider"]
+  Resolve --> Translate["translateRequest<br/>ke format target"]
+  Translate --> Saver["applyTokenSaver<br/>RTK - Caveman"]
+  Saver --> Fallback["executeWithFallback"]
+  Fallback --> Slot["acquireAccountSlot<br/>concurrency + jitter"]
+  Slot --> Exec["executor.execute<br/>HTTP - proxy"]
+  Exec --> Up["provider upstream"]
+  Up --> Resp["translateResponse<br/>atau SSE transform"]
+  Resp --> Usage["recordUsage<br/>usage_history"]
+  Usage --> Client
+  Fallback -->|"429 / 5xx"| Cool["cooldown 60 detik<br/>coba akun berikut"]
+  Cool --> Fallback
+  Fallback -->|"401 / 403"| Refresh["refreshOAuthToken<br/>coba ulang 1x"]
+  Refresh --> Fallback
+  Fallback -->|"semua akun gagal"| Client
+```
+
+### Lapis keamanan request
+
+```mermaid
+flowchart LR
+  Req["request masuk"] --> Host["hostGuard<br/>tolak non-loopback"]
+  Host --> CP{"dashboard<br/>atau /api/* ?"}
+  CP -->|"ya"| Local["controlPlaneGuard<br/>localhost + anti-CSRF"]
+  CP -->|"tidak"| V1{"path /v1/* ?"}
+  Local --> H["handler"]
+  V1 -->|"tidak"| H
+  V1 -->|"ya"| JSON["requireJsonBody<br/>+ corsOptIn"]
+  JSON --> Key{"API key?"}
+  Key -->|"valid"| H
+  Key -->|"wajib, tak valid"| R401["401"]
+  Key -->|"opsional, tanpa key"| H
+```
+
+### Skema database
+
+```mermaid
+erDiagram
+  connections ||--o{ usage_history : mencatat
+  api_keys ||--o{ usage_history : mengaudit
+  connections {
+    int id PK
+    text provider
+    text auth_type
+    text credentials
+    int cooldown_until
+  }
+  combos {
+    int id PK
+    text name
+    text strategy
+    text models
+  }
+  api_keys {
+    int id PK
+    text key_prefix
+    text key_hash
+  }
+  usage_history {
+    int id PK
+    int connection_id FK
+    int api_key_id FK
+    text model
+    int total_tokens
+  }
+  settings {
+    text key PK
+    text value
+  }
+  synced_models {
+    text provider PK
+    text model_id PK
+  }
+```
+
+Tabel lain tanpa relasi FK: `custom_models`, `disabled_models`, `imported_models`, `model_sync_state`.
+
 ## Konfigurasi (Environment)
 
 | Variabel | Default | Fungsi |
@@ -114,14 +201,18 @@ zenroute/
 │   ├── security.js       # Host guard, access control, CSRF, CORS, gateway auth
 │   ├── db/               # node:sqlite repository dan skema database
 │   ├── gateway/          # Handlers: chat.js, messages.js, responses.js, models.js
-│   ├── translator/       # Translasi bidirectional OpenAI <-> Claude (schema & tool calling)
-│   ├── providers/        # Registry 17 provider & model routing resolution
-│   ├── executors/        # base.js (header & idle timeout), proxy.js, freebuff.js
+│   ├── translator/       # Translasi OpenAI <-> Claude/Gemini/Kiro/Responses
+│   ├── providers/        # Registry 21 provider & model routing resolution
+│   ├── executors/        # base.js + proxy.js + executor khusus (codex, kiro, ...)
 │   ├── config/           # freeTierCatalog.js
-│   ├── services/         # apiKeys, auth, tokenRefresh, trafficGuard, usage, quota,
-│   │                     # modelOverrides, modelImport, modelSync, tokenSaver, rtk,
-│   │                     # caveman, settings, oauth/ (alur login per provider + session login)
-│   └── ui/               # layout.js, cliMenu.js, html.js, pages/ (overview, providers, usage, keys, etc.)
-├── tests/                # Test suite lengkap (178 tests)
+│   ├── services/         # apiKeys, auth, fallback, tokenRefresh, trafficGuard,
+│   │                     # usage, quota (+ per-provider), modelOverrides,
+│   │                     # modelImport, modelSync, tokenSaver (+ rtk, caveman),
+│   │                     # settings, logger, oauth/ (flows + providers)
+│   ├── utils/            # eventstream.js (helper SSE)
+│   └── ui/               # layout.js, html.js, cliMenu.js, assets.js,
+│                         # pages/ (overview, providers, oauth, usage,
+│                         # tokenSaver, settings, apiKeys)
+├── tests/                # 36 file test, 185 test via node --test
 └── package.json
 ```

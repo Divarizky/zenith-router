@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { getSetting } from "./settings.js";
+import { getConnectionById } from "../db/index.js";
 
 // In-memory state tracking per connection ID
 const connectionState = new Map();
@@ -162,4 +163,20 @@ export async function applyReactiveJitter(signal = null) {
  */
 export function resetTrafficGuardState() {
   connectionState.clear();
+}
+
+/**
+ * Providers with at least one request currently in flight.
+ */
+export function getActiveProviders() {
+  const active = new Set();
+  for (const [connId, state] of connectionState) {
+    if (state.inFlight > 0) {
+      try {
+        const conn = getConnectionById(connId);
+        if (conn?.provider) active.add(String(conn.provider).toLowerCase());
+      } catch {}
+    }
+  }
+  return active;
 }

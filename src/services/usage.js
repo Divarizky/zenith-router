@@ -1,4 +1,5 @@
 import { getDb } from "../db/index.js";
+import { captureLine } from "./logger.js";
 
 /**
  * Record a token usage event in SQLite
@@ -28,7 +29,7 @@ export function recordUsage({
 
     const info = stmt.run(connId, keyId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
 
-    console.info(
+    captureLine(
       `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok} | ${dur}ms${connId ? ` | conn#${connId}` : ""}`
     );
 
@@ -203,6 +204,20 @@ export function getUsageStats(options = {}) {
   `);
   const byApiKey = keyStmt.all(since) || [];
 
+  // Breakdown by provider (via connection -> connections table)
+  const providerStmt = db.prepare(`
+    SELECT
+      COALESCE(c.provider, 'unknown') AS provider,
+      COUNT(*) AS count,
+      COALESCE(SUM(u.total_tokens), 0) AS total_tokens
+    FROM usage_history u
+    LEFT JOIN connections c ON u.connection_id = c.id
+    WHERE u.timestamp >= ?
+    GROUP BY c.provider
+    ORDER BY total_tokens DESC
+  `);
+  const byProvider = providerStmt.all(since) || [];
+
   return {
     summary: {
       total_requests: Number(summary.total_requests),
@@ -222,7 +237,55 @@ export function getUsageStats(options = {}) {
       count: Number(row.count),
       total_tokens: Number(row.total_tokens),
     })),
+    by_provider: byProvider.map((row) => ({
+      provider: row.provider,
+      count: Number(row.count),
+      total_tokens: Number(row.total_tokens),
+    })),
   };
+}
+
+/**
+ * Latest usage rows for the Recent Requests panel (newest first).
+ */
+export function getRecentUsage(limit = 10) {
+  try {
+    const db = getDb();
+    return (
+      db
+        .prepare(
+          `SELECT model, input_tokens, output_tokens, duration_ms, timestamp
+           FROM usage_history
+           ORDER BY timestamp DESC, id DESC
+           LIMIT ?`
+        )
+        .all(Number(limit) || 10) || []
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Provider of the most recent usage record, or "" when none.
+ */
+export function getLastProvider() {
+  try {
+    const db = getDb();
+    const row = db
+      .prepare(
+        `SELECT c.provider AS provider
+         FROM usage_history u
+         LEFT JOIN connections c ON u.connection_id = c.id
+         WHERE c.provider IS NOT NULL
+         ORDER BY u.timestamp DESC
+         LIMIT 1`
+      )
+      .get();
+    return row?.provider ? String(row.provider).toLowerCase() : "";
+  } catch {
+    return "";
+  }
 }
 
 /**

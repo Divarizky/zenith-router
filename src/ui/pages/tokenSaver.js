@@ -18,29 +18,33 @@ export function renderTokenSaverPage(port = 20120, query = {}) {
       <p class="hint" style="margin-bottom: 1.25rem;">Kurangi pemakaian token tanpa mengubah struktur tool. Tool result dan pesan asisten tidak disentuh.</p>
 
       <form action="/dashboard/token-saver" method="POST">
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-subtle);">
-          <div>
+        <div class="setting-row">
+          <div class="setting-info">
             <strong>RTK (Reduced Token Kit)</strong>
             <p class="hint">Memadatkan baris berulang pada teks yang kamu ketik. Output tool dan turn asisten dibiarkan utuh.</p>
           </div>
-          <label class="switch">
-            <input type="checkbox" name="token_saver_rtk" value="true" ${isRtkEnabled ? "checked" : ""} />
-            <span class="slider"></span>
-          </label>
+          <div class="setting-action">
+            <label class="switch" aria-label="RTK">
+              <input type="checkbox" name="token_saver_rtk" value="true" ${isRtkEnabled ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
 
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 0;">
-          <div>
+        <div class="setting-row">
+          <div class="setting-info">
             <strong>Caveman Conciseness Compactor</strong>
             <p class="hint">Menambahkan aturan ringkas ke system prompt. Default mati karena mengubah perilaku agent.</p>
           </div>
-          <label class="switch">
-            <input type="checkbox" name="token_saver_caveman" value="true" ${isCavemanEnabled ? "checked" : ""} />
-            <span class="slider"></span>
-          </label>
+          <div class="setting-action">
+            <label class="switch" aria-label="Caveman">
+              <input type="checkbox" name="token_saver_caveman" value="true" ${isCavemanEnabled ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
 
-        <div style="margin-top: 1.25rem;">
+        <div style="margin-top: 1.5rem;">
           <button type="submit" class="btn btn-primary">Simpan</button>
         </div>
       </form>

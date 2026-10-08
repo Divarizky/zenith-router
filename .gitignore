@@ -10,3 +10,5 @@ data/
 Thumbs.db
 .pi/
 .freebuff/
+
+.workspace/

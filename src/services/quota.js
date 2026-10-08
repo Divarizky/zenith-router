@@ -82,6 +82,23 @@ export function getAllQuotaStatus() {
 }
 
 /**
+ * HTTP handler for POST /dashboard/quota/sync — refresh one account's quota.
+ */
+export async function handleSyncQuotaForm(c) {
+  const body = await c.req.parseBody();
+  const id = Number(body.id);
+  const connection = getConnections().find((x) => x.id === id);
+  if (connection) {
+    try {
+      await syncProviderQuota(connection);
+    } catch (err) {
+      console.error(`[zenroute] Quota sync failed for connection #${id}:`, err.message);
+    }
+  }
+  return c.redirect("/dashboard/usage?synced=1");
+}
+
+/**
  * HTTP handler for GET /api/quota
  */
 export function handleGetQuota(c) {

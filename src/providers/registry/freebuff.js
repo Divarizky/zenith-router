@@ -1,3 +1,5 @@
+import "../../executors/freebuff.js";
+
 // Free models: CodebuffAI/freebuff common/src/constants/freebuff-models.ts
 // (SUPPORTED_FREEBUFF_MODELS minus withdrawn/paused/paid-only rows) and the
 // official model->agent map common/src/constants/free-agents.ts

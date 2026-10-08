@@ -70,15 +70,22 @@ function appendLine(level, args) {
   }
 }
 
+let capturing = false;
+
 export function initConsoleLogCapture() {
   if (state.patched) return;
 
   for (const level of CONSOLE_LEVELS) {
     state.originals[level] = console[level];
     console[level] = (...args) => {
-      try {
-        appendLine(level, args);
-      } catch {}
+      if (!capturing) {
+        capturing = true;
+        try {
+          appendLine(level, args);
+        } catch {} finally {
+          capturing = false;
+        }
+      }
       state.originals[level]?.apply(console, args);
     };
   }

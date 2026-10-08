@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { streamSSE } from "hono/streaming";
+import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { streamSSE } from "hono/streaming";
 import { handleListModels } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
@@ -66,6 +68,12 @@ import { startModelSyncScheduler } from "./services/modelSync.js";
 export const app = new Hono();
 export const PORT = Number(process.env.PORT || 20120);
 
+// Initialize console capture eagerly so all gateway activity is captured from launch
+initConsoleLogCapture();
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.resolve(__dirname, "../public");
+
 // Security middleware: host check, localhost-only control plane, then gateway auth for /v1
 app.use("*", hostGuard);
 app.use("*", controlPlaneGuard);
@@ -76,7 +84,20 @@ app.use("/v1/*", gatewayAuth);
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", service: "zenroute", timestamp: Date.now() }));
 
-// Serve static files from public/
+// Serve static assets
+app.get("/logo.png", (c) => {
+  try {
+    const file = path.join(PUBLIC_DIR, "logo.png");
+    if (fs.existsSync(file)) {
+      const buf = fs.readFileSync(file);
+      return new Response(buf, {
+        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+      });
+    }
+  } catch {}
+  return c.text("Not found", 404);
+});
+app.get("/favicon.ico", (c) => c.redirect("/logo.png"));
 app.use("/*", serveStatic({ root: "./public" }));
 
 // Home & Dashboard Overview
@@ -184,10 +205,16 @@ app.get("/api/console-logs/stream", async (c) => {
       }
     }, 15000);
 
-    stream.onAbort(() => {
-      clearInterval(pingInterval);
-      emitter.off("lines", onLines);
-      emitter.off("clear", onClear);
+    // Hono closes the SSE response as soon as this callback resolves, so keep
+    // it pending until the client disconnects; otherwise EventSource loops
+    // reconnecting and the console panel shows Offline.
+    await new Promise((resolve) => {
+      stream.onAbort(() => {
+        clearInterval(pingInterval);
+        emitter.off("lines", onLines);
+        emitter.off("clear", onClear);
+        resolve();
+      });
     });
   });
 });

@@ -283,15 +283,24 @@ async function importFreebuff() {
     const credPath = join(homedir(), ".config", dir, "credentials.json");
     const data = await readJsonFile(credPath);
     const user = data?.default || data;
-    if (user?.authToken) {
-      return { access_token: user.authToken, email: user.email, name: user.name };
+    let token = user?.authToken || null;
+    if (!token && user && process.platform === "win32") {
+      token = await readWindowsCredential(`freebuff-cli/${credPath}`);
     }
-    if (user && process.platform === "win32") {
-      const token = await readWindowsCredential(`freebuff-cli/${credPath}`);
-      if (token) return { access_token: token, email: user.email, name: user.name };
+    if (!token) continue;
+    // A mis-decoded blob comes back as "????"; storing it only yields "Invalid Codebuff API key" later.
+    if (!/^[\x21-\x7e]+$/.test(token)) {
+      throw new Error("Token Freebuff dari aplikasi lokal tidak terbaca dengan benar. Login ulang di `freebuff` lalu import lagi.");
     }
+    return { access_token: token, email: user.email, name: user.name };
   }
   throw new Error("Kredensial Freebuff tidak ditemukan. Jalankan `freebuff` (npm i -g freebuff) lalu login dulu.");
+}
+
+/** Credential blobs are raw bytes: UTF-8 for most CLIs (9router zedCredentials.js), UTF-16LE for some. */
+export function decodeCredentialBlob(buf) {
+  const looksUtf16 = buf.length >= 2 && buf.length % 2 === 0 && buf.every((b, i) => i % 2 === 0 || b === 0);
+  return buf.toString(looksUtf16 ? "utf16le" : "utf8").replace(/\0+$/, "").trim();
 }
 
 /** Read a generic Windows credential via CredRead (no new dependencies, .NET only). */
@@ -315,7 +324,8 @@ async function readWindowsCredential(target) {
     "  $b = New-Object byte[] $c.CredBlobSize",
     "  [Runtime.InteropServices.Marshal]::Copy($c.CredBlob, $b, 0, $c.CredBlobSize)",
     "  [ZrCred]::CredFree($p)",
-    "  [Text.Encoding]::Unicode.GetString($b).Trim()",
+    // Base64 keeps the bytes intact; the console code page would turn non-ASCII into "?".
+    "  [Convert]::ToBase64String($b)",
     "}",
   ].join("\n");
   try {
@@ -324,7 +334,8 @@ async function readWindowsCredential(target) {
         err ? reject(err) : resolve(stdout)
       )
     );
-    return String(out || "").trim() || null;
+    const b64 = String(out || "").trim();
+    return b64 ? decodeCredentialBlob(Buffer.from(b64, "base64")) || null : null;
   } catch {
     return null;
   }

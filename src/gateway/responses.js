@@ -101,6 +101,7 @@ export async function handleResponses(c) {
   }
 
   const { provider, targetModel } = resolved;
+  console.info(`[RESPONSES] model=${chatBody.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(chatBody.stream)}`);
   const startTime = Date.now();
   const executor = getExecutor(provider);
 

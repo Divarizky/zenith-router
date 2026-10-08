@@ -73,7 +73,7 @@ test("kilocode import - all models, with the free flag kept per row", async (t) 
   assert.strictEqual(rows.length, 5);
   assert.strictEqual(rows.find((m) => m.model_id === "vendor/paid").is_free, 0);
   assert.strictEqual(rows.find((m) => m.model_id === "vendor/c:free").is_free, 0, "explicit isFree:false wins");
-  assert.ok(getAvailableModels().some((m) => m.id === "kc/vendor/paid"));
+  assert.ok(getAvailableModels({ all: true }).some((m) => m.id === "kc/vendor/paid"));
 
   assert.strictEqual((await importProviderModels("kilocode", "free")).code, "unsupported");
 });
@@ -191,7 +191,7 @@ test("POST /dashboard/providers/models/import/delete - removes only the selected
 
   const left = listImportedModels("kilocode").map((m) => m.model_id);
   assert.deepStrictEqual(left, ["kilo-auto/free", "vendor/a:free", "vendor/c:free"]);
-  assert.ok(!getAvailableModels().some((m) => m.id === "kc/vendor/paid"));
+  assert.ok(!getAvailableModels({ all: true }).some((m) => m.id === "kc/vendor/paid"));
 
   const html = await (await app.request(res.headers.get("location"))).text();
   assert.ok(html.includes("2 model hasil import dihapus."));

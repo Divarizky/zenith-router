@@ -131,7 +131,7 @@ test("Provider Registry - aligned configs for codex, github, kiro, and antigravi
 });
 
 test("Provider Registry - getAvailableModels aggregates model list with provider prefixes", () => {
-  const models = getAvailableModels();
+  const models = getAvailableModels({ all: true });
   assert.ok(Array.isArray(models));
   assert.ok(models.length > 0);
 

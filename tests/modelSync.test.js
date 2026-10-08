@@ -110,7 +110,7 @@ const XKIRO = {
   },
 };
 
-const ids = () => getAvailableModels().map((m) => m.id);
+const ids = () => getAvailableModels({ all: true }).map((m) => m.id);
 
 test("opencode sync - live free list replaces the hardcoded list; paid Zen models excluded", async (t) => {
   t.after(() => setCustomExecutor(null));

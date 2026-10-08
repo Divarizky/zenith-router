@@ -17,12 +17,12 @@ import { getAvailableModels, resolveModel } from "../src/providers/index.js";
 test("custom models merge into model route table", () => {
   initDb(":memory:");
   addCustomModel({ provider: "glm", model_id: "glm-4-thinking", name: "GLM 4 Thinking" });
-  const models = getAvailableModels();
+  const models = getAvailableModels({ all: true });
   const found = models.find((m) => m.id === "glm/glm-4-thinking");
   assert.ok(found, "custom model should appear in /v1/models");
   assert.strictEqual(found.custom, true);
   deleteCustomModel(listCustomModels()[0].id);
-  assert.ok(!getAvailableModels().find((m) => m.id === "glm/glm-4-thinking"));
+  assert.ok(!getAvailableModels({ all: true }).find((m) => m.id === "glm/glm-4-thinking"));
 });
 
 test("disabled models are filtered from route table and resolveModel", () => {
@@ -30,7 +30,7 @@ test("disabled models are filtered from route table and resolveModel", () => {
   disableModel("glm", "glm-4-flash");
   assert.ok(isModelDisabled("glm", "glm-4-flash"));
   assert.strictEqual(resolveModel("glm/glm-4-flash"), null);
-  assert.ok(!getAvailableModels().find((m) => m.id === "glm/glm-4-flash"));
+  assert.ok(!getAvailableModels({ all: true }).find((m) => m.id === "glm/glm-4-flash"));
   enableModel("glm", "glm-4-flash");
   assert.ok(resolveModel("glm/glm-4-flash"));
 });

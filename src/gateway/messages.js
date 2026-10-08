@@ -161,6 +161,7 @@ export async function handleMessages(c) {
   }
 
   const { provider, targetModel } = resolved;
+  console.info(`[MESSAGES] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
   const startTime = Date.now();
   const executor = getExecutor(provider);
 

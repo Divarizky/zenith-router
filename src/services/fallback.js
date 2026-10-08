@@ -191,7 +191,12 @@ export async function executeWithFallback({
     }
 
     // Capture response for error relaying
-    lastFailureResponse = buildErrorResponse(res, await res.text(), targetFormat);
+    const errText = await res.text();
+    lastFailureResponse = buildErrorResponse(res, errText, targetFormat);
+
+    console.warn(
+      `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
+    );
 
     // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
@@ -254,6 +259,8 @@ export async function executeWithFallback({
   if (lastFailureResponse) {
     return { ok: false, response: lastFailureResponse };
   }
+
+  console.error(`[ROUTING] No available connection for provider '${provider.id}'`);
 
   const shape = targetFormat === "claude"
     ? { type: "error", error: { type: "overloaded_error", message: `No available connection for provider '${provider.id}'.` } }

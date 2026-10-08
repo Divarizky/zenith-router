@@ -28,6 +28,10 @@ export function recordUsage({
 
     const info = stmt.run(connId, keyId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
 
+    console.info(
+      `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok} | ${dur}ms${connId ? ` | conn#${connId}` : ""}`
+    );
+
     return {
       id: Number(info.lastInsertRowid),
       connection_id: connId,

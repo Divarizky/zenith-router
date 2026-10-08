@@ -1,4 +1,5 @@
 import { escapeHtml } from "./html.js";
+import { getLogoDataUri } from "./assets.js";
 
 const NAV = [
   { id: "overview", label: "Overview", href: "/dashboard", icon: "home" },
@@ -31,11 +32,14 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
       </a>`
   ).join("");
 
+  const logoUri = getLogoDataUri();
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="${logoUri}">
   <title>${escapeHtml(title)} &middot; zenroute</title>
   <style>
     :root {
@@ -79,12 +83,13 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
       top: 0;
       height: 100vh;
     }
-    .brand { display: flex; align-items: center; gap: 0.65rem; padding: 0 0.5rem 1.25rem; }
+    .brand { display: flex; align-items: center; gap: 0.75rem; padding: 0 0.5rem 1.25rem; }
     .brand-logo {
-      width: 36px; height: 36px; border-radius: 10px;
-      background: var(--text); color: #0a0a0a;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 800; font-size: 1.1rem;
+      width: 36px; height: 36px; border-radius: 8px;
+      object-fit: cover;
+      display: block;
+      background: transparent;
+      flex-shrink: 0;
     }
     .brand h1 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
     .brand small { display: block; color: var(--text-subtle); font-size: 0.7rem; }
@@ -209,7 +214,7 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
 <body>
   <aside class="sidebar">
     <div class="brand">
-      <img src="/logo.png" alt="zenroute" class="brand-logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;" />
+      <img src="${logoUri}" alt="zenroute" class="brand-logo" />
       <div><h1>zenroute</h1><small>v0.1.0</small></div>
     </div>
     <nav>${navHtml}</nav>

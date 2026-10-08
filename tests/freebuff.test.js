@@ -88,3 +88,16 @@ test("FreebuffExecutor - completes session, agent-run, buffy prompt, and complet
   assert.strictEqual(compCall.body.codebuff_metadata.freebuff_instance_id, "inst_test_123");
   assert.strictEqual(compCall.body.codebuff_metadata.run_id, "run_test_456");
 });
+
+test("Freebuff registry - provider routes through the registered freebuff executor", async () => {
+  const { getProvider } = await import("../src/providers/index.js");
+  const { getExecutor } = await import("../src/executors/base.js");
+  assert.ok(getExecutor(getProvider("freebuff")) instanceof FreebuffExecutor);
+});
+
+test("decodeCredentialBlob - UTF-8 and UTF-16LE blobs decode to the same token", async () => {
+  const { decodeCredentialBlob } = await import("../src/services/oauth/flows.js");
+  const token = "example-not-real-token";
+  assert.strictEqual(decodeCredentialBlob(Buffer.from(token, "utf8")), token);
+  assert.strictEqual(decodeCredentialBlob(Buffer.from(token, "utf16le")), token);
+});

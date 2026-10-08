@@ -41,6 +41,20 @@ function generateClientSessionId() {
   return out;
 }
 
+function getClientUserAgent() {
+  const platform = process.platform === "win32" ? "win32" : process.platform;
+  const arch = process.arch === "x64" ? "x64" : process.arch;
+  return `codebuff/0.1.0 (${platform}-${arch})`;
+}
+
+function getLocalTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 export class FreebuffExecutor extends BaseExecutor {
   constructor(options = {}) {
     super(options);
@@ -79,10 +93,15 @@ export class FreebuffExecutor extends BaseExecutor {
     const fetcher = (targetUrl, init) =>
       proxyUrl ? proxyFetch(targetUrl, init, proxyUrl) : this.fetchFn(targetUrl, init);
 
+    const userAgent = getClientUserAgent();
+    const timezone = getLocalTimezone();
+
     const baseAuthHeaders = {
       Authorization: authHeader,
       "Content-Type": "application/json",
-      "User-Agent": "codebuff/0.1.0 (darwin-arm64)",
+      "User-Agent": userAgent,
+      "x-freebuff-client": "cli",
+      "x-fb-timezone": timezone,
     };
 
     let instanceId = "";
@@ -206,6 +225,8 @@ export class FreebuffExecutor extends BaseExecutor {
       "User-Agent": "ai-sdk/openai-compatible/1.0.25/codebuff",
       Accept: "application/json, text/event-stream",
       "x-freebuff-instance-id": instanceId,
+      "x-freebuff-client": "cli",
+      "x-fb-timezone": timezone,
       ...(runId ? { "x-codebuff-run-id": runId } : {}),
       "x-codebuff-agent-id": agentId,
     };

@@ -20,6 +20,7 @@ import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
+import { getConnections } from "../db/index.js";
 
 const REGISTRY = [
   claude,
@@ -136,33 +137,54 @@ export function resolveModel(modelStr) {
 }
 
 /**
- * Return list of all available models in OpenAI Model List format
+ * Return list of all available models in OpenAI Model List format.
+ *
+ * Mirroring 9router `buildModelsList` (src/app/api/v1/models/route.js) and
+ * OmniRoute `handleGetModels` (src/app/api/models/route.ts): only providers with
+ * an active connection contribute their catalog. `noAuth` free providers are
+ * always kept. Callers needing the full registry (tests, audit) can pass
+ * { all: true } or ?all=true on the endpoint.
  */
-export function getAvailableModels() {
+export function getAvailableModels({ all = false } = {}) {
   const result = [];
   const now = Math.floor(Date.now() / 1000);
 
+  // Provider IDs and aliases that currently have at least one active account.
+  let activeProviders = null;
+  if (!all) {
+    activeProviders = new Set();
+    try {
+      for (const conn of getConnections()) {
+        if (conn.is_active !== 1) continue;
+        const provider = getProvider(conn.provider);
+        if (!provider) {
+          activeProviders.add(String(conn.provider).toLowerCase());
+          continue;
+        }
+        activeProviders.add(provider.id);
+        const aliases = Array.isArray(provider.alias) ? provider.alias : [provider.alias || provider.id];
+        for (const a of aliases) activeProviders.add(String(a).toLowerCase());
+      }
+    } catch {
+      activeProviders = null; // DB not ready -> fail open to full list
+    }
+  }
+
+  const providerVisible = (p) =>
+    all || !activeProviders || p.noAuth || activeProviders.has(p.id) ||
+    (Array.isArray(p.alias) ? p.alias : [p.alias || p.id]).some((a) => activeProviders.has(String(a).toLowerCase()));
+
   // Disabled registry models are filtered out.
   for (const p of REGISTRY) {
+    if (!providerVisible(p)) continue;
     const primaryAlias = Array.isArray(p.alias) ? p.alias[0] : (p.alias || p.id);
 
     for (const m of getProviderModels(p)) {
       if (isModelDisabled(p.id, m.id)) continue;
 
-      // Direct prefixed model: e.g. "glm/glm-4-flash"
+      // Register one canonical model ID using primary alias (e.g. "fb/mimo-v2.5" or "glm/glm-4-flash")
       result.push({
         id: `${primaryAlias}/${m.id}`,
-        object: "model",
-        created: now,
-        owned_by: p.id,
-        permission: [],
-        root: m.id,
-        parent: null,
-      });
-
-      // Also register bare model name if unique or standard
-      result.push({
-        id: `${p.id}/${m.id}`,
         object: "model",
         created: now,
         owned_by: p.id,
@@ -176,7 +198,7 @@ export function getAvailableModels() {
   // Models imported from a provider's live list (dashboard "Import Models").
   for (const im of listImportedModels()) {
     const provider = getProvider(im.provider);
-    if (!provider || isModelDisabled(provider.id, im.model_id)) continue;
+    if (!provider || isModelDisabled(provider.id, im.model_id) || !providerVisible(provider)) continue;
     const primaryAlias = Array.isArray(provider.alias) ? provider.alias[0] : (provider.alias || provider.id);
     result.push({
       id: `${primaryAlias}/${im.model_id}`,
@@ -194,6 +216,7 @@ export function getAvailableModels() {
   const seenIds = new Set(result.map((r) => r.id));
   for (const cm of listCustomModels()) {
     const provider = getProvider(cm.provider);
+    if (provider && !providerVisible(provider)) continue;
     const primaryAlias = provider ? (Array.isArray(provider.alias) ? provider.alias[0] : (provider.alias || provider.id)) : cm.provider;
     if (isModelDisabled(cm.provider, cm.model_id)) continue;
     const id = `${primaryAlias}/${cm.model_id}`;

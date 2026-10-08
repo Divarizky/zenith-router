@@ -56,6 +56,7 @@ export async function handleChat(c) {
   }
 
   const { provider, targetModel } = resolved;
+  console.info(`[CHAT] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
   const startTime = Date.now();
   const executor = getExecutor(provider);
 

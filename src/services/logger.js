@@ -47,8 +47,14 @@ function scheduleFlush() {
   state.flushTimer?.unref?.();
 }
 
+// Device-local wall clock (toISOString is UTC, which shows the wrong hour on the dashboard).
+function localTimestamp(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 function appendLine(level, args) {
-  const timestamp = new Date().toISOString().slice(11, 19);
+  const timestamp = localTimestamp();
   const tag = level.toUpperCase();
   const text = args.map(formatArg).join(" ");
   const line = `[${timestamp}] [${tag}] ${text}`;

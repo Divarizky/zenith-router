@@ -23,6 +23,27 @@ test("logger service - captures console calls and strips ANSI codes", () => {
   assert.ok(!logs.some((l) => l.includes("\x1b[32m")), "ANSI codes must be stripped");
 });
 
+test("logger service - timestamp uses device local time", () => {
+  initConsoleLogCapture();
+  clearConsoleLogs();
+
+  const before = new Date();
+  console.log("Local time check");
+  const after = new Date();
+
+  const line = getConsoleLogs().find((l) => l.includes("Local time check"));
+  assert.ok(line, "log line must exist");
+  const m = line.match(/^\[(\d{2}):(\d{2}):(\d{2})\] \[LOG\]/);
+  assert.ok(m, `log line must start with local HH:MM:SS, got: ${line}`);
+
+  const toSec = (d) => d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+  const logged = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  const min = toSec(before);
+  const max = toSec(after);
+  const inRange = min <= max ? logged >= min && logged <= max + 1 : true; // midnight wrap: skip strict check
+  assert.ok(inRange, `timestamp ${m[1]}:${m[2]}:${m[3]} must match device local time`);
+});
+
 test("GET /api/console-logs - returns JSON logs list", async () => {
   initConsoleLogCapture();
   clearConsoleLogs();

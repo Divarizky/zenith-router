@@ -42,12 +42,21 @@ const FINGERPRINT_TOOLS = [
   { type: "function", function: { name: "glob", description: "Find files by pattern", parameters: { type: "object", properties: { pattern: { type: "string" } } } } },
 ];
 
-function ensureFingerprintTools(body) {
+// Shape a fingerprint tool for the upstream path: Responses and Claude Messages
+// both require a top-level `name`, unlike Chat Completions.
+function shapeTool(tool, path) {
+  const { name, description, parameters } = tool.function;
+  if (path.endsWith("/responses")) return { type: "function", name, description, parameters };
+  if (path.endsWith("/messages")) return { name, description, input_schema: parameters };
+  return tool;
+}
+
+function ensureFingerprintTools(body, path = "/zen/v1/chat/completions") {
   if (!body || typeof body !== "object") return;
   if (!Array.isArray(body.tools)) body.tools = [];
   const have = new Set(body.tools.map((t) => t?.function?.name || t?.name).filter(Boolean));
   for (const tool of FINGERPRINT_TOOLS) {
-    if (!have.has(tool.function.name)) body.tools.push(tool);
+    if (!have.has(tool.function.name)) body.tools.push(shapeTool(tool, path));
   }
 }
 
@@ -65,7 +74,7 @@ export class OpencodeExecutor extends BaseExecutor {
     const finalUrl = `https://opencode.ai${path}`;
 
     if (parsed && typeof parsed === "object") {
-      ensureFingerprintTools(parsed);
+      ensureFingerprintTools(parsed, path);
       body = JSON.stringify(parsed);
     }
 

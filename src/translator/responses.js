@@ -56,9 +56,11 @@ export function openaiToResponsesRequest(body, targetModel) {
       }
       if (Array.isArray(msg.tool_calls)) {
         for (const call of msg.tool_calls) {
+          // Responses API pairs calls and outputs by `call_id`; `id` is optional and
+          // must start with "fc", so the chat tool_call id goes into call_id only.
           input.push({
             type: "function_call",
-            id: call.id || `call_${randomUUID().slice(0, 8)}`,
+            call_id: call.id || `call_${randomUUID().slice(0, 8)}`,
             name: call.function?.name || "unknown",
             arguments: typeof call.function?.arguments === "string" ? call.function.arguments : JSON.stringify(call.function?.arguments || {}),
           });
@@ -138,8 +140,10 @@ export function createResponsesToOpenAITransformStream(model = "codex") {
             const parsed = JSON.parse(dataStr);
             const type = parsed.type;
 
-            // Output text delta
-            if (type === "response.output_text.delta" || (parsed.delta && typeof parsed.delta === "string")) {
+            // Output text delta. The loose `parsed.delta` fallback only exists for
+            // untyped text events; argument deltas must never be treated as content.
+            const isArgsDelta = typeof type === "string" && type.endsWith("arguments.delta");
+            if (type === "response.output_text.delta" || (!isArgsDelta && parsed.delta && typeof parsed.delta === "string")) {
               const textDelta = parsed.delta || parsed.text || "";
               const openAIChunk = {
                 id: responseId,
@@ -159,7 +163,7 @@ export function createResponsesToOpenAITransformStream(model = "codex") {
 
             // Function call item added (tool name + call_id)
             if (type === "response.output_item.added" && parsed.item?.type === "function_call") {
-              activeToolCallId = parsed.item.id || parsed.item.call_id || `call_${randomUUID().slice(0, 8)}`;
+              activeToolCallId = parsed.item.call_id || parsed.item.id || `call_${randomUUID().slice(0, 8)}`;
               const openAIChunk = {
                 id: responseId,
                 object: "chat.completion.chunk",
@@ -550,7 +554,7 @@ export async function responsesToOpenAIResponse(streamOrData, model = "codex") {
         }
         if (parsed.type === "response.output_item.added" && parsed.item?.type === "function_call") {
           toolCalls.push({
-            id: parsed.item.id || `call_${randomUUID().slice(0, 8)}`,
+            id: parsed.item.call_id || parsed.item.id || `call_${randomUUID().slice(0, 8)}`,
             type: "function",
             function: {
               name: parsed.item.name || "",

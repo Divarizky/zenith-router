@@ -71,3 +71,18 @@ test("kiro executor routes authenticated connections through Amazon Q first", as
   assert.strictEqual(seenHeaders.get("TokenType"), "API_KEY");
   assert.strictEqual(seenHeaders.get("X-Amz-Target"), null);
 });
+
+test("cline auth adds 9router-style client identity headers plus workos token", () => {
+  const h = applyConnectionAuth(
+    { "Content-Type": "application/json" },
+    { provider: "cline", auth_type: "oauth", credentials: { access_token: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig" } }
+  );
+  assert.strictEqual(h.Authorization, "Bearer workos:eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig");
+  assert.match(h["User-Agent"], /^zenroute\//);
+  assert.strictEqual(h["X-CLIENT-TYPE"], "zenroute");
+  assert.ok(h["X-CLIENT-VERSION"]);
+  assert.ok(h["X-CORE-VERSION"]);
+  assert.strictEqual(h["X-PLATFORM"], process.platform);
+  assert.ok(h["X-PLATFORM-VERSION"]);
+  assert.strictEqual(h["X-IS-MULTIROOT"], "false");
+});

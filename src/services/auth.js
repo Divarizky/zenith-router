@@ -5,6 +5,7 @@ import {
 } from "../db/index.js";
 import { getProvider } from "../providers/index.js";
 import { isConnectionExhausted } from "./quota.js";
+import pkg from "../../package.json" with { type: "json" };
 
 /**
  * Check if a connection is currently locked under cooldown
@@ -91,8 +92,21 @@ export function applyConnectionAuth(headers, connection) {
   if (connection.auth_type === "oauth") {
     let token = creds.access_token || creds.api_key;
     if (!token) return headers;
-    // Cline OAuth access tokens are WorkOS JWTs and must carry the "workos:" prefix.
-    if (connection.provider === "cline" && /^eyJ[\w-]+\.[\w-]+/.test(token)) token = `workos:${token}`;
+    // Cline free models are gated to recognized product surfaces (mirrors 9router
+    // shared/clineAuth.js buildClineHeaders): without client identity headers the
+    // upstream answers 403 "only available via Cline product surfaces".
+    if (connection.provider === "cline") {
+      // Cline OAuth access tokens are WorkOS JWTs and must carry the "workos:" prefix.
+      if (/^eyJ[\w-]+\.[\w-]+/.test(token)) token = `workos:${token}`;
+      const v = pkg.version || "0.0.0";
+      if (!headers["User-Agent"]) headers["User-Agent"] = `zenroute/${v}`;
+      if (!headers["X-CLIENT-TYPE"]) headers["X-CLIENT-TYPE"] = "zenroute";
+      headers["X-CLIENT-VERSION"] = headers["X-CLIENT-VERSION"] || v;
+      headers["X-CORE-VERSION"] = headers["X-CORE-VERSION"] || v;
+      headers["X-PLATFORM"] = headers["X-PLATFORM"] || process.platform;
+      headers["X-PLATFORM-VERSION"] = headers["X-PLATFORM-VERSION"] || process.version;
+      headers["X-IS-MULTIROOT"] = headers["X-IS-MULTIROOT"] || "false";
+    }
     headers["Authorization"] = `Bearer ${token}`;
     // Claude Code subscription usage: same identity bundle 9router sends (shared.js CLAUDE_CODE_HEADERS).
     // ponytail: x-claude-code-session-id alignment and X-Stainless SDK telemetry skipped; add if upstream rejects.

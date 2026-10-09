@@ -64,6 +64,7 @@ import {
 import { getConnections } from "./db/index.js";
 import { getAllProviders } from "./providers/index.js";
 import { startModelSyncScheduler } from "./services/modelSync.js";
+import { startQuotaSyncScheduler } from "./services/quotaSync.js";
 
 export const app = new Hono();
 export const PORT = Number(process.env.PORT || 20120);
@@ -224,6 +225,7 @@ app.get("/api/console-logs/stream", async (c) => {
 export function startServer() {
   initConsoleLogCapture();
   startModelSyncScheduler();
+  startQuotaSyncScheduler();
   const hostname = getBindHost();
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
   const base = `http://${displayHost}:${PORT}`;

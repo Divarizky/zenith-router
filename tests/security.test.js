@@ -227,10 +227,17 @@ test("security - applyConnectionAuth follows the connection auth type", () => {
       "Anthropic-Dangerous-Direct-Browser-Access": "true",
     }
   );
-  assert.deepStrictEqual(
-    applyConnectionAuth({}, { provider: "cline", auth_type: "oauth", credentials: { access_token: "eyJhbGc.eyJzdWIi.sig" } }),
-    { Authorization: "Bearer workos:eyJhbGc.eyJzdWIi.sig" }
+  const clineHeaders = applyConnectionAuth(
+    {},
+    { provider: "cline", auth_type: "oauth", credentials: { access_token: "eyJhbGc.eyJzdWIi.sig" } }
   );
+  assert.strictEqual(clineHeaders.Authorization, "Bearer workos:eyJhbGc.eyJzdWIi.sig");
+  // Client identity headers so cline-free models pass the product-surface gate.
+  assert.match(clineHeaders["User-Agent"], /^zenroute\//);
+  assert.strictEqual(clineHeaders["X-CLIENT-TYPE"], "zenroute");
+  assert.ok(clineHeaders["X-CLIENT-VERSION"]);
+  assert.ok(clineHeaders["X-CORE-VERSION"]);
+  assert.strictEqual(clineHeaders["X-IS-MULTIROOT"], "false");
   assert.deepStrictEqual(
     applyConnectionAuth({}, { provider: "kilocode", auth_type: "oauth", credentials: { access_token: "k", org_id: "org1" } }),
     { Authorization: "Bearer k", "X-Kilocode-OrganizationID": "org1" }

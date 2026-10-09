@@ -122,3 +122,70 @@ test("Kiro EventStream - translates OpenAI request to CodeWhisperer conversation
   assert.ok(translated.conversationState.currentMessage.userInputMessage.content.includes("Be concise."));
   assert.ok(translated.conversationState.currentMessage.userInputMessage.content.includes("Create a web server."));
 });
+
+test("Responses Translator - tool call history uses call_id, not id", () => {
+  const req = {
+    model: "muse-spark-1.3-contributor-free",
+    messages: [
+      { role: "system", content: "sys" },
+      { role: "user", content: "list files" },
+      { role: "assistant", content: null, tool_calls: [{ id: "call_abc", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } }] },
+      { role: "tool", tool_call_id: "call_abc", content: "a.txt" },
+    ],
+  };
+  const out = openaiToResponsesRequest(req, "muse-spark-1.3-contributor-free");
+  const call = out.input.find((i) => i.type === "function_call");
+  const result = out.input.find((i) => i.type === "function_call_output");
+  assert.strictEqual(call.call_id, "call_abc");
+  assert.strictEqual(call.id, undefined, "id must be omitted; upstream requires fc_ prefix");
+  assert.strictEqual(result.call_id, call.call_id);
+});
+
+test("Responses Translator - stream exposes upstream call_id as the tool_call id", async () => {
+  const stream = createTransformStream(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "muse");
+  const chunks = [
+    { type: "response.output_item.added", item: { type: "function_call", id: "fc_1", call_id: "call_xyz", name: "bash" } },
+    { type: "response.function_call_arguments.delta", delta: '{"command":"ls"}' },
+    { type: "response.output_item.done", item: { type: "function_call", id: "fc_1", call_id: "call_xyz" } },
+    { type: "response.completed", response: { usage: {} } },
+  ];
+  const source = new ReadableStream({
+    start(c) {
+      for (const ch of chunks) c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(ch)}\n\n`));
+      c.close();
+    },
+  });
+  const text = await new Response(source.pipeThrough(stream)).text();
+  assert.ok(text.includes('"id":"call_xyz"'));
+  assert.ok(!text.includes('"id":"fc_1"'));
+});
+
+test("Responses Translator - argument deltas never leak into message content", async () => {
+  const stream = createTransformStream(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "muse");
+  const chunks = [
+    { type: "response.output_text.delta", delta: "let me search" },
+    { type: "response.output_item.added", item: { type: "function_call", call_id: "call_9", name: "findCustomer" } },
+    { type: "response.function_call_arguments.delta", delta: '{"limit":80,"offset":1,"path":"C:\\DMS\\CustomerRepository.kt"}' },
+    { type: "response.function_call_arguments.delta", delta: "" },
+    { type: "response.completed", response: { usage: {} } },
+  ];
+  const source = new ReadableStream({
+    start(c) {
+      for (const ch of chunks) c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(ch)}\n\n`));
+      c.close();
+    },
+  });
+  const text = await new Response(source.pipeThrough(stream)).text();
+  const events = text.split("\n\n").filter(Boolean).map((l) => l.replace("data: ", ""));
+  const contents = events.filter((e) => e.startsWith("{")).map((e) => JSON.parse(e))
+    .flatMap((p) => p.choices || [])
+    .map((c) => c.delta?.content)
+    .filter(Boolean);
+  assert.deepStrictEqual(contents, ["let me search"], "only real text may reach content");
+  const argText = events.filter((e) => e.startsWith("{")).map((e) => JSON.parse(e))
+    .flatMap((p) => p.choices || [])
+    .flatMap((c) => c.delta?.tool_calls || [])
+    .map((t) => t.function?.arguments)
+    .join("");
+  assert.ok(argText.includes("CustomerRepository"), "arguments must reach tool_calls, not content");
+});

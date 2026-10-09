@@ -8,15 +8,28 @@ function actionFor(stream) {
   return stream ? "streamGenerateContent?alt=sse" : "generateContent";
 }
 
-// Registry ids are client-facing; upstream wants the tiered/suffixed name.
+// Registry ids are client-facing; upstream wants the real model name, and tier
+// variants (thinkingLevel) share one *-tiered model.
 async function upstreamModelFor(model) {
   try {
     const { getProvider } = await import("../providers/index.js");
     const entry = getProvider("antigravity")?.models?.find((m) => m.id === model);
-    return entry?.upstreamModelId || model;
+    return { id: entry?.upstreamModelId || model, thinkingLevel: entry?.thinkingLevel };
   } catch {
-    return model;
+    return { id: model };
   }
+}
+
+// Set the tier unless the client already chose its own thinking settings.
+function applyThinkingLevel(request, level) {
+  if (!level) return request;
+  const gen = request.generationConfig || {};
+  const tc = gen.thinkingConfig || {};
+  if (tc.thinkingLevel || tc.thinkingBudget !== undefined) return request;
+  return {
+    ...request,
+    generationConfig: { ...gen, thinkingConfig: { includeThoughts: false, ...tc, thinkingLevel: level } },
+  };
 }
 
 function generateProjectId() {
@@ -31,7 +44,7 @@ export class AntigravityExecutor extends BaseExecutor {
     } catch {}
 
     const sourceRequest = parsed?.request || parsed || {};
-    const model = await upstreamModelFor(targetModel || parsed?.model || sourceRequest?.model || "");
+    const { id: model, thinkingLevel } = await upstreamModelFor(targetModel || parsed?.model || sourceRequest?.model || "");
     const projectId =
       connection?.credentials?.project_id || connection?.credentials?.projectId || parsed?.project || generateProjectId();
 
@@ -40,7 +53,7 @@ export class AntigravityExecutor extends BaseExecutor {
       project: projectId,
       model,
       userAgent: "antigravity",
-      request: sourceRequest,
+      request: applyThinkingLevel(sourceRequest, thinkingLevel),
     };
 
     const antigravityHeaders = {

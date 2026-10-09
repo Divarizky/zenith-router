@@ -60,3 +60,68 @@ test("OpencodeExecutor - rewrites legacy url, sets free-tier headers, keeps clie
     assert.ok(toolNames.includes(name), `missing fingerprint tool ${name}`);
   }
 });
+
+test("OpencodeExecutor - fingerprint tools match the upstream tool schema per path", async () => {
+  let seen = null;
+  const executor = new OpencodeExecutor({
+    fetchFn: async (url, init = {}) => {
+      seen = { url, body: JSON.parse(init.body) };
+      return new Response("{}", { status: 200 });
+    },
+  });
+
+  const clientTools = Array.from({ length: 17 }, (_, i) => ({
+    type: "function",
+    name: `t${i}`,
+    description: "x",
+    parameters: { type: "object", properties: {} },
+  }));
+
+  // Responses path: every tool needs a top-level name (regression for tools[17].name).
+  await executor.execute({
+    url: "x",
+    headers: {},
+    body: JSON.stringify({ model: "muse-spark-1.3-contributor-free", input: "hi", tools: clientTools }),
+    targetModel: "muse-spark-1.3-contributor-free",
+    targetFormat: "openai-responses",
+  });
+  assert.strictEqual(seen.url, "https://opencode.ai/zen/v1/responses");
+  assert.strictEqual(seen.body.tools.length, 21);
+  for (const tool of seen.body.tools) {
+    assert.strictEqual(typeof tool.name, "string", `tool tanpa name: ${JSON.stringify(tool)}`);
+    assert.strictEqual(tool.function, undefined);
+  }
+  assert.deepStrictEqual(seen.body.tools[17].parameters.properties, { command: { type: "string" } });
+
+  // Claude Messages path: name + input_schema.
+  await executor.execute({
+    url: "x",
+    headers: {},
+    body: JSON.stringify({
+      model: "union-alpha",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "custom", input_schema: { type: "object" } }],
+    }),
+    targetModel: "union-alpha",
+    targetFormat: "claude",
+  });
+  assert.strictEqual(seen.url, "https://opencode.ai/zen/v1/messages");
+  for (const tool of seen.body.tools) {
+    assert.strictEqual(typeof tool.name, "string");
+    assert.ok(tool.input_schema, `tool tanpa input_schema: ${JSON.stringify(tool)}`);
+  }
+
+  // Client already declares bash in Responses shape: no duplicate is added.
+  await executor.execute({
+    url: "x",
+    headers: {},
+    body: JSON.stringify({
+      model: "muse-spark-1.2-contributor-free",
+      input: "hi",
+      tools: [{ type: "function", name: "bash", parameters: { type: "object" } }],
+    }),
+    targetModel: "muse-spark-1.2-contributor-free",
+    targetFormat: "openai-responses",
+  });
+  assert.strictEqual(seen.body.tools.filter((t) => t.name === "bash").length, 1);
+});

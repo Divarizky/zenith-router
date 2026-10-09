@@ -15,6 +15,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const isTrafficGuard = settings.traffic_guard_enabled !== "false";
   const maxConcurrency = settings.max_account_concurrency || "2";
   const isJitter = settings.request_jitter_enabled !== "false";
+  const isQuotaAutoSync = settings.quota_auto_sync !== "false";
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
   const isSaved = query.saved === "1" || query.saved === "true";
@@ -103,6 +104,19 @@ export function renderSettingsPage(port = 20120, query = {}) {
           </div>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Auto Sinkron Kuota &amp; Saldo</strong>
+            <p class="hint">Menyegarkan kuota/balance semua akun secara berkala di latar belakang. Interval diatur lewat env ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES (default 30 menit).</p>
+          </div>
+          <div class="setting-action">
+            <label class="switch" aria-label="Auto Sinkron Kuota dan Saldo">
+              <input type="checkbox" name="quota_auto_sync" value="true" ${isQuotaAutoSync ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
         <div style="margin-top: 1.5rem;">
           <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
         </div>
@@ -129,12 +143,14 @@ export async function handleSaveSettings(c) {
   const trafficGuard = body.traffic_guard_enabled === "true" || body.traffic_guard_enabled === "on" ? "true" : "false";
   const maxConcurrency = String(Number(body.max_account_concurrency) || 2);
   const requestJitter = body.request_jitter_enabled === "true" || body.request_jitter_enabled === "on" ? "true" : "false";
+  const quotaAutoSync = body.quota_auto_sync === "true" || body.quota_auto_sync === "on" ? "true" : "false";
 
   setSetting("require_api_key", requireKey);
   setSetting("account_rotation", rotation);
   setSetting("traffic_guard_enabled", trafficGuard);
   setSetting("max_account_concurrency", maxConcurrency);
   setSetting("request_jitter_enabled", requestJitter);
+  setSetting("quota_auto_sync", quotaAutoSync);
 
   return c.redirect("/dashboard/settings?saved=1");
 }

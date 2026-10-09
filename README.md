@@ -56,7 +56,7 @@ Keterangan status: **Berjalan** = terpakai sehari-hari, **Opt-in** = mati secara
 | Kartu kuota di halaman Usage dengan bar per jendela/model, hitung mundur reset, dan tombol Sync per akun | Berjalan |
 | Peta koneksi provider aktif di sekitar router (topologi SVG) dan panel Recent Requests | Berjalan |
 | Sembunyikan akun yang tidak punya sumber data kuota | Berjalan |
-| Auto-refresh kuota berkala dengan cache | Belum ada (Sync masih manual) |
+| Auto-refresh kuota berkala dengan cache | Berjalan (default 30 menit, bisa dimatikan di Settings) |
 
 ### Optimisasi prompt dan token
 
@@ -127,6 +127,7 @@ Key gateway hanya membuka akses ke zenroute dan tidak pernah diteruskan ke provi
 | `ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
 | `ZENROUTE_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar chunk stream upstream |
 | `ZENROUTE_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkron model gratis; `0` mematikan sinkron otomatis |
+| `ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES` | `30` | Interval auto sync kuota & balance; `0` mematikan auto sync |
 
 Header `x-zenroute-token-saver: false` mematikan RTK dan Caveman untuk satu request.
 

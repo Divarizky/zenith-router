@@ -4,12 +4,15 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+// Versi tampilan (banner CLI, /health, sidebar) dibaca dari package.json agar tidak basi saat bump.
+import pkg from "../package.json" with { type: "json" };
 import { streamSSE } from "hono/streaming";
 import { handleListModels } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
-import { handleGetUsage } from "./services/usage.js";
+import { handleGetUsage, getLastProvider } from "./services/usage.js";
+import { getActiveProviders } from "./services/trafficGuard.js";
 import { handleGetQuota, handleSyncQuotaForm } from "./services/quota.js";
 import {
   initConsoleLogCapture,
@@ -64,7 +67,7 @@ import {
 import { getConnections } from "./db/index.js";
 import { getAllProviders } from "./providers/index.js";
 import { startModelSyncScheduler } from "./services/modelSync.js";
-import { startQuotaSyncScheduler } from "./services/quotaSync.js";
+import { startQuotaSyncScheduler, syncAllQuotas } from "./services/quotaSync.js";
 
 export const app = new Hono();
 export const PORT = Number(process.env.PORT || 20120);
@@ -83,7 +86,7 @@ app.use("/v1/*", requireJsonBody);
 app.use("/v1/*", gatewayAuth);
 
 // Health check
-app.get("/health", (c) => c.json({ status: "ok", service: "zenroute", timestamp: Date.now() }));
+app.get("/health", (c) => c.json({ status: "ok", service: "zenith-router", version: pkg.version, timestamp: Date.now() }));
 
 // Serve static assets
 app.get("/logo.png", (c) => {
@@ -99,7 +102,9 @@ app.get("/logo.png", (c) => {
   return c.text("Not found", 404);
 });
 app.get("/favicon.ico", (c) => c.redirect("/logo.png"));
-app.use("/*", serveStatic({ root: "./public" }));
+// Absolute root: a cwd-relative "./public" 404s every /providers/*.png whenever the
+// process is started from outside the package directory (e.g. the global `zenith` shim).
+app.use("/*", serveStatic({ root: PUBLIC_DIR }));
 
 // Home & Dashboard Overview
 app.get("/", (c) => c.html(renderOverviewPage(PORT)));
@@ -134,7 +139,7 @@ app.get("/dashboard/connections", (c) => c.redirect("/dashboard/providers"));
 app.get("/dashboard/models", (c) => c.redirect("/dashboard/providers"));
 
 // Dashboard Usage & Settings UI & Actions
-app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT)));
+app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT, c.req.query())));
 app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT, c.req.query())));
 app.post("/dashboard/token-saver", handleSaveTokenSaver);
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query())));
@@ -161,7 +166,20 @@ app.post("/v1/responses", handleResponses);
 // Analytics & Usage
 app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
+// Live topology state: provider yang sedang memproses request + provider terakhir dipakai.
+app.get("/api/topology/active", (c) =>
+  c.json({ active: [...getActiveProviders()], last: getLastProvider() })
+);
 app.post("/dashboard/quota/sync", handleSyncQuotaForm);
+// Manual counterpart of the auto-sync job: refresh every linked provider at once.
+app.post("/dashboard/quota/sync/all", async (c) => {
+  try {
+    await syncAllQuotas({ minAgeMs: 0 });
+  } catch (err) {
+    console.error("[zenith] Quota bulk sync failed:", err.message);
+  }
+  return c.redirect("/dashboard/usage?synced=1");
+});
 
 // Console Logs API
 app.get("/api/console-logs", (c) => c.json({ logs: getConsoleLogs() }));
@@ -232,7 +250,7 @@ export function startServer() {
   const dim = "\x1b[2m";
   const bold = "\x1b[1m";
   const reset = "\x1b[0m";
-  console.log(`\n${bold}zenroute${reset} ${dim}v0.1.0${reset}\n`);
+  console.log(`\n${bold}Zenith Router${reset} ${dim}v${pkg.version}${reset}\n`);
   console.log(`  Dashboard:  ${base}/dashboard`);
   console.log(`  Endpoint:   ${base}/v1`);
   console.log(`  Health:     ${base}/health`);
@@ -240,7 +258,7 @@ export function startServer() {
   console.log(`\n  ${dim}Ctrl+C untuk berhenti. Setup awal lewat dashboard.${reset}\n`);
   if (!isLoopbackHost(hostname)) {
     console.warn(
-      "[zenroute] Bound to a non-loopback address: zenroute API keys are required on /v1 and the dashboard stays localhost-only."
+      "[zenith] Bound to a non-loopback address: Zenith Router API keys are required on /v1 and the dashboard stays localhost-only."
     );
   }
   return serve({

@@ -64,7 +64,7 @@ function gatewayError(c, status, type, message) {
 export async function hostGuard(c, next) {
   if (isLoopbackHost(getBindHost())) {
     const hostname = new URL(c.req.url).hostname.toLowerCase();
-    const allowed = listFromEnv("ZENROUTE_ALLOWED_HOSTS").map((h) => h.toLowerCase());
+    const allowed = listFromEnv("ZENITH_ALLOWED_HOSTS").map((h) => h.toLowerCase());
     if (!isLoopbackHost(hostname) && !allowed.includes(hostname)) {
       return c.text("Forbidden host", 403);
     }
@@ -125,17 +125,17 @@ export async function controlPlaneGuard(c, next) {
 }
 
 /**
- * CORS is opt-in for /v1 via ZENROUTE_CORS_ORIGINS. CLI agents do not need it.
+ * CORS is opt-in for /v1 via ZENITH_CORS_ORIGINS. CLI agents do not need it.
  */
 export async function corsOptIn(c, next) {
-  const origins = listFromEnv("ZENROUTE_CORS_ORIGINS");
+  const origins = listFromEnv("ZENITH_CORS_ORIGINS");
   if (origins.length === 0) {
     return next();
   }
   return cors({
     origin: origins,
     allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Authorization", "Content-Type", "x-api-key", "anthropic-version", "anthropic-beta", "x-zenroute-token-saver"],
+    allowHeaders: ["Authorization", "Content-Type", "x-api-key", "anthropic-version", "anthropic-beta", "x-zenith-token-saver"],
   })(c, next);
 }
 
@@ -154,7 +154,7 @@ export async function requireJsonBody(c, next) {
 }
 
 /**
- * Validate the zenroute gateway key. The key never travels upstream; provider
+ * Validate the zenith-router gateway key. The key never travels upstream; provider
  * credentials come from the stored connection.
  */
 export async function gatewayAuth(c, next) {
@@ -169,10 +169,10 @@ export async function gatewayAuth(c, next) {
       c.set("apiKeyId", verified.id);
       c.set("apiKeyName", verified.name);
     } else if (isApiKeyRequired()) {
-      return gatewayError(c, 401, "authentication_error", "Invalid zenroute API key");
+      return gatewayError(c, 401, "authentication_error", "Invalid Zenith Router API key");
     }
   } else if (isApiKeyRequired()) {
-    return gatewayError(c, 401, "authentication_error", "Missing zenroute API key");
+    return gatewayError(c, 401, "authentication_error", "Missing Zenith Router API key");
   }
 
   await next();

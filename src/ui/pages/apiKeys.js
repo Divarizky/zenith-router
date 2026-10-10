@@ -20,7 +20,7 @@ function renderNewKeyNotice(newKey, port) {
     <div class="card" style="margin-bottom: 1.5rem; border-color: var(--warning);">
       <h3 style="color: var(--warning);">New key: copy it now</h3>
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-        Ini satu-satunya waktu kunci penuh ditampilkan. zenroute hanya menyimpan hash SHA-256.
+        Ini satu-satunya waktu kunci penuh ditampilkan. Zenith Router hanya menyimpan hash SHA-256.
       </p>
       <code style="display: block; padding: 0.75rem; word-break: break-all; font-size: 0.95rem;">${escapeHtml(newKey.key)}</code>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem;">
@@ -64,8 +64,8 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
       <h3>Gateway Access Policy</h3>
       <p class="hint">Kunci API di /v1: ${policy}</p>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
-        Ubah di Pengaturan. Selalu wajib saat zenroute terikat ke alamat non-loopback.
-        Kunci ini hanya membuka zenroute; kredensial penyedia tetap di Koneksi dan tidak diambil dari klien.
+        Ubah di Pengaturan. Selalu wajib saat Zenith Router terikat ke alamat non-loopback.
+        Kunci ini hanya membuka Zenith Router; kredensial penyedia tetap di Koneksi dan tidak diambil dari klien.
       </p>
       ${lockoutWarning}
     </div>

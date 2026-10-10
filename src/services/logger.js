@@ -6,8 +6,8 @@ const FLUSH_INTERVAL_MS = 100;
 const MAX_BATCH_LINES = 50;
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
-if (!global._zenrouteLogBufferState) {
-  global._zenrouteLogBufferState = {
+if (!global._zenithLogBufferState) {
+  global._zenithLogBufferState = {
     logs: [],
     patched: false,
     originals: {},
@@ -15,10 +15,10 @@ if (!global._zenrouteLogBufferState) {
     pendingLines: [],
     flushTimer: null,
   };
-  global._zenrouteLogBufferState.emitter.setMaxListeners(100);
+  global._zenithLogBufferState.emitter.setMaxListeners(100);
 }
 
-const state = global._zenrouteLogBufferState;
+const state = global._zenithLogBufferState;
 
 function stripAnsi(str) {
   return typeof str === "string" ? str.replace(ANSI_RE, "") : String(str);
@@ -99,9 +99,17 @@ export function initConsoleLogCapture() {
   state.patched = true;
 }
 
-export function captureLine(text) {
+/**
+ * Log only to the dashboard console Logs panel. Keeps the terminal clean for
+ * background work the user did not run by hand (quota sync, scheduler ticks).
+ */
+export function logQuiet(text, level = "log") {
+  captureLine(text, level);
+}
+
+export function captureLine(text, level = "log") {
   try {
-    appendLine("log", [String(text)]);
+    appendLine(level, [String(text)]);
   } catch {}
 }
 

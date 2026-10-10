@@ -4,8 +4,8 @@ let customExecutor = null;
 const EXECUTORS = new Map();
 
 // Non-streaming LLM calls only return headers after the full generation, so the headers wait must be generous.
-const DEFAULT_HEADERS_TIMEOUT_MS = Number(process.env.ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS) || 300000;
-const DEFAULT_IDLE_TIMEOUT_MS = Number(process.env.ZENROUTE_UPSTREAM_IDLE_TIMEOUT_MS) || 120000;
+const DEFAULT_HEADERS_TIMEOUT_MS = Number(process.env.ZENITH_UPSTREAM_HEADERS_TIMEOUT_MS) || 300000;
+const DEFAULT_IDLE_TIMEOUT_MS = Number(process.env.ZENITH_UPSTREAM_IDLE_TIMEOUT_MS) || 120000;
 
 function timeoutError(message) {
   return new DOMException(message, "TimeoutError");

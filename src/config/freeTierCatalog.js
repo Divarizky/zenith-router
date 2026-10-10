@@ -2,7 +2,7 @@
  * Free-tier monthly token budget catalog, mirrored from OmniRoute's
  * open-sse/config/freeTierCatalog.ts (2026-06-05 research snapshot).
  *
- * Only values applicable to zenroute's current providers are carried over.
+ * Only values applicable to zenith-router's current providers are carried over.
  * Providers not listed have no documented recurring free token cap.
  */
 

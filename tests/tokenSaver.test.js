@@ -129,7 +129,7 @@ test("tokenSaver pipeline - guarantees fail-open on internal error", () => {
   assert.deepStrictEqual(result, corrupted);
 });
 
-test("POST /v1/chat/completions - bypasses token saver when header x-zenroute-token-saver is false", async () => {
+test("POST /v1/chat/completions - bypasses token saver when header x-zenith-token-saver is false", async () => {
   initDb(":memory:");
   addConnection({ provider: "glm", name: "GLM test", credentials: { api_key: "test-key" } });
   let capturedBody = null;
@@ -151,7 +151,7 @@ test("POST /v1/chat/completions - bypasses token saver when header x-zenroute-to
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-zenroute-token-saver": "false",
+      "x-zenith-token-saver": "false",
     },
     body: JSON.stringify({
       model: "glm/glm-4-flash",

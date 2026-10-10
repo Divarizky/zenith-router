@@ -1,5 +1,7 @@
 import { getConnections, updateConnection } from "../db/index.js";
 import { fetchLiveQuota } from "./quota/index.js";
+import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
+import { logQuiet } from "./logger.js";
 
 let customQuotaFetcher = null;
 
@@ -27,7 +29,7 @@ export function isConnectionExhausted(connection) {
 /**
  * Fetch live quota/balance for a connection from provider endpoint
  */
-export async function syncProviderQuota(connection) {
+export async function syncProviderQuota(connection, { quiet = false } = {}) {
   if (!connection || !connection.id) return null;
 
   let quotaData = null;
@@ -35,13 +37,25 @@ export async function syncProviderQuota(connection) {
   if (customQuotaFetcher) {
     quotaData = await customQuotaFetcher(connection);
   } else {
+    // Quota endpoints reject expired tokens. Refresh first when the token is
+    // (nearly) expired, and once more reactively if the provider still says 401/403.
+    connection = await withFreshToken(connection, false);
     try {
-      const live = await fetchLiveQuota(connection);
+      let live = await fetchLiveQuota(connection);
+      if (live?.error && canRefresh(connection)) {
+        const retried = await withFreshToken(connection, true);
+        if (retried !== connection) {
+          connection = retried;
+          live = await fetchLiveQuota(connection);
+        }
+      }
       if (live) {
         quotaData = live;
       }
     } catch (err) {
-      console.error(`[zenroute] Failed to fetch live quota for ${connection.provider} (#${connection.id}):`, err.message);
+      const msg = `[zenith] Failed to fetch live quota for ${connection.provider} (#${connection.id}): ${err.message}`;
+      if (quiet) logQuiet(msg, "error");
+      else console.error(msg);
     }
 
     if (!quotaData) {
@@ -50,6 +64,10 @@ export async function syncProviderQuota(connection) {
         unit: "unknown",
         is_exhausted: false,
       };
+    } else if (quotaData.error && connection.credentials?.quota) {
+      // Keep the last good bars visible next to the error instead of wiping them.
+      const prev = connection.credentials.quota;
+      quotaData = { ...prev, ...quotaData, quotas: quotaData.quotas || prev.quotas };
     }
   }
 
@@ -63,6 +81,19 @@ export async function syncProviderQuota(connection) {
 
   updateConnection(connection.id, { credentials: updatedCreds });
   return updatedCreds.quota;
+}
+
+/** Returns the connection with a valid access token; the input one if refresh is unavailable or fails. */
+async function withFreshToken(connection, force) {
+  if (!force && !needsTokenRefresh(connection)) return connection;
+  try {
+    return (await refreshOAuthToken(connection, { force })) || connection;
+  } catch (err) {
+    const msg = `[zenith] Token refresh before quota sync failed for ${connection.provider} (#${connection.id}): ${err.message}`;
+    if (force) logQuiet(msg, "error");
+    else console.error(msg);
+    return connection;
+  }
 }
 
 /**
@@ -92,7 +123,7 @@ export async function handleSyncQuotaForm(c) {
     try {
       await syncProviderQuota(connection);
     } catch (err) {
-      console.error(`[zenroute] Quota sync failed for connection #${id}:`, err.message);
+      console.error(`[zenith] Quota sync failed for connection #${id}:`, err.message);
     }
   }
   return c.redirect("/dashboard/usage?synced=1");

@@ -9,10 +9,9 @@ import {
   startQuotaSyncScheduler,
   stopQuotaSyncScheduler,
 } from "../src/services/quotaSync.js";
-import { setSetting } from "../src/services/settings.js";
 import { app } from "../src/index.js";
 
-const ENV_KEY = "ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES";
+const ENV_KEY = "ZENITH_QUOTA_SYNC_INTERVAL_MINUTES";
 
 function addGlmConnection(name, quota) {
   return addConnection({
@@ -76,11 +75,11 @@ test("quotaSync - minAgeMs skips connections with a fresh cache", async () => {
   }
 });
 
-test("quotaSync - getQuotaSyncIntervalMs reads env, defaults to 30min, 0 turns off", () => {
+test("quotaSync - getQuotaSyncIntervalMs reads env, defaults to 15min, 0 turns off", () => {
   const prev = process.env[ENV_KEY];
   try {
     delete process.env[ENV_KEY];
-    assert.strictEqual(getQuotaSyncIntervalMs(), 30 * 60_000);
+    assert.strictEqual(getQuotaSyncIntervalMs(), 15 * 60_000);
 
     process.env[ENV_KEY] = "45";
     assert.strictEqual(getQuotaSyncIntervalMs(), 45 * 60_000);
@@ -96,9 +95,9 @@ test("quotaSync - getQuotaSyncIntervalMs reads env, defaults to 30min, 0 turns o
   }
 });
 
-test("quotaSync - runQuotaSyncTick honors the quota_auto_sync toggle", async () => {
+test("quotaSync - runQuotaSyncTick always refreshes, there is no on/off toggle", async () => {
   initDb(":memory:");
-  addGlmConnection("Toggled");
+  addGlmConnection("Tick");
 
   const calls = [];
   setCustomQuotaFetcher(async () => {
@@ -107,18 +106,11 @@ test("quotaSync - runQuotaSyncTick honors the quota_auto_sync toggle", async () 
   });
 
   try {
-    setSetting("quota_auto_sync", "false");
-    const off = await runQuotaSyncTick({ intervalMs: 0 });
-    assert.strictEqual(calls.length, 0, "disabled toggle must not fetch");
-    assert.deepStrictEqual(off, {});
-
-    setSetting("quota_auto_sync", "true");
-    const on = await runQuotaSyncTick({ intervalMs: 0 });
-    assert.strictEqual(calls.length, 1, "enabled toggle fetches");
-    assert.ok(Object.keys(on).length === 1);
+    const tick = await runQuotaSyncTick({ intervalMs: 0 });
+    assert.strictEqual(calls.length, 1, "a tick fetches without any setting gate");
+    assert.ok(Object.keys(tick).length === 1);
   } finally {
     setCustomQuotaFetcher(null);
-    setSetting("quota_auto_sync", "true");
   }
 });
 
@@ -130,7 +122,6 @@ test("quotaSync - scheduler off via env, runs first pass on start, stop clears t
     assert.strictEqual(startQuotaSyncScheduler(), null, "env 0 disables the scheduler");
 
     process.env[ENV_KEY] = "30";
-    setSetting("quota_auto_sync", "true");
     const calls = [];
     setCustomQuotaFetcher(async () => {
       calls.push(1);

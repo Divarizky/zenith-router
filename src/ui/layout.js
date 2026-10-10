@@ -1,5 +1,7 @@
 import { escapeHtml } from "./html.js";
 import { getLogoDataUri } from "./assets.js";
+// Versi sidebar dibaca dari package.json, sama dengan banner CLI dan User-Agent upstream.
+import pkg from "../../package.json" with { type: "json" };
 
 const NAV = [
   { id: "overview", label: "Overview", href: "/dashboard", icon: "home" },
@@ -23,7 +25,7 @@ function icon(name) {
   return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 }
 
-export function renderLayout({ title = "zenroute", activeTab = "overview", content = "", port = 20120 }) {
+export function renderLayout({ title = "Zenith Router", activeTab = "overview", content = "", port = 20120 }) {
   const navHtml = NAV.map(
     (t) => `
       <a href="${t.href}" class="nav-link ${t.id === activeTab ? "active" : ""}">
@@ -40,7 +42,7 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="${logoUri}">
-  <title>${escapeHtml(title)} &middot; zenroute</title>
+  <title>${escapeHtml(title)} &middot; Zenith Router</title>
   <style>
     :root {
       --bg: #0a0a0a;
@@ -108,7 +110,7 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
     .main { flex: 1; min-width: 0; padding: 1.75rem 2rem 3rem; }
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
     .topbar h2 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
-    .pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.7rem; border-radius: 9999px; font-size: 0.72rem; font-weight: 600; background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.7rem; border-radius: 9999px; font-size: 0.72rem; font-weight: 600; background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); white-space: nowrap; }
     .pill-success { color: var(--success); border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.08); }
     .pill-warning { color: var(--warning); border-color: rgba(251,191,36,.3); background: rgba(251,191,36,.08); }
     .pill-danger { color: var(--danger); border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.08); }
@@ -128,8 +130,16 @@ export function renderLayout({ title = "zenroute", activeTab = "overview", conte
 .section-head .hint { color: var(--text-muted); font-size: 0.82rem; }
 .provider-card { display: block; margin-bottom: 0; color: inherit; text-decoration: none; transition: border-color 0.12s, background 0.12s; }
 .provider-card:hover { border-color: var(--text-subtle); background: var(--surface-2); }
-.provider-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.35rem; }
+.provider-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem 0.75rem; margin-bottom: 0.35rem; }
 .provider-card-head h3 { margin-bottom: 0; }
+.provider-title { display: flex; align-items: center; gap: 0.65rem; flex: 1 1 12rem; min-width: 0; }
+.provider-text { min-width: 0; }
+.provider-title h3 { overflow-wrap: break-word; }
+.provider-card-head > .pill { flex-shrink: 0; margin-left: auto; }
+.provider-card .hint, .provider-card .hint code { overflow-wrap: anywhere; }
+.provider-icon { width: var(--pi, 32px); height: var(--pi, 32px); flex-shrink: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--surface-3); border: 1px solid var(--border); }
+.provider-icon img { width: 100%; height: 100%; object-fit: contain; }
+.provider-icon-fb { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--pi, 32px) * 0.38); font-weight: 700; color: var(--text-muted); }
 .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
 .crumb { color: var(--text-subtle); font-size: 0.82rem; margin-bottom: 1rem; }
 .crumb a { color: var(--text-muted); text-decoration: none; }
@@ -180,6 +190,8 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .btn-danger { color: var(--danger); border-color: rgba(248,113,113,.35); background: transparent; }
     .btn-danger:hover { background: rgba(248,113,113,.1); }
     .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+    .btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 0.3rem; min-width: 1.9rem; min-height: 1.9rem; line-height: 1; }
+    .btn-icon svg { flex-shrink: 0; }
     /* Forms */
     .field { margin-bottom: 0.9rem; }
     .field label { display: block; font-size: 0.8rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.3rem; }
@@ -189,6 +201,8 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .input-select { width: auto; min-width: 140px; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); font-size: 0.85rem; }
     code { background: var(--surface-2); padding: 0.15rem 0.4rem; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; color: var(--text); }
     table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    /* Wide tables (accounts, models, keys) scroll inside their card instead of pushing the page sideways. */
+    .card:has(> table) { overflow-x: auto; }
     th, td { padding: 0.6rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border-subtle); }
     th { color: var(--text-subtle); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
     tr:last-child td { border-bottom: none; }
@@ -226,8 +240,8 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
 <body>
   <aside class="sidebar">
     <div class="brand">
-      <img src="${logoUri}" alt="zenroute" class="brand-logo" />
-      <div><h1>zenroute</h1><small>v0.1.0</small></div>
+      <img src="${logoUri}" alt="Zenith Router" class="brand-logo" />
+      <div><h1>Zenith Router</h1><small>v${pkg.version}</small></div>
     </div>
     <nav>${navHtml}</nav>
     <div class="sidebar-footer">Ultra-lightweight personal AI gateway</div>

@@ -1,8 +1,27 @@
 import test from "node:test";
 import assert from "node:assert";
 import { initDb, addConnection } from "../src/db/index.js";
-import { recordUsage, getUsageStats } from "../src/services/usage.js";
+import { recordUsage, getUsageStats, getLastProvider } from "../src/services/usage.js";
 import { app } from "../src/index.js";
+
+test("usage service - no-auth traffic records its provider so getLastProvider stays truthful", () => {
+  initDb(":memory:");
+
+  const conn = addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "k1" } });
+  recordUsage({ connectionId: conn.id, model: "glm-4-flash", inputTokens: 10, outputTokens: 5 });
+  assert.strictEqual(getLastProvider(), "glm");
+
+  // Virtual no-auth connections have no id, so the provider column keeps them visible.
+  const record = recordUsage({
+    connectionId: null,
+    provider: "opencode",
+    model: "mimo-v2.6-flash-free",
+    inputTokens: 20,
+    outputTokens: 7,
+  });
+  assert.strictEqual(record.provider, "opencode");
+  assert.strictEqual(getLastProvider(), "opencode", "provider column beats the older connection-linked row");
+});
 
 test("usage service - recordUsage saves entry to usage_history safely", () => {
   initDb(":memory:");

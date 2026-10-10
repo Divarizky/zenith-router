@@ -243,7 +243,7 @@ export async function scanAndRefreshTokens() {
         await refreshOAuthToken(conn);
         refreshedCount++;
       } catch (err) {
-        console.error(`[zenroute] Proactive token refresh failed for connection ${conn.id}:`, err.message);
+        console.error(`[zenith] Proactive token refresh failed for connection ${conn.id}:`, err.message);
       }
     }
   }

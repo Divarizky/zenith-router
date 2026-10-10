@@ -14,9 +14,9 @@ function isTestRun() {
 }
 
 function defaultDbPath() {
-  if (process.env.ZENROUTE_DB_PATH) return process.env.ZENROUTE_DB_PATH;
+  if (process.env.ZENITH_DB_PATH) return process.env.ZENITH_DB_PATH;
   if (isTestRun()) return ":memory:";
-  return join(PROJECT_ROOT, "data", "zenroute.db");
+  return join(PROJECT_ROOT, "data", "zenith.db");
 }
 
 const SCHEMA_SQL = `
@@ -171,7 +171,11 @@ function migrateSchema(db) {
   if (!usageColumns.some((col) => col.name === "api_key_id")) {
     db.exec("ALTER TABLE usage_history ADD COLUMN api_key_id INTEGER");
   }
+  if (!usageColumns.some((col) => col.name === "provider")) {
+    db.exec("ALTER TABLE usage_history ADD COLUMN provider TEXT");
+  }
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_history (provider, timestamp)");
 }
 
 /**

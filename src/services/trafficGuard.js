@@ -4,6 +4,23 @@ import { getConnectionById } from "../db/index.js";
 
 // In-memory state tracking per connection ID
 const connectionState = new Map();
+// In-flight count per provider. Virtual (no-auth) connections carry no id, so they
+// never occupy a connection slot, but the topology still has to see their traffic.
+const providerState = new Map();
+
+function enterProviderSlot(providerId) {
+  const key = String(providerId || "").toLowerCase();
+  if (!key) return () => {};
+  providerState.set(key, (providerState.get(key) || 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = (providerState.get(key) || 0) - 1;
+    if (next > 0) providerState.set(key, next);
+    else providerState.delete(key);
+  };
+}
 
 function getState(connId) {
   if (!connectionState.has(connId)) {
@@ -43,11 +60,16 @@ function delay(ms, signal) {
  * Returns a release callback to be called when the request finishes.
  */
 export async function acquireAccountSlot(connection, signal = null) {
-  if (!connection || !connection.id) {
+  if (!connection) {
     return () => {};
   }
 
   const isGuardEnabled = getSetting("traffic_guard_enabled", "true") === "true";
+  // Virtual (no-auth) connections have no id and skip the concurrency guard, but they
+  // still report as in-flight so the router topology shows the provider actually serving.
+  if (!connection.id || !isGuardEnabled) {
+    return enterProviderSlot(connection.provider);
+  }
   if (!isGuardEnabled) {
     return () => {};
   }
@@ -106,6 +128,7 @@ export async function acquireAccountSlot(connection, signal = null) {
   }
 
   state.inFlight++;
+  const releaseProviderSlot = enterProviderSlot(connection.provider);
 
   // Apply human-like proactive jitter pacing if previous request just finished (< 250ms ago)
   if (isJitterEnabled && state.lastDispatchedAt > 0) {
@@ -116,6 +139,7 @@ export async function acquireAccountSlot(connection, signal = null) {
         await delay(jitterMs, signal);
       } catch (err) {
         releaseAccountSlot(connection.id);
+        releaseProviderSlot();
         throw err;
       }
     }
@@ -127,6 +151,7 @@ export async function acquireAccountSlot(connection, signal = null) {
   return () => {
     if (released) return;
     released = true;
+    releaseProviderSlot();
     releaseAccountSlot(connection.id);
   };
 }
@@ -163,6 +188,7 @@ export async function applyReactiveJitter(signal = null) {
  */
 export function resetTrafficGuardState() {
   connectionState.clear();
+  providerState.clear();
 }
 
 /**
@@ -178,5 +204,7 @@ export function getActiveProviders() {
       } catch {}
     }
   }
+  // Virtual connections never show up above, so count providers directly too.
+  for (const providerId of providerState.keys()) active.add(providerId);
   return active;
 }

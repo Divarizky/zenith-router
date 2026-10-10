@@ -3,6 +3,8 @@ import assert from "node:assert";
 import { initDb, addConnection } from "../src/db/index.js";
 import { syncProviderQuota, isConnectionExhausted } from "../src/services/quota.js";
 import { setOAuthFetch } from "../src/services/oauth/providers.js";
+import { setCustomTokenRefresher } from "../src/services/tokenRefresh.js";
+import { getConnectionById } from "../src/db/index.js";
 
 test("Live Quota - Codex parses rate limit from usage endpoint", async () => {
   initDb(":memory:");
@@ -38,6 +40,46 @@ test("Live Quota - Codex parses rate limit from usage endpoint", async () => {
   assert.strictEqual(quota.plan, "ChatGPT Plus");
 
   setOAuthFetch(null);
+});
+
+test("Live Quota - Codex labels windows by length (free plan = weekly only)", async () => {
+  initDb(":memory:");
+
+  setOAuthFetch(async (url) => {
+    if (url.includes("/wham/usage")) {
+      return new Response(
+        JSON.stringify({
+          plan_type: "free",
+          rate_limit: {
+            limit_reached: false,
+            primary_window: { used_percent: 12, limit_window_seconds: 604800, reset_after_seconds: 3600 },
+            secondary_window: null,
+          },
+        }),
+        { status: 200 }
+      );
+    }
+    return new Response("Not found", { status: 404 });
+  });
+
+  const conn = addConnection({
+    provider: "codex",
+    name: "Free Codex",
+    auth_type: "oauth",
+    credentials: { access_token: "mock_codex_token" },
+  });
+
+  try {
+    const quota = await syncProviderQuota(conn);
+    const rows = Object.values(quota.quotas);
+    assert.strictEqual(rows.length, 1, "free plan has a single window");
+    assert.strictEqual(rows[0].displayName, "Weekly (7d)");
+    assert.strictEqual(rows[0].remainingPercentage, 88);
+    assert.ok(rows[0].resetAt, "reset time derived from reset_after_seconds");
+    assert.strictEqual(quota.used_percent, 12);
+  } finally {
+    setOAuthFetch(null);
+  }
 });
 
 test("Live Quota - OpenRouter parses credit balance and limit", async () => {
@@ -361,4 +403,48 @@ test("Live Quota - Antigravity filters noise models, dedupes buckets and reads p
   assert.match(denied.error, /menolak token/);
 
   setOAuthFetch(null);
+});
+
+test("Live Quota - expired OAuth token is refreshed before the quota call", async () => {
+  initDb(":memory:");
+  const seen = [];
+
+  setCustomTokenRefresher(async () => ({ access_token: "fresh_token", expires_at: Date.now() + 3600_000 }));
+  setOAuthFetch(async (url, init) => {
+    const auth = init?.headers?.Authorization;
+    seen.push(auth);
+    if (auth !== "Bearer fresh_token") return new Response("expired", { status: 401 });
+    return new Response(
+      JSON.stringify({
+        models: {
+          "gemini-3-flash-agent": { quotaInfo: { remainingFraction: 0.5, resetTime: "2026-10-10T00:00:00Z" } },
+        },
+      }),
+      { status: 200 }
+    );
+  });
+
+  const conn = addConnection({
+    provider: "antigravity",
+    name: "Expired AG",
+    auth_type: "oauth",
+    credentials: {
+      access_token: "stale_token",
+      refresh_token: "r",
+      expires_at: Date.now() - 60_000,
+      project_id: "p",
+    },
+  });
+
+  try {
+    const quota = await syncProviderQuota(conn);
+    assert.ok(!quota.error, "no auth error after refresh");
+    assert.strictEqual(Object.keys(quota.quotas).length, 1);
+    assert.strictEqual(seen[0], "Bearer fresh_token", "stale token is never sent");
+    const stored = getConnectionById(conn.id).credentials;
+    assert.strictEqual(stored.access_token, "fresh_token", "refreshed token is persisted, not overwritten");
+  } finally {
+    setCustomTokenRefresher(null);
+    setOAuthFetch(null);
+  }
 });

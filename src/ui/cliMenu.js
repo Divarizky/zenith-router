@@ -94,7 +94,7 @@ export async function showInterfaceMenu({ port, displayHost }) {
   const base = `http://${displayHost}:${port}`;
   while (true) {
     const choice = await selectMenu(
-      "zenroute",
+      "Zenith Router",
       `Server: ${base}`,
       [
         { label: "Web UI (Buka Dashboard di Browser)" },
@@ -111,7 +111,7 @@ export async function showInterfaceMenu({ port, displayHost }) {
     }
     if (choice === 1 || choice === -1) {
       process.stdout.write("\x1b[2J\x1b[H");
-      console.log(`\n${BOLD}zenroute${RESET} ${DIM}berjalan di background${RESET}`);
+      console.log(`\n${BOLD}Zenith Router${RESET} ${DIM}berjalan di background${RESET}`);
       console.log(`  Dashboard:  ${base}/dashboard`);
       console.log(`  Endpoint:   ${base}/v1`);
       console.log(`\n  ${DIM}Ctrl+C untuk berhenti.${RESET}\n`);

@@ -343,20 +343,20 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
 });
 
 test("sync interval - env override, default 6h, 0 turns the scheduler off", () => {
-  const original = process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS;
+  const original = process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS;
   try {
-    delete process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS;
+    delete process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS;
     assert.strictEqual(getSyncIntervalMs(), 6 * 3_600_000);
-    process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS = "12";
+    process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS = "12";
     assert.strictEqual(getSyncIntervalMs(), 12 * 3_600_000);
-    process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS = "0";
+    process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS = "0";
     assert.strictEqual(getSyncIntervalMs(), 0);
     assert.strictEqual(startModelSyncScheduler(), null);
-    process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS = "abc";
+    process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS = "abc";
     assert.strictEqual(getSyncIntervalMs(), 0);
   } finally {
-    if (original === undefined) delete process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS;
-    else process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS = original;
+    if (original === undefined) delete process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS;
+    else process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS = original;
   }
 });
 

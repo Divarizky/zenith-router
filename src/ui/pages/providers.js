@@ -23,6 +23,7 @@ import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
+import { getProviderIconPath } from "../assets.js";
 
 const SECTIONS = [
   { category: "oauth", title: "OAuth Providers", hint: "Login dengan akun langganan, lalu tempel token di sini." },
@@ -131,7 +132,7 @@ function formatWib(ms) {
 function syncSummary(p) {
   const state = getModelSyncState(p.id);
   const hours = getSyncIntervalMs() / 3_600_000;
-  const schedule = hours > 0 ? `Model gratis disinkron otomatis tiap ${hours} jam.` : "Sinkron otomatis dimatikan (ZENROUTE_MODEL_SYNC_INTERVAL_HOURS=0).";
+  const schedule = hours > 0 ? `Model gratis disinkron otomatis tiap ${hours} jam.` : "Sinkron otomatis dimatikan (ZENITH_MODEL_SYNC_INTERVAL_HOURS=0).";
   const fallback = p.freeModelSync === "replace" ? "memakai daftar bawaan" : "hanya daftar bawaan yang tampil";
 
   let status;
@@ -177,6 +178,30 @@ function accountStats(list) {
   return { total: list.length, healthy };
 }
 
+/** Up to two initials used as the fallback badge when an icon file is missing. */
+function providerInitials(name) {
+  const letters = String(name || "?")
+    .split(/\s+/)
+    .map((w) => w.replace(/[^A-Za-z0-9]/g, "")[0] || "")
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("");
+  return (letters || "?").toUpperCase();
+}
+
+/**
+ * Brand icon (public/providers/<id>.png) with an initials badge behind it, so a
+ * missing file degrades to text instead of a broken image.
+ */
+function providerIconHtml(p, size = 32) {
+  const src = getProviderIconPath(p?.id);
+  const initials = escapeHtml(providerInitials(p?.name || p?.id));
+  const badge = `<span class="provider-icon-fb"${src ? " style=\"display:none\"" : ""}>${initials}</span>`;
+  if (!src) return `<span class="provider-icon" style="--pi:${size}px">${badge}</span>`;
+  const img = `<img src="${escapeHtml(src)}" alt="" width="${size}" height="${size}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />`;
+  return `<span class="provider-icon" style="--pi:${size}px">${img}${badge}</span>`;
+}
+
 function statusPill(p, stats) {
   if (p.noAuth) return `<span class="pill pill-success">Siap</span>`;
   if (stats.healthy > 0) return `<span class="pill pill-success">${stats.healthy} Terhubung</span>`;
@@ -215,14 +240,19 @@ export function renderProvidersPage(port = 20120) {
         return `
       <a class="card provider-card" href="${providerUrl(p.id)}">
         <div class="provider-card-head">
-          <h3>${escapeHtml(p.name)}</h3>
+          <div class="provider-title">
+            ${providerIconHtml(p, 32)}
+            <div class="provider-text">
+              <h3>${escapeHtml(p.name)}</h3>
+              <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${countProviderModels(
+                p,
+                allImported.filter((m) => m.provider === p.id),
+                allCustom.filter((m) => m.provider === p.id)
+              )} model</p>
+            </div>
+          </div>
           ${statusPill(p, stats)}
         </div>
-        <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${countProviderModels(
-          p,
-          allImported.filter((m) => m.provider === p.id),
-          allCustom.filter((m) => m.provider === p.id)
-        )} model</p>
         ${s.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       </a>`;
       })
@@ -328,7 +358,7 @@ const OAUTH_SCRIPT = `
         pollMs = 2000;
         show('<p>Selesaikan login di tab yang terbuka. ' + link + '</p>' +
           (r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
-            : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke zenroute, tempel URL callback atau kode di bawah.</p>') +
+            : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke Zenith Router, tempel URL callback atau kode di bawah.</p>') +
           '<div class="field"><input id="oauth-manual" placeholder="http://localhost:.../callback?code=... atau code#state" autocomplete="off" /></div>' +
           '<button type="button" class="btn btn-sm" onclick="zrOAuthManual()">Kirim</button>' +
           '<p id="oauth-manual-error" class="hint" style="color: var(--danger); margin-top: 0.5rem;"></p>');
@@ -494,7 +524,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 
   let accountsBody;
   if (p.noAuth) {
-    accountsBody = `<p class="hint">Provider ini tidak butuh akun. zenroute langsung meneruskan request ke endpoint publik.</p>`;
+    accountsBody = `<p class="hint">Provider ini tidak butuh akun. Zenith Router langsung meneruskan request ke endpoint publik.</p>`;
   } else if (accounts.length === 0) {
     accountsBody = `<div class="empty"><p class="big">Belum ada akun</p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
@@ -611,9 +641,12 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 
     <div class="card">
       <div class="provider-card-head">
-        <div>
-          <h3 style="font-size: 1.1rem;">${escapeHtml(p.name)}</h3>
-          <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : "API Key"}</p>
+        <div class="provider-title">
+          ${providerIconHtml(p, 40)}
+          <div class="provider-text">
+            <h3 style="font-size: 1.1rem;">${escapeHtml(p.name)}</h3>
+            <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : "API Key"}</p>
+          </div>
         </div>
         ${statusPill(p, stats)}
       </div>

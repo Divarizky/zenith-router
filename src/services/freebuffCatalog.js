@@ -24,7 +24,7 @@ export async function fetchFreebuffCatalog({ etag = null } = {}) {
   try {
     const headers = {
       Accept: "text/plain",
-      "User-Agent": "zenroute/model-sync",
+      "User-Agent": "zenith-router/model-sync",
     };
     if (etag) headers["If-None-Match"] = etag;
 

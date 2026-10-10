@@ -29,7 +29,7 @@ export function applyTokenSaver(body, format = "openai", options = {}) {
 
     return optimized;
   } catch (err) {
-    console.error("[zenroute] Token saver pipeline failed, failing open:", err.message);
+    console.error("[zenith] Token saver pipeline failed, failing open:", err.message);
     return body;
   }
 }

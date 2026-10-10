@@ -78,8 +78,8 @@ test("cline auth adds 9router-style client identity headers plus workos token", 
     { provider: "cline", auth_type: "oauth", credentials: { access_token: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig" } }
   );
   assert.strictEqual(h.Authorization, "Bearer workos:eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig");
-  assert.match(h["User-Agent"], /^zenroute\//);
-  assert.strictEqual(h["X-CLIENT-TYPE"], "zenroute");
+  assert.match(h["User-Agent"], /^zenith-router\//);
+  assert.strictEqual(h["X-CLIENT-TYPE"], "zenith-router");
   assert.ok(h["X-CLIENT-VERSION"]);
   assert.ok(h["X-CORE-VERSION"]);
   assert.strictEqual(h["X-PLATFORM"], process.platform);

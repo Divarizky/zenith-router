@@ -131,7 +131,7 @@ test("Database - migrates a pre-api_key_id usage_history table on startup", asyn
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const dir = mkdtempSync(join(tmpdir(), "zenroute-migrate-"));
+  const dir = mkdtempSync(join(tmpdir(), "zenith-migrate-"));
   const dbPath = join(dir, "old.db");
   t.after(() => {
     closeDb();

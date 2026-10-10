@@ -7,6 +7,7 @@ import { captureLine } from "./logger.js";
 export function recordUsage({
   connectionId = null,
   apiKeyId = null,
+  provider = null,
   model,
   inputTokens = 0,
   outputTokens = 0,
@@ -21,22 +22,26 @@ export function recordUsage({
     const dur = Number(durationMs) || 0;
     const connId = connectionId ? Number(connectionId) : null;
     const keyId = apiKeyId ? Number(apiKeyId) : null;
+    const providerId = provider ? String(provider) : null;
 
     const stmt = db.prepare(`
-      INSERT INTO usage_history (connection_id, api_key_id, model, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (connection_id, api_key_id, provider, model, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const info = stmt.run(connId, keyId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
+    const info = stmt.run(connId, keyId, providerId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
 
     captureLine(
-      `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok} | ${dur}ms${connId ? ` | conn#${connId}` : ""}`
+      `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok} | ${dur}ms${
+        connId ? ` | conn#${connId}` : providerId ? ` | provider=${providerId}` : ""
+      }`
     );
 
     return {
       id: Number(info.lastInsertRowid),
       connection_id: connId,
       api_key_id: keyId,
+      provider: providerId,
       model,
       input_tokens: inTok,
       output_tokens: outTok,
@@ -45,7 +50,7 @@ export function recordUsage({
       timestamp,
     };
   } catch (err) {
-    console.error("[zenroute] Failed to record usage to SQLite:", err.message);
+    console.error("[zenith] Failed to record usage to SQLite:", err.message);
     return null;
   }
 }
@@ -70,7 +75,7 @@ export function estimateTokens(textOrMessages) {
 /**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
-export function createUsageTapStream({ connectionId, apiKeyId = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
+export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
   let inputTokens = 0;
   let outputTokens = 0;
   let streamedTextLength = 0;
@@ -139,6 +144,7 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, model, sta
         recordUsage({
           connectionId,
           apiKeyId,
+          provider,
           model,
           inputTokens,
           outputTokens,
@@ -274,11 +280,11 @@ export function getLastProvider() {
     const db = getDb();
     const row = db
       .prepare(
-        `SELECT c.provider AS provider
+        `SELECT COALESCE(u.provider, c.provider) AS provider
          FROM usage_history u
          LEFT JOIN connections c ON u.connection_id = c.id
-         WHERE c.provider IS NOT NULL
-         ORDER BY u.timestamp DESC
+         WHERE COALESCE(u.provider, c.provider) IS NOT NULL
+         ORDER BY u.timestamp DESC, u.id DESC
          LIMIT 1`
       )
       .get();

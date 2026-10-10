@@ -45,9 +45,9 @@ test("security - no CORS headers on /v1 by default", async () => {
   assert.strictEqual(res.headers.get("access-control-allow-origin"), null);
 });
 
-test("security - CORS is opt-in through ZENROUTE_CORS_ORIGINS", async () => {
+test("security - CORS is opt-in through ZENITH_CORS_ORIGINS", async () => {
   initDb(":memory:");
-  await withEnv({ ZENROUTE_CORS_ORIGINS: "http://localhost:3000" }, async () => {
+  await withEnv({ ZENITH_CORS_ORIGINS: "http://localhost:3000" }, async () => {
     const ok = await app.request("/v1/models", {
       method: "OPTIONS",
       headers: { Origin: "http://localhost:3000", "Access-Control-Request-Method": "POST" },
@@ -68,8 +68,8 @@ test("security - host guard blocks non-loopback Host headers (DNS rebinding)", a
   assert.strictEqual((await app.request("http://127.0.0.1/health")).status, 200);
   assert.strictEqual((await app.request("http://localhost/health")).status, 200);
 
-  await withEnv({ ZENROUTE_ALLOWED_HOSTS: "zenroute.local" }, async () => {
-    assert.strictEqual((await app.request("http://zenroute.local/health")).status, 200);
+  await withEnv({ ZENITH_ALLOWED_HOSTS: "zenith.local" }, async () => {
+    assert.strictEqual((await app.request("http://zenith.local/health")).status, 200);
   });
 });
 
@@ -233,8 +233,8 @@ test("security - applyConnectionAuth follows the connection auth type", () => {
   );
   assert.strictEqual(clineHeaders.Authorization, "Bearer workos:eyJhbGc.eyJzdWIi.sig");
   // Client identity headers so cline-free models pass the product-surface gate.
-  assert.match(clineHeaders["User-Agent"], /^zenroute\//);
-  assert.strictEqual(clineHeaders["X-CLIENT-TYPE"], "zenroute");
+  assert.match(clineHeaders["User-Agent"], /^zenith-router\//);
+  assert.strictEqual(clineHeaders["X-CLIENT-TYPE"], "zenith-router");
   assert.ok(clineHeaders["X-CLIENT-VERSION"]);
   assert.ok(clineHeaders["X-CORE-VERSION"]);
   assert.strictEqual(clineHeaders["X-IS-MULTIROOT"], "false");

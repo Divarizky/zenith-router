@@ -99,8 +99,8 @@ export function applyConnectionAuth(headers, connection) {
       // Cline OAuth access tokens are WorkOS JWTs and must carry the "workos:" prefix.
       if (/^eyJ[\w-]+\.[\w-]+/.test(token)) token = `workos:${token}`;
       const v = pkg.version || "0.0.0";
-      if (!headers["User-Agent"]) headers["User-Agent"] = `zenroute/${v}`;
-      if (!headers["X-CLIENT-TYPE"]) headers["X-CLIENT-TYPE"] = "zenroute";
+      if (!headers["User-Agent"]) headers["User-Agent"] = `zenith-router/${v}`;
+      if (!headers["X-CLIENT-TYPE"]) headers["X-CLIENT-TYPE"] = "zenith-router";
       headers["X-CLIENT-VERSION"] = headers["X-CLIENT-VERSION"] || v;
       headers["X-CORE-VERSION"] = headers["X-CORE-VERSION"] || v;
       headers["X-PLATFORM"] = headers["X-PLATFORM"] || process.platform;

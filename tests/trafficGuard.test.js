@@ -6,6 +6,7 @@ import {
   acquireAccountSlot,
   releaseAccountSlot,
   resetTrafficGuardState,
+  getActiveProviders,
 } from "../src/services/trafficGuard.js";
 
 test("Traffic Guard - enforces max concurrency cap per connection", async () => {
@@ -60,6 +61,36 @@ test("Traffic Guard - handles client abort while waiting in queue", async () => 
   await assert.rejects(p2, /aborted/i, "Aborted request must reject and exit queue");
 
   rel1();
+});
+
+test("Traffic Guard - no-auth virtual connection counts as active traffic", async () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  setSetting("traffic_guard_enabled", "true");
+  setSetting("max_account_concurrency", "1");
+  setSetting("request_jitter_enabled", "false");
+
+  // Virtual connection minted for a no-auth provider: no id, no DB row.
+  const virtualConn = { id: null, provider: "opencode", auth_type: "noauth" };
+
+  const release = await acquireAccountSlot(virtualConn);
+  assert.deepStrictEqual([...getActiveProviders()], ["opencode"], "no-auth traffic is reported as in flight");
+
+  release();
+  release(); // double release must not underflow the count
+  assert.deepStrictEqual([...getActiveProviders()], [], "active clears once the request finishes");
+});
+
+test("Traffic Guard - provider is active even when the guard is disabled", async () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  setSetting("traffic_guard_enabled", "false");
+
+  const release = await acquireAccountSlot({ id: 104, provider: "cline", auth_type: "oauth" });
+  assert.deepStrictEqual([...getActiveProviders()], ["cline"], "topology stays honest with the guard off");
+
+  release();
+  assert.deepStrictEqual([...getActiveProviders()], []);
 });
 
 test("Traffic Guard - disabled state bypasses concurrency limiter", async () => {

@@ -117,7 +117,7 @@ export function renderOverviewPage(port = 20120) {
           else if (text.includes('[WARN]')) color = '#fbbf24';
           else if (text.includes('[INFO]')) color = '#60a5fa';
           else if (text.includes('[DEBUG]')) color = '#c084fc';
-          else if (text.includes('zenroute') || text.includes('Dashboard:')) color = '#34d399';
+          else if (text.includes('Zenith Router') || text.includes('[zenith]') || text.includes('Dashboard:')) color = '#34d399';
 
           div.style.color = color;
           div.textContent = text;

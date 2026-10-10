@@ -165,7 +165,7 @@ export async function executeWithFallback({
         const refreshed = await refreshOAuthToken(connection);
         if (refreshed) connection = refreshed;
       } catch (err) {
-        console.error(`[zenroute] Proactive refresh error for ${connection.id}:`, err.message);
+        console.error(`[zenith] Proactive refresh error for ${connection.id}:`, err.message);
       }
     }
 
@@ -279,7 +279,7 @@ export async function executeWithFallback({
         return { ok: false, response: lastFailureResponse };
       } catch (err) {
         if (releaseSlot) releaseSlot();
-        console.error(`[zenroute] Reactive refresh error for ${connection.id}:`, err.message);
+        console.error(`[zenith] Reactive refresh error for ${connection.id}:`, err.message);
         if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
         if (attempt < maxAttempts) continue;
         return { ok: false, response: lastFailureResponse };

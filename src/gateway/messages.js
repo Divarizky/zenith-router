@@ -205,7 +205,7 @@ export async function handleMessages(c) {
   const upstreamPayload = applyTokenSaver(
     translatedPayload,
     targetFormat,
-    tokenSaverOptions(getAllSettings(), c.req.header("x-zenroute-token-saver"))
+    tokenSaverOptions(getAllSettings(), c.req.header("x-zenith-token-saver"))
   );
 
   const upstreamUrl = targetFormat === FORMATS.OPENAI
@@ -269,6 +269,7 @@ export async function handleMessages(c) {
         createUsageTapStream({
           connectionId: connection?.id,
           apiKeyId,
+          provider: provider?.id,
           model: targetModel,
           startTime,
           estimatedInputTokens: estimateTokens(body.messages),
@@ -295,6 +296,7 @@ export async function handleMessages(c) {
       recordUsage({
         connectionId: connection?.id,
         apiKeyId,
+        provider: provider?.id,
         model: targetModel,
         inputTokens,
         outputTokens,

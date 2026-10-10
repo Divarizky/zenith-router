@@ -125,9 +125,9 @@ export async function syncAllFreeModels() {
   return results;
 }
 
-/** Interval from ZENROUTE_MODEL_SYNC_INTERVAL_HOURS (default 6); 0 or negative turns sync off. */
+/** Interval from ZENITH_MODEL_SYNC_INTERVAL_HOURS (default 6); 0 or negative turns sync off. */
 export function getSyncIntervalMs() {
-  const raw = process.env.ZENROUTE_MODEL_SYNC_INTERVAL_HOURS;
+  const raw = process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS;
   const hours = raw === undefined || raw === "" ? DEFAULT_INTERVAL_HOURS : Number(raw);
   return Number.isFinite(hours) && hours > 0 ? hours * 3_600_000 : 0;
 }

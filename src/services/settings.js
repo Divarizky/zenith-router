@@ -29,7 +29,7 @@ export function setSetting(key, value) {
     stmt.run(String(key), String(value), now);
     return String(value);
   } catch (err) {
-    console.error(`[zenroute] Failed to set setting '${key}':`, err.message);
+    console.error(`[zenith] Failed to set setting '${key}':`, err.message);
     return null;
   }
 }
@@ -42,7 +42,6 @@ const DEFAULT_SETTINGS = {
   traffic_guard_enabled: "true",
   max_account_concurrency: "2",
   request_jitter_enabled: "true",
-  quota_auto_sync: "true",
 };
 
 /**

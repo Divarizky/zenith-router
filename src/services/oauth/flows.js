@@ -120,7 +120,7 @@ export async function startOAuthFlow({ providerId, origin, name, proxyUrl }) {
     flowId,
     flowType: "authorization_code",
     authUrl: impl.buildAuthUrl({ redirectUri, state, codeChallenge: impl.pkce ? codeChallenge : undefined }),
-    // When the redirect cannot reach zenroute, the user pastes the callback URL instead.
+    // When the redirect cannot reach Zenith Router, the user pastes the callback URL instead.
     listening,
   };
 }
@@ -266,7 +266,7 @@ export function renderCallbackPage({ ok, error, account }) {
   const body = ok
     ? `<h1>Login berhasil</h1><p>${account ? `Akun <strong>${esc(account)}</strong> tersimpan. ` : ""}Tab ini boleh ditutup.</p>`
     : `<h1>Login gagal</h1><p>${esc(error)}</p>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>zenroute</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Zenith Router</title>
 <style>body{background:#000;color:#fff;font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:420px;padding:2rem;border:1px solid #333;border-radius:10px}h1{font-size:1.2rem}p{color:#aaa}</style>
 </head><body><main>${body}</main>${ok ? "<script>setTimeout(function(){window.close()},1500)</script>" : ""}</body></html>`;
 }

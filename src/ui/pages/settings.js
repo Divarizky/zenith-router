@@ -15,14 +15,13 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const isTrafficGuard = settings.traffic_guard_enabled !== "false";
   const maxConcurrency = settings.max_account_concurrency || "2";
   const isJitter = settings.request_jitter_enabled !== "false";
-  const isQuotaAutoSync = settings.quota_auto_sync !== "false";
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
   const isSaved = query.saved === "1" || query.saved === "true";
 
   let authNote = "";
   if (forcedByBind) {
-    authNote = `<p style="font-size: 0.8rem; color: var(--warning); margin-top: 0.25rem;">Selalu ditegakkan: zenroute terikat ke ${escapeHtml(getBindHost())}.</p>`;
+    authNote = `<p style="font-size: 0.8rem; color: var(--warning); margin-top: 0.25rem;">Selalu ditegakkan: Zenith Router terikat ke ${escapeHtml(getBindHost())}.</p>`;
   } else if (isRequireAuth && activeKeys === 0) {
     authNote = `<p style="font-size: 0.8rem; color: var(--danger); margin-top: 0.25rem;">Tidak ada kunci API aktif: semua request /v1 ditolak. Buat satu di Kunci API.</p>`;
   }
@@ -33,13 +32,16 @@ export function renderSettingsPage(port = 20120, query = {}) {
         ? `<div class="notice notice-ok"><span>Pengaturan Gateway berhasil disimpan.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
         : ""
     }
-    <div class="card" style="max-width: 640px;">
-      <h3 style="margin-bottom: 1.25rem;">Global Gateway Settings</h3>
+    <div class="card">
+      <div class="section-head">
+        <h3>General</h3>
+        <p class="hint">Pengaturan dasar gateway dan keamanan akses.</p>
+      </div>
       <form action="/dashboard/settings" method="POST">
         <div class="setting-row">
           <div class="setting-info">
             <strong>Wajibkan Kunci API untuk Akses Gateway</strong>
-            <p class="hint">Klien harus mengirim kunci zenroute dari halaman Kunci API (Authorization: Bearer atau x-api-key) untuk memakai /v1.</p>
+            <p class="hint">Klien harus mengirim kunci Zenith Router dari halaman Kunci API (Authorization: Bearer atau x-api-key) untuk memakai /v1.</p>
             ${authNote}
           </div>
           <div class="setting-action">
@@ -50,10 +52,15 @@ export function renderSettingsPage(port = 20120, query = {}) {
           </div>
         </div>
 
+        <div class="section-head" style="margin-top: 1.75rem;">
+          <h3>Accounts &amp; Connections</h3>
+          <p class="hint">Perilaku pemilihan dan perlindungan akun provider yang tertaut.</p>
+        </div>
+
         <div class="setting-row">
           <div class="setting-info">
             <strong>Strategi Rotasi Akun</strong>
-            <p class="hint">Cara zenroute memilih antar akun aktif untuk penyedia yang sama.</p>
+            <p class="hint">Cara Zenith Router memilih antar akun aktif untuk penyedia yang sama.</p>
           </div>
           <div class="setting-action">
             <select name="account_rotation" class="input-select">
@@ -104,19 +111,6 @@ export function renderSettingsPage(port = 20120, query = {}) {
           </div>
         </div>
 
-        <div class="setting-row">
-          <div class="setting-info">
-            <strong>Auto Sinkron Kuota &amp; Saldo</strong>
-            <p class="hint">Menyegarkan kuota/balance semua akun secara berkala di latar belakang. Interval diatur lewat env ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES (default 30 menit).</p>
-          </div>
-          <div class="setting-action">
-            <label class="switch" aria-label="Auto Sinkron Kuota dan Saldo">
-              <input type="checkbox" name="quota_auto_sync" value="true" ${isQuotaAutoSync ? "checked" : ""} />
-              <span class="slider"></span>
-            </label>
-          </div>
-        </div>
-
         <div style="margin-top: 1.5rem;">
           <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
         </div>
@@ -143,14 +137,12 @@ export async function handleSaveSettings(c) {
   const trafficGuard = body.traffic_guard_enabled === "true" || body.traffic_guard_enabled === "on" ? "true" : "false";
   const maxConcurrency = String(Number(body.max_account_concurrency) || 2);
   const requestJitter = body.request_jitter_enabled === "true" || body.request_jitter_enabled === "on" ? "true" : "false";
-  const quotaAutoSync = body.quota_auto_sync === "true" || body.quota_auto_sync === "on" ? "true" : "false";
 
   setSetting("require_api_key", requireKey);
   setSetting("account_rotation", rotation);
   setSetting("traffic_guard_enabled", trafficGuard);
   setSetting("max_account_concurrency", maxConcurrency);
   setSetting("request_jitter_enabled", requestJitter);
-  setSetting("quota_auto_sync", quotaAutoSync);
 
   return c.redirect("/dashboard/settings?saved=1");
 }

@@ -70,7 +70,7 @@ test("POST /v1/chat/completions - non-streaming relays upstream completion", asy
     choices: [
       {
         index: 0,
-        message: { role: "assistant", content: "Hello from zenroute!" },
+        message: { role: "assistant", content: "Hello from zenith-router!" },
         finish_reason: "stop",
       },
     ],
@@ -100,7 +100,7 @@ test("POST /v1/chat/completions - non-streaming relays upstream completion", asy
   assert.strictEqual(res.status, 200);
   const json = await res.json();
   assert.strictEqual(json.object, "chat.completion");
-  assert.strictEqual(json.choices[0].message.content, "Hello from zenroute!");
+  assert.strictEqual(json.choices[0].message.content, "Hello from zenith-router!");
 });
 
 test("POST /v1/chat/completions - streaming relays SSE events and completes with [DONE]", async () => {

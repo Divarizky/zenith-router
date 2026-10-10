@@ -1,25 +1,21 @@
 import { getConnections } from "../db/index.js";
 import { syncProviderQuota } from "./quota.js";
 import { hasQuotaFetcher } from "./quota/index.js";
-import { getSetting } from "./settings.js";
+import { logQuiet } from "./logger.js";
 
-const DEFAULT_INTERVAL_MINUTES = 30;
+const DEFAULT_INTERVAL_MINUTES = 15;
 
 let timer = null;
 let running = false;
 
 /**
- * Interval from ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES (default 30);
+ * Interval from ZENITH_QUOTA_SYNC_INTERVAL_MINUTES (default 15);
  * 0 or negative turns auto sync off.
  */
 export function getQuotaSyncIntervalMs() {
-  const raw = process.env.ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES;
+  const raw = process.env.ZENITH_QUOTA_SYNC_INTERVAL_MINUTES;
   const minutes = raw === undefined || raw === "" ? DEFAULT_INTERVAL_MINUTES : Number(raw);
   return Number.isFinite(minutes) && minutes > 0 ? minutes * 60_000 : 0;
-}
-
-function isAutoSyncEnabled() {
-  return getSetting("quota_auto_sync", "true") !== "false";
 }
 
 /**
@@ -30,7 +26,7 @@ function isAutoSyncEnabled() {
  * right after a manual sync does not hammer the same endpoint twice.
  * Returns { [connectionId]: { ok, quota? | error? } }.
  */
-export async function syncAllQuotas({ minAgeMs = 0 } = {}) {
+export async function syncAllQuotas({ minAgeMs = 0, quiet = false } = {}) {
   if (running) return {};
   running = true;
   const results = {};
@@ -42,15 +38,19 @@ export async function syncAllQuotas({ minAgeMs = 0 } = {}) {
       const updatedAt = Number(c.credentials?.quota?.updated_at) || 0;
       if (minAgeMs > 0 && now - updatedAt < minAgeMs) continue;
       try {
-        results[c.id] = { ok: true, quota: await syncProviderQuota(c) };
+        results[c.id] = { ok: true, quota: await syncProviderQuota(c, { quiet }) };
         synced++;
       } catch (err) {
         results[c.id] = { ok: false, error: err.message };
-        console.warn(`[zenroute] Quota auto-sync failed for ${c.provider} (#${c.id}): ${err.message}`);
+        // Auto sync is background work: dashboard console only, terminal stays clean.
+        if (quiet) logQuiet(`[zenith] Quota sync failed for ${c.provider} (#${c.id}): ${err.message}`, "warn");
+        else console.warn(`[zenith] Quota sync failed for ${c.provider} (#${c.id}): ${err.message}`);
       }
     }
     if (synced > 0) {
-      console.log(`[zenroute] Quota auto-sync: ${synced} akun diperbarui`);
+      const msg = `[zenith] Quota sync: ${synced} akun diperbarui`;
+      if (quiet) logQuiet(msg);
+      else console.log(msg);
     }
   } finally {
     running = false;
@@ -59,20 +59,19 @@ export async function syncAllQuotas({ minAgeMs = 0 } = {}) {
 }
 
 /**
- * One scheduler pass: honors the quota_auto_sync toggle, then refreshes
- * caches older than half the interval. Exported so tests (and future callers)
- * can trigger a tick without waiting for the timer.
+ * One scheduler pass: refreshes caches older than half the interval. Exported
+ * so tests (and future callers) can trigger a tick without waiting for the
+ * timer. There is no on/off toggle: auto sync always runs unless the env
+ * interval is 0.
  */
 export async function runQuotaSyncTick({ intervalMs = getQuotaSyncIntervalMs() } = {}) {
-  if (!isAutoSyncEnabled()) return {};
-  return syncAllQuotas({ minAgeMs: Math.floor(intervalMs / 2) });
+  return syncAllQuotas({ minAgeMs: Math.floor(intervalMs / 2), quiet: true });
 }
 
 /**
  * First pass right away, then on an interval. Timers are unref'd so they never
- * keep the process alive. The quota_auto_sync setting is re-read on every tick,
- * so toggling it in Settings takes effect without a restart.
- * Returns the timer, or null when auto sync is turned off via env.
+ * keep the process alive. Returns the timer, or null when auto sync is turned
+ * off via env.
  */
 export function startQuotaSyncScheduler() {
   const intervalMs = getQuotaSyncIntervalMs();

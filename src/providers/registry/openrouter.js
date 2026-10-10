@@ -11,8 +11,8 @@ export default {
     baseUrl: "https://openrouter.ai/api/v1/chat/completions",
     format: "openai",
     headers: {
-      "HTTP-Referer": "https://zenroute.local",
-      "X-Title": "zenroute",
+      "HTTP-Referer": "https://zenith.local",
+      "X-Title": "Zenith Router",
     },
   },
   models: [

@@ -1,4 +1,4 @@
-# zenroute
+# Zenith Router
 
 Gateway AI personal untuk coding agent. Satu endpoint lokal yang menerima permintaan berformat OpenAI Chat Completions, Anthropic Messages, dan OpenAI Responses, lalu meneruskannya ke akun provider milik sendiri (langganan ChatGPT/Claude/GitHub Copilot, API key, atau provider gratis) dengan rotasi akun dan failover otomatis.
 
@@ -56,7 +56,7 @@ Keterangan status: **Berjalan** = terpakai sehari-hari, **Opt-in** = mati secara
 | Kartu kuota di halaman Usage dengan bar per jendela/model, hitung mundur reset, dan tombol Sync per akun | Berjalan |
 | Peta koneksi provider aktif di sekitar router (topologi SVG) dan panel Recent Requests | Berjalan |
 | Sembunyikan akun yang tidak punya sumber data kuota | Berjalan |
-| Auto-refresh kuota berkala dengan cache | Berjalan (default 30 menit, bisa dimatikan di Settings) |
+| Auto-refresh kuota berkala dengan cache | Berjalan (default 15 menit, tanpa pengaturan on/off) |
 
 ### Optimisasi prompt dan token
 
@@ -80,13 +80,13 @@ Prasyarat: Node.js >= 22.13.0. Modul `node:sqlite` baru berhenti membutuhkan fla
 ### 1. Jalankan dari source
 
 ```bash
-git clone https://github.com/Divarizky/zenroute.git
-cd zenroute
+git clone https://github.com/Divarizky/zenith-router.git
+cd zenith-router
 npm install
 npm start          # atau: npm run dev untuk auto-reload
 ```
 
-Server berjalan di `http://127.0.0.1:20120`. Di Windows tersedia juga `zenroute.cmd` dan `zenroute.ps1`.
+Server berjalan di `http://127.0.0.1:20120`. Di Windows tersedia juga `zenith.cmd` dan `zenith.ps1`.
 
 ### 2. Pasang sebagai perintah global
 
@@ -94,7 +94,7 @@ Server berjalan di `http://127.0.0.1:20120`. Di Windows tersedia juga `zenroute.
 npm link
 ```
 
-Setelah itu perintah `zenroute` bisa dipanggil dari direktori mana pun. Saat dijalankan di terminal interaktif, zenroute menampilkan menu untuk membuka dashboard di browser.
+Setelah itu perintah `zenith` bisa dipanggil dari direktori mana pun. Saat dijalankan di terminal interaktif, Zenith Router menampilkan menu untuk membuka dashboard di browser.
 
 ## Langkah Pemakaian
 
@@ -113,7 +113,7 @@ curl http://127.0.0.1:20120/v1/chat/completions \
   -d '{"model":"glm/glm-5.2","messages":[{"role":"user","content":"Halo"}]}'
 ```
 
-Key gateway hanya membuka akses ke zenroute dan tidak pernah diteruskan ke provider. Kredensial provider selalu diambil dari database lokal, dan tanpa akun aktif gateway membalas 503.
+Key gateway hanya membuka akses ke Zenith Router dan tidak pernah diteruskan ke provider. Kredensial provider selalu diambil dari database lokal, dan tanpa akun aktif gateway membalas 503.
 
 ## Konfigurasi
 
@@ -121,15 +121,14 @@ Key gateway hanya membuka akses ke zenroute dan tidak pernah diteruskan ke provi
 |---|---|---|
 | `PORT` | `20120` | Port server |
 | `HOST` | `127.0.0.1` | Alamat bind. Selain loopback, API key otomatis wajib |
-| `ZENROUTE_DB_PATH` | `<root>/data/zenroute.db` | Lokasi database |
-| `ZENROUTE_ALLOWED_HOSTS` | kosong | Host tambahan yang diterima saat bind loopback |
-| `ZENROUTE_CORS_ORIGINS` | kosong (CORS mati) | Origin browser yang boleh memanggil `/v1` |
-| `ZENROUTE_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
-| `ZENROUTE_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar chunk stream upstream |
-| `ZENROUTE_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkron model gratis; `0` mematikan sinkron otomatis |
-| `ZENROUTE_QUOTA_SYNC_INTERVAL_MINUTES` | `30` | Interval auto sync kuota & balance; `0` mematikan auto sync |
+| `ZENITH_DB_PATH` | `<root>/data/zenith.db` | Lokasi database |
+| `ZENITH_ALLOWED_HOSTS` | kosong | Host tambahan yang diterima saat bind loopback |
+| `ZENITH_CORS_ORIGINS` | kosong (CORS mati) | Origin browser yang boleh memanggil `/v1` |
+| `ZENITH_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
+| `ZENITH_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar chunk stream upstream |
+| `ZENITH_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkron model gratis; `0` mematikan sinkron otomatis |
 
-Header `x-zenroute-token-saver: false` mematikan RTK dan Caveman untuk satu request.
+Header `x-zenith-token-saver: false` mematikan RTK dan Caveman untuk satu request.
 
 ## Test
 
@@ -139,7 +138,7 @@ npm test   # node --test, database memakai :memory:
 
 ## Catatan
 
-- Kredensial provider disimpan plaintext di `data/zenroute.db`. Folder itu sudah masuk `.gitignore`, jadi jangan dibagikan maupun dicommit.
+- Kredensial provider disimpan plaintext di `data/zenith.db`. Folder itu sudah masuk `.gitignore`, jadi jangan dibagikan maupun dicommit.
 - Quota dihitung dari endpoint resmi masing-masing provider, jadi angka dan cakupannya berbeda-beda. Beberapa fetcher dibangun dari referensi implementasi pihak lain dan belum diverifikasi terhadap akun berbayar, jadi periksa angkanya sebelum dipakai untuk keputusan biaya.
 - Provider tanpa sumber data kuota tidak muncul di halaman Kuota & Balance.
 

@@ -1,4 +1,4 @@
--- zenroute SQLite database schema
+-- zenith-router SQLite database schema
 
 CREATE TABLE IF NOT EXISTS connections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS usage_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   connection_id INTEGER,
   api_key_id INTEGER,
+  provider TEXT,
   model TEXT NOT NULL,
   input_tokens INTEGER DEFAULT 0,
   output_tokens INTEGER DEFAULT 0,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS usage_history (
 
 CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_history (provider, timestamp);
 
 -- Gateway API keys: only the SHA-256 hash is stored; the plaintext key is shown once on creation.
 CREATE TABLE IF NOT EXISTS api_keys (

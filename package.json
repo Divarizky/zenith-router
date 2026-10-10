@@ -1,20 +1,53 @@
 {
-  "name": "zenroute",
+  "name": "zenith-router",
   "version": "0.1.0",
   "description": "Ultra-lightweight personal AI gateway for coding agents, built on Hono and node:sqlite",
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "zenroute": "bin/zenroute.js"
+    "zenith": "bin/zenith.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "zenith.cmd",
+    "zenith.ps1"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node --test tests/*.test.js"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Divarizky/zenith-router.git"
+  },
+  "homepage": "https://github.com/Divarizky/zenith-router#readme",
+  "bugs": {
+    "url": "https://github.com/Divarizky/zenith-router/issues"
+  },
+  "keywords": [
+    "ai",
+    "gateway",
+    "llm",
+    "proxy",
+    "openai",
+    "anthropic",
+    "claude",
+    "codex",
+    "routing",
+    "failover",
+    "sqlite",
+    "hono"
+  ],
+  "author": "Divarizky",
   "dependencies": {
     "@hono/node-server": "^1.13.8",
     "hono": "^4.7.2"

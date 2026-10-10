@@ -28,7 +28,7 @@ Keterangan status: **Berjalan** = terpakai sehari-hari, **Opt-in** = mati secara
 | Translasi OpenAI ↔ Claude (termasuk tool calling), Responses API untuk backend Codex, Google Cloud Code/Gemini `v1internal`, AWS EventStream binary untuk Kiro | Berjalan |
 | Prefix model mengarah ke provider (`glm/glm-5.2`, `cc/…`, `cx/…`, atau id provider apa pun) | Berjalan |
 | Failover ke akun berikutnya saat 429/5xx, plus cooldown 60 detik untuk akun bermasalah | Berjalan |
-| Refresh token otomatis dan satu kali coba ulang setelah 401/403 | Berjalan |
+| Refresh token otomatis (proaktif sebelum request, pindaian latar belakang tiap 5 menit) dan satu kali coba ulang setelah 401/403 | Berjalan |
 | Traffic Guard: batas konkurensi in-flight per akun, antrean FIFO, jitter proaktif dan reaktif | Berjalan |
 | Strategi rotasi akun `lru` dan `sticky` dari halaman Settings | Berjalan |
 | Combo routing beberapa model dalam satu grup strategi | On progress (tabel `combos` sudah ada di skema DB, resolver dan routing belum dibuat) |

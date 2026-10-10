@@ -250,3 +250,34 @@ export async function scanAndRefreshTokens() {
 
   return refreshedCount;
 }
+
+const REFRESH_SCAN_INTERVAL_MS = 5 * 60 * 1000; // matches the <5 min proactive window
+let refreshTimer = null;
+
+/**
+ * Background token refresher. First pass runs right away so accounts that were
+ * already close to expiry before boot are renewed, then it rescans on the
+ * interval. Timers are unref'd like the model and quota schedulers, so the
+ * scan never keeps the process alive. There is no on/off toggle: it runs
+ * whenever the server does.
+ */
+export function startTokenRefreshScheduler() {
+  if (refreshTimer) return refreshTimer;
+
+  const tick = () => {
+    scanAndRefreshTokens().catch((err) => {
+      console.error(`[zenith] Background token refresh failed:`, err.message);
+    });
+  };
+
+  tick();
+  refreshTimer = setInterval(tick, REFRESH_SCAN_INTERVAL_MS);
+  refreshTimer.unref?.();
+  return refreshTimer;
+}
+
+export function stopTokenRefreshScheduler() {
+  if (!refreshTimer) return;
+  clearInterval(refreshTimer);
+  refreshTimer = null;
+}

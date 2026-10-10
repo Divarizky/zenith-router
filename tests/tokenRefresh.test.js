@@ -5,6 +5,8 @@ import {
   needsTokenRefresh,
   refreshOAuthToken,
   scanAndRefreshTokens,
+  startTokenRefreshScheduler,
+  stopTokenRefreshScheduler,
   setCustomTokenRefresher,
 } from "../src/services/tokenRefresh.js";
 import { app } from "../src/index.js";
@@ -118,6 +120,50 @@ test("tokenRefresh - scanAndRefreshTokens renews all near-expiry accounts", asyn
 
   const count = await scanAndRefreshTokens();
   assert.strictEqual(count, 1, "Only the expiring account should be refreshed");
+
+  setCustomTokenRefresher(null);
+});
+
+test("tokenRefresh - background scheduler renews near-expiry accounts on its first pass", async () => {
+  initDb(":memory:");
+
+  addConnection({
+    provider: "codex",
+    name: "Scheduled Codex",
+    auth_type: "oauth",
+    credentials: {
+      access_token: "old_scheduled",
+      refresh_token: "ref_scheduled",
+      expires_at: Date.now() + 60 * 1000, // 1 min left
+    },
+  });
+
+  addConnection({
+    provider: "codex",
+    name: "Fresh Scheduled Codex",
+    auth_type: "oauth",
+    credentials: {
+      access_token: "fresh_scheduled",
+      refresh_token: "ref_scheduled2",
+      expires_at: Date.now() + 3600 * 1000, // 1 hour left
+    },
+  });
+
+  const refreshed = [];
+  setCustomTokenRefresher(async (connection) => {
+    refreshed.push(connection.name);
+    return {
+      access_token: `refreshed_${connection.name}`,
+      refresh_token: "ref_updated",
+      expires_at: Date.now() + 3600 * 1000,
+    };
+  });
+
+  startTokenRefreshScheduler();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  stopTokenRefreshScheduler();
+
+  assert.deepStrictEqual(refreshed, ["Scheduled Codex"], "the first background pass only renews the expiring account");
 
   setCustomTokenRefresher(null);
 });

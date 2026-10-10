@@ -2,7 +2,7 @@
 
 Semua perubahan penting Zenith Router dicatat di sini. Format mengikuti [Keep a Changelog](https://keepachangelog.com/id/1.1.0/), versi memakai [Semantic Versioning](https://semver.org/lang/id/).
 
-## [0.1.0] - 10-10-2026
+## [0.1.0] - 11-10-2026
 
 Rilis pertama.
 
@@ -11,7 +11,7 @@ Rilis pertama.
 - Endpoint `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, dan `GET /v1/models`, lengkap dengan streaming SSE dan non-streaming.
 - Translasi dua arah OpenAI ↔ Claude termasuk tool calling, OpenAI Responses untuk backend Codex, Google Cloud Code/Gemini `v1internal`, dan AWS EventStream binary untuk Kiro.
 - Prefix model mengarah ke provider (`glm/…`, `cc/…`, `cx/…`, atau id provider apa pun).
-- Failover ke akun berikutnya saat 429/5xx, cooldown 60 detik untuk akun bermasalah, refresh token otomatis, dan satu kali coba ulang setelah 401/403.
+- Failover ke akun berikutnya saat 429/5xx, cooldown 60 detik untuk akun bermasalah, refresh token otomatis (proaktif sebelum request dan pindaian latar belakang tiap 5 menit), dan satu kali coba ulang setelah 401/403.
 - Traffic Guard: batas konkurensi in-flight per akun, antrean FIFO, jitter proaktif dan reaktif, plus strategi rotasi `lru` dan `sticky`.
 - API key gateway `zr_…` disimpan sebagai hash SHA-256 dan hanya tampil sekali saat dibuat; bisa diwajibkan untuk semua request `/v1`.
 

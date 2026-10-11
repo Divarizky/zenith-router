@@ -2,6 +2,8 @@ import { getDb, getConnections } from "../db/index.js";
 import { getProvider, getProviderModels } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
 import { applyConnectionAuth } from "./auth.js";
+import { MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
+import { capabilitiesFromApi } from "../providers/capabilities.js";
 
 const IMPORT_TIMEOUT_MS = 20000;
 
@@ -9,6 +11,49 @@ const IMPORT_TIMEOUT_MS = 20000;
 const KNOWN_FREE_OPENCODE = new Set(["big-pickle"]);
 // GLM free-tier models from OmniRoute's free model catalog.
 const FREE_GLM = new Set(["glm-4.7-flash", "glm-4.5-flash"]);
+
+const ACCESS_CHECK_CONCURRENCY = 5;
+
+/**
+ * Mistral checks the rate limit before validating the body, so a request with
+ * no messages costs no tokens: a usable model answers 400, a model outside the
+ * tier answers 429 with a 0/minute limit or 403 tier_not_allowed/labs_not_enabled. Those are
+ * marked not free. Any other answer (network error, 5xx) keeps the model.
+ */
+async function mistralAccessCheck(models, { executor, headers, proxyUrl }) {
+  const refused = async (model) => {
+    try {
+      const res = await executor.execute({
+        url: "https://api.mistral.ai/v1/chat/completions",
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: model.id, messages: [] }),
+        timeoutMs: IMPORT_TIMEOUT_MS,
+        proxyUrl,
+      });
+      const text = await res.text();
+      if (res.status === 429) {
+        return (
+          res.headers.get("x-ratelimit-limit-req-minute") === "0" ||
+          res.headers.get("x-ratelimit-limit-tokens-minute") === "0"
+        );
+      }
+      return res.status === 403 && MODEL_ACCESS_DENIED_403.test(text);
+    } catch {
+      return false;
+    }
+  };
+
+  const out = [...models];
+  for (let i = 0; i < out.length; i += ACCESS_CHECK_CONCURRENCY) {
+    const batch = out.slice(i, i + ACCESS_CHECK_CONCURRENCY);
+    const results = await Promise.all(batch.map(refused));
+    results.forEach((no, j) => {
+      if (no) out[i + j] = { ...out[i + j], isFree: false };
+    });
+  }
+  return out;
+}
 
 function listOf(json) {
   const raw = json?.data ?? json?.models ?? json;
@@ -121,15 +166,18 @@ const IMPORTERS = {
   },
   mistral: {
     url: "https://api.mistral.ai/v1/models",
-    modes: ["all"],
-    // /v1/models returns no pricing fields. The free Experiment tier covers every
-    // chat model with a shared monthly quota, so free-ness comes from the tier,
-    // not the payload. Only routable chat models are listed (no embeddings/OCR),
-    // and deprecated models are skipped.
+    // No manual import: sync already lists every chat model this account can use.
+    modes: [],
+    // /v1/models returns no pricing fields and lists models the account's tier
+    // can't call. Only routable chat models are kept (no embeddings/OCR), and
+    // deprecated models are skipped; checkAccess then drops the ones the tier refuses.
+    // capabilities.reasoning / .vision ride along and are stored with the synced
+    // row, so the router never has to guess these from the model name.
     parse: (json) =>
       listOf(json)
         .filter((m) => m.capabilities?.completion_chat === true && !m.deprecation)
-        .map((m) => ({ id: m.id, name: m.name || m.id, isFree: true })),
+        .map((m) => ({ id: m.id, name: m.name || m.id, isFree: true, capabilities: capabilitiesFromApi(m) })),
+    checkAccess: mistralAccessCheck,
   },
   ollama: {
     url: "https://ollama.com/v1/models",
@@ -221,7 +269,11 @@ export async function fetchProviderModels(provider) {
       proxyUrl: connection?.proxy_url || null,
     });
     if (!res.ok) return { ok: false, code: "upstream_error", status: res.status };
-    const models = importer.parse(await res.json()).filter((m) => typeof m.id === "string" && m.id);
+    let models = importer.parse(await res.json()).filter((m) => typeof m.id === "string" && m.id);
+    if (importer.checkAccess) {
+      const executor = getExecutor(provider.id);
+      models = await importer.checkAccess(models, { executor, headers, proxyUrl: connection?.proxy_url || null });
+    }
     return { ok: true, models };
   } catch {
     return { ok: false, code: "upstream_error" };

@@ -19,13 +19,32 @@ const ICONS = {
   bolt: '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m16 7 3 3"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1c-.6 0-1.2.4-1.5 1z"/>',
+  brain: '<path d="M12 4.6a3 3 0 0 0-5.7-1.1A2.6 2.6 0 0 0 4 6a2.5 2.5 0 0 0 .5 4.8 2.8 2.8 0 0 0 1.4 4.6A2.5 2.5 0 0 0 8.6 18H12z"/><path d="M12 4.6a3 3 0 0 1 5.7-1.1A2.6 2.6 0 0 1 20 6a2.5 2.5 0 0 1-.5 4.8 2.8 2.8 0 0 1-1.4 4.6A2.5 2.5 0 0 1 15.4 18H12z"/><path d="M12 4.6V18"/><path d="M9.2 8.2h1.4M13.4 8.2h1.4M9.2 12.4h1.4M13.4 12.4h1.4"/>',
+  eye: '<path d="M2.5 12S6.5 5.5 12 5.5 21.5 12 21.5 12 17.5 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
 };
 
 function icon(name) {
   return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 }
 
-export function renderLayout({ title = "Zenith Router", activeTab = "overview", content = "", port = 20120 }) {
+/**
+ * Ikon kemampuan model untuk daftar model: otak untuk thinking, mata untuk vision.
+ * Model yang kemampuannya tidak diketahui tidak mendapat ikon sama sekali.
+ */
+export function capabilityIcons(capabilities) {
+  if (!capabilities) return "";
+  const badges = [];
+  if (capabilities.reasoning) {
+    badges.push(`<span class="cap-icon" title="Model ini mendukung thinking (reasoning)">${icon("brain")}</span>`);
+  }
+  if (capabilities.vision) {
+    badges.push(`<span class="cap-icon" title="Model ini bisa membaca gambar (vision)">${icon("eye")}</span>`);
+  }
+  if (badges.length === 0) return "";
+  return `<span class="cap-icons" aria-label="Kemampuan model">${badges.join("")}</span>`;
+}
+
+export function renderLayout({ title = "Zenith Router", activeTab = "overview", content = "", port = 20120, extraScripts = "" }) {
   const navHtml = NAV.map(
     (t) => `
       <a href="${t.href}" class="nav-link ${t.id === activeTab ? "active" : ""}">
@@ -140,6 +159,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 .provider-icon { width: var(--pi, 32px); height: var(--pi, 32px); flex-shrink: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--surface-3); border: 1px solid var(--border); }
 .provider-icon img { width: 100%; height: 100%; object-fit: contain; }
 .provider-icon-fb { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--pi, 32px) * 0.38); font-weight: 700; color: var(--text-muted); }
+.cap-icons { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.45rem; vertical-align: middle; }
+.cap-icon { display: inline-flex; color: var(--text-muted); cursor: help; }
+.cap-icon svg { width: 15px; height: 15px; }
+.cap-icon:hover { color: var(--text); }
 .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
 .crumb { color: var(--text-subtle); font-size: 0.82rem; margin-bottom: 1rem; }
 .crumb a { color: var(--text-muted); text-decoration: none; }
@@ -158,6 +181,11 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 td.actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
 th.select-cell, td.select-cell { width: 2.25rem; padding-right: 0; }
 .select-cell input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); cursor: pointer; vertical-align: middle; }
+/* Kolom seleksi hanya muncul saat mode pilih aktif di halaman detail provider. */
+table.select-mode-off th.select-cell, table.select-mode-off td.select-cell { display: none; }
+table.select-mode-on tr.model-row { cursor: pointer; }
+table.select-mode-on tr.model-row:hover { background: var(--bg-hover, #1e2029); }
+table.select-mode-on tr.model-row.is-checked { background: var(--accent-soft, #1f6feb22); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 tr.muted td { color: var(--text-subtle); }
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
@@ -304,8 +332,47 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
         all.indeterminate = n > 0 && n < boxes.length;
       });
     }
-    document.addEventListener('change', function(e) {
-      var t = e.target;
+    // Mode pilih baris: tabel dengan data-sync-row="models" mulai tersembunyi kolomnya;
+    // tombol toggle menampilkan kolom dan mengizinkan klik baris untuk mencentang.
+    function setSelectMode(table, on) {
+      table.classList.toggle('select-mode-on', on);
+      table.classList.toggle('select-mode-off', !on);
+      var group = table.getAttribute('data-sync-row');
+      document.querySelectorAll('[data-select-mode-toggle="' + group + '"]').forEach(function(btn) {
+        btn.textContent = on ? 'Batalkan Pilih' : 'Pilih';
+      });
+    }
+    document.querySelectorAll('table[data-sync-row]').forEach(function(table) {
+      setSelectMode(table, false);
+    });
+    document.addEventListener('click', function(clickEvent) {
+      var toggle = clickEvent.target.closest ? clickEvent.target.closest('[data-select-mode-toggle]') : null;
+      if (toggle) {
+        var toggleGroup = toggle.getAttribute('data-select-mode-toggle');
+        var toggleTable = document.querySelector('table[data-sync-row="' + toggleGroup + '"]');
+        if (!toggleTable) return;
+        setSelectMode(toggleTable, !toggleTable.classList.contains('select-mode-on'));
+        return;
+      }
+      var row = clickEvent.target.closest ? clickEvent.target.closest('tr.model-row') : null;
+      if (!row) return;
+      var rowTable = row.closest('table');
+      if (!rowTable || !rowTable.classList.contains('select-mode-on')) return;
+      // Klik tombol/form/link di dalam baris bukan klik seleksi.
+      if (clickEvent.target.closest('a, button, input, form, code')) return;
+      var box = row.querySelector('input[data-select-group]');
+      if (!box) return;
+      box.checked = !box.checked;
+      row.classList.toggle('is-checked', box.checked);
+      syncSelection(box.getAttribute('data-select-group'));
+    });
+    document.addEventListener('change', function(syncEvent) {
+      var t = syncEvent.target;
+      if (!t.matches) return;
+      if (t.matches('table[data-sync-row] input[data-select-group]')) {
+        var changedRow = t.closest('tr.model-row');
+        if (changedRow) changedRow.classList.toggle('is-checked', t.checked);
+      }
       if (!t.matches) return;
       if (t.matches('input[data-select-all]')) {
         var group = t.getAttribute('data-select-all');
@@ -327,6 +394,7 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
       return n > 0 && confirm('Hapus ' + n + ' ' + label + '?');
     }
   </script>
+  ${extraScripts}
 </body>
 </html>`;
 }

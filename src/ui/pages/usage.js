@@ -88,7 +88,7 @@ function renderTopologyPane(topology) {
       .topology-canvas { display: block; background: var(--bg-subtle, #0d1117); border: 1px solid var(--border, #21262d); border-radius: 10px; }
       .topology-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted, #8b949e); }
       .topology-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
-      .topology-legend .dot-router { background: #f0b429; }
+      .topology-legend .dot-router { background: #e6edf3; }
       .topology-legend .dot-active { background: #22d3ee; }
       .topology-legend .dot-last { background: #f59e0b; }
       .topology-legend .dot-idle { background: #6e7681; }
@@ -105,6 +105,8 @@ function renderTopologyPane(topology) {
       .recent-when { font-size: 0.7rem; color: var(--text-subtle); flex-shrink: 0; }
       .recent-io { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
       .recent-empty { font-size: 0.8rem; color: var(--text-muted); padding: 1rem 0; text-align: center; }
+      .recent-item-new { animation: recent-flash 1.2s ease-out; }
+      @keyframes recent-flash { from { background: var(--accent-soft, #1f6feb22); } to { background: transparent; } }
       @media (max-width: 1100px) { .topo-split { flex-direction: column; } .recent-panel { width: 100%; } }
       .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       @media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -144,8 +146,8 @@ function renderTopologyPane(topology) {
       .topo-node.is-active .topo-node-rect { animation: topo-node-breathe 1.3s ease-in-out infinite; }
       /* Router core: berdenyut saat ada request berjalan. */
       @keyframes topo-router-pulse {
-        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(253, 224, 71, .5)); }
-        50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(250, 204, 21, .95)); }
+        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(230, 237, 243, .45)); }
+        50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(255, 255, 255, .95)); }
       }
       @keyframes topo-router-icon {
         0%, 100% { transform: rotate(0deg) scale(1); }
@@ -153,15 +155,15 @@ function renderTopologyPane(topology) {
         75% { transform: rotate(5deg) scale(1.08); }
       }
       @keyframes topo-router-label {
-        0%, 100% { filter: drop-shadow(0 0 4px #fde047); }
-        50% { filter: drop-shadow(0 0 9px #facc15) drop-shadow(0 0 3px #ffffff); }
+        0%, 100% { filter: drop-shadow(0 0 4px #e6edf3); }
+        50% { filter: drop-shadow(0 0 9px #ffffff) drop-shadow(0 0 3px #ffffff); }
       }
       .topo-router-rect-on { transform-box: fill-box; transform-origin: center; }
       .topo-router-icon { transform-box: fill-box; transform-origin: center; }
       .topo-router.is-powering .topo-router-rect-on { animation: topo-router-pulse .75s ease-in-out infinite; }
       .topo-router.is-powering .topo-router-icon { animation: topo-router-icon .45s ease-in-out infinite; }
       .topo-router.is-powering .topo-router-label { animation: topo-router-label .7s ease-in-out infinite; }
-      .topo-router-badge { filter: drop-shadow(0 0 6px #fde047); }
+      .topo-router-badge { filter: drop-shadow(0 0 6px #e6edf3); }
       /* Beam edge: core bergaris + halo berkedip, partikel mengalir di sepanjang path. */
       @keyframes topo-edge-dash { to { stroke-dashoffset: -36; } }
       @keyframes topo-edge-flicker { 0%, 100% { opacity: .85; } 40% { opacity: 1; } 55% { opacity: .55; } 70% { opacity: 1; } }
@@ -242,12 +244,12 @@ function renderTopologyPane(topology) {
       // Router core memakai dua rect yang ditampilkan bergantian lewat apply().
       var router = document.createElementNS(NS, "g");
       router.innerHTML =
-        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="12" fill="#161b22" stroke="#f0b429" stroke-width="1.5"/>' +
-        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="12" fill="rgba(240,180,41,0.15)" stroke="#fde047" stroke-width="2" style="display:none"/>' +
-        '<image class="topo-router-icon" x="' + (CX - 66) + '" y="' + (CY - 12) + '" width="24" height="24" href="' + logo + '"/>' +
-        '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" fill="#f0b429">Zenith Router</text>' +
+        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="12" fill="#161b22" stroke="#e6edf3" stroke-width="1.5"/>' +
+        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="12" fill="rgba(230,237,243,0.12)" stroke="#ffffff" stroke-width="2" style="display:none"/>' +
+        '<image class="topo-router-icon" x="' + (CX - 66) + '" y="' + (CY - 12) + '" width="24" height="24" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
+        '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" fill="#e6edf3">Zenith Router</text>' +
         '<g class="topo-router-badge" style="display:none">' +
-        '<circle cx="' + (CX + 64) + '" cy="' + (CY - 14) + '" r="10" fill="#f0b429"/>' +
+        '<circle cx="' + (CX + 64) + '" cy="' + (CY - 14) + '" r="10" fill="#e6edf3"/>' +
         '<text class="topo-router-badge-n" x="' + (CX + 64) + '" y="' + (CY - 10) + '" text-anchor="middle" font-size="11" font-weight="bold" fill="#000">0</text>' +
         "</g>";
       nodesG.appendChild(router);
@@ -278,7 +280,7 @@ function renderTopologyPane(topology) {
         // Dua varian edge: beam listrik saat aktif, garis solid saat idle.
         var edges = document.createElementNS(NS, "g");
         var particles = [0, 1, 2, 3, 4].map(function (k) {
-          return '<circle r="' + (k % 2 === 0 ? 3.5 : 2.2) + '" fill="' + (k % 3 === 0 ? "#fde047" : k % 3 === 1 ? "#67e8f9" : "#fff") + '">' +
+          return '<circle r="' + (k % 2 === 0 ? 3.5 : 2.2) + '" fill="' + (k % 3 === 0 ? "#e6edf3" : k % 3 === 1 ? "#67e8f9" : "#fff") + '">' +
             '<animateMotion dur="' + (0.5 + k * 0.12) + 's" repeatCount="indefinite" path="' + path + '" begin="' + (k * 0.15) + 's"/></circle>';
         }).join("");
         var sparks = [0, 1, 2, 3].map(function (k) {
@@ -445,8 +447,10 @@ function renderRecentPanel(recent) {
     .join("");
   return `
     <aside class="recent-panel">
-      <div class="recent-head"><span>Recent Requests</span><span class="pill">${recent.length}</span></div>
+      <div class="recent-head"><span>Recent Requests</span><span class="pill" id="recent-count">${recent.length}</span></div>
+      <div id="recent-body">
       ${recent.length === 0 ? `<p class="recent-empty">No requests yet</p>` : `<ul class="recent-list">${rows}</ul>`}
+      </div>
     </aside>`;
 }
 
@@ -724,5 +728,67 @@ function renderQuotaCard(s) {
     activeTab: "usage",
     content,
     port,
+    extraScripts: `<script>
+    (function () {
+      var body = document.getElementById("recent-body");
+      var badge = document.getElementById("recent-count");
+      if (!body || !badge) return;
+      var seen = {};
+      body.querySelectorAll(".recent-item").forEach(function (li, i) {
+        seen[li.textContent + "|" + i] = true;
+      });
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      }
+      function compact(n) {
+        n = Number(n) || 0;
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+        if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+        return String(n);
+      }
+      function rel(ts) {
+        var diff = Math.max(0, Date.now() - Number(ts || 0));
+        var m = Math.floor(diff / 60000);
+        if (m < 1) return "just now";
+        if (m < 60) return m + "m ago";
+        var h = Math.floor(m / 60);
+        if (h < 24) return h + "h ago";
+        return Math.floor(h / 24) + "d ago";
+      }
+      function key(r) {
+        return [r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
+      }
+      function poll() {
+        fetch("/api/usage/recent?limit=10", { cache: "no-store" })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (next) {
+            if (!next || !Array.isArray(next.recent)) return;
+            var items = next.recent;
+            badge.textContent = String(items.length);
+            if (items.length === 0) {
+              body.innerHTML = '<p class="recent-empty">No requests yet</p>';
+              return;
+            }
+            var html = items.map(function (r) {
+              var fresh = !seen[key(r)];
+              seen[key(r)] = true;
+              return '<li class="recent-item' + (fresh ? ' recent-item-new' : '') + '">' +
+                '<div class="recent-line">' +
+                '<code class="recent-model">' + esc(r.model) + '</code>' +
+                '<span class="recent-when">' + esc(rel(r.timestamp)) + '</span>' +
+                '</div>' +
+                '<div class="recent-io">in ' + compact(r.input_tokens) + ' \u00b7 out ' + compact(r.output_tokens) + '</div>' +
+                '</li>';
+            }).join("");
+            body.innerHTML = '<ul class="recent-list">' + html + '</ul>';
+          })
+          .catch(function () {});
+      }
+      setInterval(function () { if (!document.hidden) poll(); }, 2000);
+      document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
+    })();
+    </script>`,
   });
 }

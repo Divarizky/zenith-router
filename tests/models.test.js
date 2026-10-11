@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
 import { getAvailableModels, getProvider } from "../src/providers/index.js";
+import { initDb } from "../src/db/index.js";
 
 test("Provider Registry - contains 21 core providers", () => {
   const providers = [
@@ -52,7 +53,7 @@ test("Provider Registry - nvidia and cline use standard OpenAI transport", () =>
 test("Provider Registry - new providers use expected configs", () => {
   const mis = getProvider("mistral");
   assert.strictEqual(mis.category, "apikey");
-  assert.strictEqual(mis.freeModelSync, "merge");
+  assert.strictEqual(mis.freeModelSync, "replace");
   assert.strictEqual(mis.transport.baseUrl, "https://api.mistral.ai/v1/chat/completions");
   assert.ok(mis.models.some((m) => m.id === "mistral-large-latest"));
 
@@ -173,4 +174,19 @@ test("GET /v1/models - returns OpenAI compatible model list", async () => {
   assert.ok(first.id);
   assert.strictEqual(first.object, "model");
   assert.ok(first.owned_by);
+});
+
+test("GET /v1/models - publishes capabilities and token limits, and omits them when unknown", async () => {
+  initDb(":memory:");
+  const body = await (await app.request("/v1/models?all=true")).json();
+  const find = (id) => body.data.find((m) => m.id === id);
+
+  const gpt = find("cx/gpt-6.1-sol");
+  assert.deepEqual(gpt.capabilities, { vision: true, reasoning: true });
+  assert.equal(gpt.context_length, 1050000);
+
+  const unknown = find("bzl/auto:free");
+  assert.ok(unknown, "unknown model is still listed");
+  assert.equal(unknown.capabilities, undefined, "unknown models get no capabilities field");
+  assert.equal(unknown.context_length, undefined);
 });

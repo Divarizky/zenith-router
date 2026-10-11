@@ -39,11 +39,11 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
   } else {
     // Quota endpoints reject expired tokens. Refresh first when the token is
     // (nearly) expired, and once more reactively if the provider still says 401/403.
-    connection = await withFreshToken(connection, false);
+    connection = await withFreshToken(connection, false, quiet);
     try {
       let live = await fetchLiveQuota(connection);
       if (live?.error && canRefresh(connection)) {
-        const retried = await withFreshToken(connection, true);
+        const retried = await withFreshToken(connection, true, quiet);
         if (retried !== connection) {
           connection = retried;
           live = await fetchLiveQuota(connection);
@@ -84,13 +84,13 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
 }
 
 /** Returns the connection with a valid access token; the input one if refresh is unavailable or fails. */
-async function withFreshToken(connection, force) {
+async function withFreshToken(connection, force, quiet) {
   if (!force && !needsTokenRefresh(connection)) return connection;
   try {
     return (await refreshOAuthToken(connection, { force })) || connection;
   } catch (err) {
     const msg = `[zenith] Token refresh before quota sync failed for ${connection.provider} (#${connection.id}): ${err.message}`;
-    if (force) logQuiet(msg, "error");
+    if (force || quiet) logQuiet(msg, "error");
     else console.error(msg);
     return connection;
   }

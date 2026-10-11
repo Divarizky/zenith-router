@@ -17,11 +17,12 @@ import {
   getModelSyncState,
 } from "../../services/modelOverrides.js";
 import { getImportModes, importProviderModels } from "../../services/modelImport.js";
+import { resolveCapabilities } from "../../providers/capabilities.js";
 import { syncFreeModels, getSyncIntervalMs } from "../../services/modelSync.js";
 import { getOAuthFlow } from "../../services/oauth/providers.js";
 import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
-import { renderLayout } from "../layout.js";
+import { renderLayout, capabilityIcons } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getProviderIconPath } from "../assets.js";
 
@@ -551,7 +552,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     imported: `<span class="pill">Impor</span>`,
   };
 
-  const modelRow = (modelId, name, source, customId, isFree = false) => {
+  const modelRow = (modelId, name, source, customId, isFree = false, capabilities = null) => {
     const custom = source === "custom";
     const disabled = isModelDisabled(p.id, modelId);
     const toggleAction = disabled ? "enable" : "disable";
@@ -561,9 +562,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       modelId
     )}" />`;
     return `
-        <tr${disabled ? ` class="muted"` : ""}>
+        <tr class="model-row${disabled ? ` muted` : ""}" data-sync-row="models">
           <td class="select-cell">${selectCell}</td>
-          <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code></td>
+          <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code>${capabilityIcons(capabilities)}</td>
           <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Gratis</span>` : ""}</td>
           <td>${SOURCE_CELL[source]}</td>
           <td>${disabled ? `<span class="pill">Nonaktif</span>` : `<span class="pill pill-success">Aktif</span>`}</td>
@@ -587,9 +588,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   };
 
   const modelRows = [
-    ...builtInModels.map((m) => modelRow(m.id, m.name, m.source, null, m.source === "synced")),
-    ...importedModels.map((m) => modelRow(m.model_id, m.name, "imported", null, m.is_free === 1)),
-    ...customModels.map((m) => modelRow(m.model_id, m.name, "custom", m.id)),
+    ...builtInModels.map((m) => modelRow(m.id, m.name, m.source, null, m.source === "synced", m.capabilities)),
+    ...importedModels.map((m) => modelRow(m.model_id, m.name, "imported", null, m.is_free === 1, resolveCapabilities(m.model_id))),
+    ...customModels.map((m) => modelRow(m.model_id, m.name, "custom", m.id, false, resolveCapabilities(m.model_id))),
   ].join("");
   const totalModels = builtInModels.length + importedModels.length + customModels.length;
 
@@ -666,6 +667,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       <div class="card-head">
         <h3>Model (${totalModels})</h3>
         <div class="btn-row">
+          <button type="button" class="btn btn-sm" data-select-mode-toggle="models">Pilih</button>
           <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
           <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Aktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
           ${
@@ -693,7 +695,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       <form id="models-bulk-form" method="POST">
         <input type="hidden" name="provider" value="${id}" />
       </form>
-      <table>
+      <table data-sync-row="models">
         <thead><tr><th class="select-cell"><input type="checkbox" data-select-all="models" autocomplete="off" aria-label="Pilih semua model" title="Pilih semua model" /></th><th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
         <tbody>${modelRows}</tbody>
       </table>

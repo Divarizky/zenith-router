@@ -1,4 +1,5 @@
 import { getConnectionById, getConnections, updateConnection } from "../db/index.js";
+import { logQuiet } from "./logger.js";
 import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn } from "./oauth/providers.js";
 
 let customTokenRefresher = null;
@@ -243,7 +244,8 @@ export async function scanAndRefreshTokens() {
         await refreshOAuthToken(conn);
         refreshedCount++;
       } catch (err) {
-        console.error(`[zenith] Proactive token refresh failed for connection ${conn.id}:`, err.message);
+        // Background scan: dashboard console only, never the terminal.
+        logQuiet(`[zenith] Proactive token refresh failed for connection ${conn.id}: ${err.message}`, "error");
       }
     }
   }
@@ -265,8 +267,9 @@ export function startTokenRefreshScheduler() {
   if (refreshTimer) return refreshTimer;
 
   const tick = () => {
+    // Background job: dashboard console only, never the terminal.
     scanAndRefreshTokens().catch((err) => {
-      console.error(`[zenith] Background token refresh failed:`, err.message);
+      logQuiet(`[zenith] Background token refresh failed: ${err.message}`, "error");
     });
   };
 

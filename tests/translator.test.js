@@ -157,3 +157,22 @@ test("POST /v1/chat/completions - cross-vendor routing to Claude upstream with t
 
   setCustomExecutor(null);
 });
+
+test("Translator Request - maps role developer to system for OpenAI-compatible upstreams", () => {
+  const body = {
+    model: "mis/mistral-large-latest",
+    messages: [
+      { role: "developer", content: "You are a coding assistant." },
+      { role: "user", content: "Hi" },
+    ],
+  };
+
+  const passthrough = translateRequest("openai", "openai", body, "mistral-large-latest");
+  assert.deepStrictEqual(passthrough.messages.map((m) => m.role), ["system", "user"]);
+  assert.strictEqual(passthrough.messages[0].content, "You are a coding assistant.");
+  assert.strictEqual(body.messages[0].role, "developer", "input body is not mutated");
+
+  const claude = translateRequest("openai", "claude", body, "claude-sonnet-4-5");
+  assert.ok(String(JSON.stringify(claude.system)).includes("You are a coding assistant."), "developer prompt becomes Claude system");
+  assert.ok(claude.messages.every((m) => m.role !== "developer"));
+});

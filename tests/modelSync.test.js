@@ -391,3 +391,75 @@ test("dashboard - Sync Now redirects with a notice and the page shows synced row
   assert.ok(html.includes("Sinkron gagal (HTTP 502)"));
   assert.ok(html.includes("gagal:"));
 });
+
+test("mistral sync - drops models the account tier refuses, checked with a zero-token request", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
+
+  const probes = [];
+  setCustomExecutor({
+    execute: async (req) => {
+      if (req.url.endsWith("/v1/models")) {
+        const data = ["ministral-3b-2512", "mistral-medium-latest", "mistral-large-latest", "mistral-small-2603", "labs-leanstral-1-5"].map((id) => ({
+          id,
+          capabilities: { completion_chat: true },
+        }));
+        return new Response(JSON.stringify({ data }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      const body = JSON.parse(req.body);
+      probes.push(body);
+      const err = (status, extra = {}, msg = "Rate limit exceeded") =>
+        new Response(JSON.stringify({ object: "error", message: msg }), {
+          status,
+          headers: { "Content-Type": "application/json", ...extra },
+        });
+      if (body.model === "mistral-medium-latest") return err(429, { "x-ratelimit-limit-req-minute": "0" });
+      if (body.model === "mistral-large-latest") return err(403, {}, "tier_not_allowed: not available in your subscription tier");
+      if (body.model === "labs-leanstral-1-5") return err(403, {}, "Model labs-leanstral-1-5 is a Labs model. labs_not_enabled");
+      // A transient failure must not drop a model.
+      if (body.model === "mistral-small-2603") return err(503);
+      return err(400, {}, "messages must not be empty");
+    },
+  });
+
+  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
+  assert.ok(probes.every((b) => Array.isArray(b.messages) && b.messages.length === 0), "probes carry no messages");
+
+  const routed = ids();
+  assert.ok(routed.includes("mis/ministral-3b-2512"));
+  assert.ok(routed.includes("mis/mistral-small-2603"));
+  assert.ok(!routed.includes("mis/mistral-medium-latest"), "0/minute model is not listed");
+  assert.ok(!routed.includes("mis/mistral-large-latest"), "tier_not_allowed model is not listed");
+  assert.ok(!routed.includes("mis/labs-leanstral-1-5"), "Labs model not enabled for the org is not listed");
+  assert.ok(!routed.includes("mis/devstral-latest"), "static fallback list is replaced after sync");
+});
+
+test("mistral sync - stores the reasoning/vision capabilities the API reports", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
+
+  setCustomExecutor({
+    execute: async (req) => {
+      if (req.url.endsWith("/v1/models")) {
+        const data = [
+          { id: "ministral-14b-latest", capabilities: { completion_chat: true, vision: true, reasoning: false } },
+          { id: "codestral-2508", capabilities: { completion_chat: true, vision: false, reasoning: false } },
+        ];
+        return new Response(JSON.stringify({ data }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ message: "messages must not be empty" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
+
+  const rows = listSyncedModels("mistral");
+  const byId = Object.fromEntries(rows.map((r) => [r.model_id, r.capabilities]));
+  assert.deepEqual(JSON.parse(byId["ministral-14b-latest"]), { vision: true, reasoning: false });
+  assert.deepEqual(JSON.parse(byId["codestral-2508"]), { vision: false, reasoning: false });
+});

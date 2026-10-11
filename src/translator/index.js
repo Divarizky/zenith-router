@@ -24,11 +24,30 @@ import {
 export { FORMATS, normalizeFormat };
 
 /**
+ * OpenAI clients (Pi, newer SDKs) send the system prompt as role "developer".
+ * Most OpenAI-compatible upstreams (Mistral, Groq, ...) only accept "system",
+ * and the translators below only look for "system", so map it once here.
+ */
+function normalizeDeveloperRole(body) {
+  if (!Array.isArray(body?.messages) || !body.messages.some((m) => m?.role === "developer")) {
+    return body;
+  }
+  return {
+    ...body,
+    messages: body.messages.map((m) => (m?.role === "developer" ? { ...m, role: "system" } : m)),
+  };
+}
+
+/**
  * Translate incoming request body from sourceFormat to targetFormat
  */
 export function translateRequest(sourceFormat, targetFormat, body, targetModel) {
   const src = normalizeFormat(sourceFormat);
   const tgt = normalizeFormat(targetFormat);
+
+  if (src === FORMATS.OPENAI) {
+    body = normalizeDeveloperRole(body);
+  }
 
   if (src === tgt) {
     return { ...body, model: targetModel || body.model };

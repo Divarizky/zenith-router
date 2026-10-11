@@ -11,7 +11,7 @@ import { handleListModels } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
-import { handleGetUsage, getLastProvider } from "./services/usage.js";
+import { handleGetUsage, getLastProvider, getRecentUsage } from "./services/usage.js";
 import { getActiveProviders } from "./services/trafficGuard.js";
 import { handleGetQuota, handleSyncQuotaForm } from "./services/quota.js";
 import {
@@ -167,6 +167,12 @@ app.post("/v1/responses", handleResponses);
 // Analytics & Usage
 app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
+// Recent usage entries consumed by the live "Recent Requests" panel (no page reload).
+app.get("/api/usage/recent", (c) => {
+  const raw = String(c.req.query("limit") || "10");
+  const limit = Math.min(Math.max(Number.parseInt(raw, 10) || 10, 1), 50);
+  return c.json({ recent: getRecentUsage(limit) });
+});
 // Live topology state: provider yang sedang memproses request + provider terakhir dipakai.
 app.get("/api/topology/active", (c) =>
   c.json({ active: [...getActiveProviders()], last: getLastProvider() })

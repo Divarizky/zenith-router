@@ -92,7 +92,7 @@ export async function syncFreeModels(providerId) {
   const db = getDb();
   const now = Date.now();
   const insert = db.prepare(
-    "INSERT OR REPLACE INTO synced_models (provider, model_id, name, synced_at) VALUES (?, ?, ?, ?)"
+    "INSERT OR REPLACE INTO synced_models (provider, model_id, name, capabilities, synced_at) VALUES (?, ?, ?, ?, ?)"
   );
   db.exec("BEGIN");
   try {
@@ -102,7 +102,7 @@ export async function syncFreeModels(providerId) {
     if (provider.freeModelSync === "replace") {
       db.prepare("DELETE FROM imported_models WHERE provider = ?").run(provider.id);
     }
-    for (const m of free) insert.run(provider.id, m.id, m.name || null, now);
+    for (const m of free) insert.run(provider.id, m.id, m.name || null, m.capabilities ? JSON.stringify(m.capabilities) : null, now);
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");

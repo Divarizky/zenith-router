@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS synced_models (
   provider TEXT NOT NULL,
   model_id TEXT NOT NULL,
   name TEXT,
+  capabilities TEXT,   -- JSON from the provider API, e.g. {"vision":true,"reasoning":false}
   synced_at INTEGER NOT NULL,
   PRIMARY KEY (provider, model_id)
 );
@@ -176,6 +177,11 @@ function migrateSchema(db) {
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_history (provider, timestamp)");
+
+  const syncedColumns = db.prepare("PRAGMA table_info(synced_models)").all();
+  if (syncedColumns.length && !syncedColumns.some((col) => col.name === "capabilities")) {
+    db.exec("ALTER TABLE synced_models ADD COLUMN capabilities TEXT");
+  }
 }
 
 /**

@@ -42,6 +42,61 @@ test("GET /dashboard/usage - renders Usage Analytics page with model breakdown",
   assert.ok(html.includes("<img src=\"/providers/glm.png\""));
 });
 
+test("GET /api/usage/recent - returns the latest usage entries as JSON", async () => {
+  initDb(":memory:");
+
+  const conn = addConnection({
+    provider: "glm",
+    name: "GLM Key",
+    credentials: { api_key: "k1" },
+  });
+
+  recordUsage({
+    connectionId: conn.id,
+    model: "glm-4-flash",
+    inputTokens: 250,
+    outputTokens: 75,
+    durationMs: 400,
+  });
+
+  const res = await app.request("/api/usage/recent?limit=10");
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.headers.get("content-type")?.includes("application/json"));
+
+  const body = await res.json();
+  assert.ok(Array.isArray(body.recent), "recent is an array");
+  assert.strictEqual(body.recent.length, 1);
+  assert.strictEqual(body.recent[0].model, "glm-4-flash");
+  assert.strictEqual(body.recent[0].input_tokens, 250);
+  assert.strictEqual(body.recent[0].output_tokens, 75);
+});
+
+test("GET /dashboard/usage - Recent Requests panel is wired for live refresh", async () => {
+  initDb(":memory:");
+
+  const conn = addConnection({
+    provider: "glm",
+    name: "GLM Key",
+    credentials: { api_key: "k1" },
+  });
+
+  recordUsage({
+    connectionId: conn.id,
+    model: "glm-4-flash",
+    inputTokens: 250,
+    outputTokens: 75,
+    durationMs: 400,
+  });
+
+  const res = await app.request("/dashboard/usage");
+  assert.strictEqual(res.status, 200);
+
+  const html = await res.text();
+  assert.ok(html.includes('id="recent-body"'), "panel body is replaceable");
+  assert.ok(html.includes('id="recent-count"'), "panel badge is updatable");
+  assert.ok(html.includes("/api/usage/recent"), "client polls the recent endpoint");
+});
+
 test("GET /dashboard/settings - renders Settings page with form", async () => {
   initDb(":memory:");
 

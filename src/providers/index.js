@@ -20,6 +20,22 @@ import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
+import { resolveCapabilities } from "./capabilities.js";
+
+/**
+ * Capability fields published per model on /v1/models, same shape as 9router:
+ * clients read capabilities.vision to decide whether image input is allowed and
+ * capabilities.reasoning to decide whether reasoning_effort may be sent. A model
+ * nobody has data for gets no field at all — better an absent claim than a wrong one.
+ */
+function modelCapabilityFields(modelId, storedCaps = null) {
+  const caps = storedCaps || resolveCapabilities(modelId, storedCaps);
+  if (!caps) return {};
+  const fields = { capabilities: { vision: caps.vision === true, reasoning: caps.reasoning === true } };
+  if (caps.contextWindow) fields.context_length = caps.contextWindow;
+  if (caps.maxOutput) fields.max_completion_tokens = caps.maxOutput;
+  return fields;
+}
 import { getConnections } from "../db/index.js";
 
 const REGISTRY = [
@@ -74,15 +90,24 @@ export function getAllProviders() {
 }
 
 /**
- * Built-in models of a provider: `{ id, name, source }` with source "builtin" or "synced".
- * Providers with `freeModelSync` use their last synced free list: "replace" swaps out the
- * hardcoded list (kept only as a fallback until the first sync), "merge" adds to it.
+ * Built-in models of a provider: `{ id, name, source, capabilities }` with source
+ * "builtin" or "synced". Providers with `freeModelSync` use their last synced free
+ * list: "replace" swaps out the hardcoded list (kept only as a fallback until the
+ * first sync), "merge" adds to it. `capabilities` is null when neither the provider
+ * API nor the pattern table knows the model.
  */
 export function getProviderModels(p) {
-  const staticModels = p.models.map((m) => ({ id: m.id, name: m.name, source: "builtin" }));
+  const withCaps = (m, storedCaps = null) => {
+    const capabilities = resolveCapabilities(m.id, storedCaps);
+    return capabilities ? { ...m, capabilities } : m;
+  };
+
+  const staticModels = p.models.map((m) => withCaps({ id: m.id, name: m.name, source: "builtin" }));
   if (!p.freeModelSync) return staticModels;
 
-  const synced = listSyncedModels(p.id).map((m) => ({ id: m.model_id, name: m.name || m.model_id, source: "synced" }));
+  const synced = listSyncedModels(p.id).map((m) =>
+    withCaps({ id: m.model_id, name: m.name || m.model_id, source: "synced" }, m.capabilities)
+  );
   if (synced.length === 0) return staticModels;
   if (p.freeModelSync === "replace") return synced;
 
@@ -183,7 +208,7 @@ export function getAvailableModels({ all = false } = {}) {
       if (isModelDisabled(p.id, m.id)) continue;
 
       // Register one canonical model ID using primary alias (e.g. "fb/mimo-v2.5" or "glm/glm-4-flash")
-      result.push({
+      const entry = {
         id: `${primaryAlias}/${m.id}`,
         object: "model",
         created: now,
@@ -191,7 +216,9 @@ export function getAvailableModels({ all = false } = {}) {
         permission: [],
         root: m.id,
         parent: null,
-      });
+      };
+      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities));
+      result.push(entry);
     }
   }
 
@@ -200,7 +227,7 @@ export function getAvailableModels({ all = false } = {}) {
     const provider = getProvider(im.provider);
     if (!provider || isModelDisabled(provider.id, im.model_id) || !providerVisible(provider)) continue;
     const primaryAlias = Array.isArray(provider.alias) ? provider.alias[0] : (provider.alias || provider.id);
-    result.push({
+    const entry = {
       id: `${primaryAlias}/${im.model_id}`,
       object: "model",
       created: now,
@@ -209,7 +236,9 @@ export function getAvailableModels({ all = false } = {}) {
       root: im.model_id,
       parent: null,
       imported: true,
-    });
+    };
+    Object.assign(entry, modelCapabilityFields(im.model_id));
+    result.push(entry);
   }
 
   // Custom models ride along with caps derived from a simple cloud default.
@@ -221,7 +250,7 @@ export function getAvailableModels({ all = false } = {}) {
     if (isModelDisabled(cm.provider, cm.model_id)) continue;
     const id = `${primaryAlias}/${cm.model_id}`;
     if (!seenIds.has(id)) {
-      result.push({
+      const entry = {
         id,
         object: "model",
         created: now,
@@ -230,7 +259,9 @@ export function getAvailableModels({ all = false } = {}) {
         root: cm.model_id,
         parent: null,
         custom: true,
-      });
+      };
+      Object.assign(entry, modelCapabilityFields(cm.model_id));
+      result.push(entry);
       seenIds.add(id);
     }
   }

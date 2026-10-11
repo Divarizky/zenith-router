@@ -2,6 +2,42 @@
 
 Semua perubahan penting Zenith Router dicatat di sini. Format mengikuti [Keep a Changelog](https://keepachangelog.com/id/1.1.0/), versi memakai [Semantic Versioning](https://semver.org/lang/id/).
 
+## [0.1.1] - 12-10-2026
+
+Perbaikan untuk kompatibilitas provider, observabilitas, dan dashboard.
+
+### Kemampuan model
+
+- Data `vision` dan `reasoning` kini disimpan per model saat sinkronisasi, dan dikirim di `GET /v1/models` bersama `context_length` dan `max_completion_tokens`. Client yang menghormati `capabilities.reasoning` berhenti mengirim `reasoning_effort` ke model yang tidak mendukungnya.
+- Tabel kapabilitas model di `src/providers/capabilities.js`, berurutan dari data API provider lalu pola nama model, lalu `null` bila tidak diketahui. Model yang tidak dikenal tidak mendapat field apa pun, bukan asumsi.
+- Ikon otak dan mata di baris model pada halaman provider menandai kemampuan thinking dan vision.
+
+### Perbaikan provider Mistral
+
+- Role `developer` dinormalisasi menjadi `system` untuk sumber berformat OpenAI; sebelumnya ditolak 422 `union_tag_invalid`.
+- Adaptasi payload per provider: `max_completion_tokens` dan `seed` diubah namanya, sedangkan `store`, `user`, `logit_bias`, `verbosity`, dan `web_search_options` dibuang. Field tersebut sebelumnya memicu 422 `extra_forbidden`.
+- ID tool call dipetakan ke 9 karakter alfanumerik secara stabil antar request; bentuk lain ditolak 400 dengan kode 3280.
+- `reasoning_effort` dibuang lalu request diulang sekali untuk model yang menolaknya (400 kode 3051), dan pasangan model/provider diingat supaya request berikutnya langsung mengirim tanpa field itu.
+- Penolakan tingkat tier dibedakan dari rate limit biasa: 429 dengan batas 0 request per menit menjadi 403 `model_not_available`, dan 429 pada kuota token per menit yang belum tersentuh menjadi 413 `request_too_large`. Keduanya tidak lagi mendinginkan akun. 503 kini menyertakan `Retry-After` dan menyebut lama tunggu.
+- Model yang ditolak semua akun karena tier dinonaktifkan otomatis dan bisa diaktifkan lagi dari halaman provider.
+- Sinkronisasi model memverifikasi akses tiap model dengan request `messages` kosong yang tidak memakai token, sehingga provider gratis tidak lagi menampilkan model yang tidak bisa dipanggil.
+
+### Observabilitas
+
+- Refresh token proaktif dan sinkronisasi kuota latar belakang melapor hanya ke Console Log dashboard, tidak lagi ke terminal.
+- Panel Recent Requests memperbarui diri tiap 2 detik lewat `GET /api/usage/recent`, dengan animasi baris baru dan jeda saat tab tidak aktif.
+
+### Dashboard
+
+- Tabel model memakai mode pemilihan: kolom checkbox tersembunyi sampai tombol `Pilih` ditekan, dan berubah menjadi `Batalkan Pilih` selama mode aktif. Klik baris mencentang model, link dan tombol di dalam baris tetap mengikuti perilaku normal.
+- Ikon router di topologi dibuat persegi agar tidak gepeng dan diganti ke monokrom; aksen node aktif dan node terakhir dipakai tetap dipertahankan.
+
+### Proyek
+
+- Workflow GitHub Actions menjalankan suite test pada Node 22.13.0 dan Node 24 untuk setiap pull request dan push ke `master`.
+- Branch `master` dilindungi: wajib pull request dengan minimal satu approval, tidak bisa dihapus, tidak bisa di-force-push, dan wajib lolos kedua status check test.
+- README ditulis ulang untuk pengguna akhir: bagian status fitur dihapus, ditambah tabel provider, referensi kemampuan model, keamanan, dan batasan yang diketahui.
+
 ## [0.1.0] - 11-10-2026
 
 Rilis pertama.
@@ -54,4 +90,5 @@ Rilis pertama.
 - Varian tier Antigravity memakai `thinkingLevel` di `generationConfig` alih-alih akhiran `(high)`/`(medium)`/`(low)` pada nama model, yang menyebabkan 404.
 - Parser Codex membaca `rate_limit.primary_window`/`secondary_window` dan melabeli bar dari panjang jendela, bukan "Primary window" tetap.
 
+[0.1.1]: https://github.com/Divarizky/zenith-router/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Divarizky/zenith-router/releases/tag/v0.1.0

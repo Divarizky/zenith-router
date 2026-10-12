@@ -35,12 +35,25 @@ CREATE TABLE IF NOT EXISTS connections (
 
 CREATE INDEX IF NOT EXISTS idx_connections_provider_active ON connections (provider, is_active);
 
+-- Per-model rate-limit locks. A lock lives per (connection, model) pair so a 429
+-- on one model cannot park or unpark another model on the same account, and an
+-- account-wide credential lock on connections.cooldown_until cannot be narrowed
+-- by a shorter model lock.
+CREATE TABLE IF NOT EXISTS connection_model_locks (
+  connection_id INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  locked_until INTEGER NOT NULL,
+  PRIMARY KEY (connection_id, model)
+);
+
 CREATE TABLE IF NOT EXISTS combos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE NOT NULL,
   strategy TEXT NOT NULL DEFAULT 'fallback',
   models TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -53,6 +66,7 @@ CREATE TABLE IF NOT EXISTS usage_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   connection_id INTEGER,
   api_key_id INTEGER,
+  combo_name TEXT,
   model TEXT NOT NULL,
   input_tokens INTEGER DEFAULT 0,
   output_tokens INTEGER DEFAULT 0,
@@ -175,12 +189,45 @@ function migrateSchema(db) {
   if (!usageColumns.some((col) => col.name === "provider")) {
     db.exec("ALTER TABLE usage_history ADD COLUMN provider TEXT");
   }
+  if (!usageColumns.some((col) => col.name === "combo_name")) {
+    db.exec("ALTER TABLE usage_history ADD COLUMN combo_name TEXT");
+  }
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_history (provider, timestamp)");
 
   const syncedColumns = db.prepare("PRAGMA table_info(synced_models)").all();
   if (syncedColumns.length && !syncedColumns.some((col) => col.name === "capabilities")) {
     db.exec("ALTER TABLE synced_models ADD COLUMN capabilities TEXT");
+  }
+
+  const comboColumns = db.prepare("PRAGMA table_info(combos)").all();
+  if (comboColumns.length && !comboColumns.some((col) => col.name === "enabled")) {
+    db.exec("ALTER TABLE combos ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
+  }
+  if (comboColumns.length && !comboColumns.some((col) => col.name === "updated_at")) {
+    db.exec("ALTER TABLE combos ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Move model-scoped locks written by the previous single-column design
+  // (connections.cooldown_model) into the per-pair table, then drop the column.
+  const connectionColumns = db.prepare("PRAGMA table_info(connections)").all();
+  if (connectionColumns.some((col) => col.name === "cooldown_model")) {
+    const orphaned = db
+      .prepare(`SELECT id, cooldown_until, cooldown_model FROM connections WHERE cooldown_model IS NOT NULL`)
+      .all();
+    const carry = db.prepare(
+      `INSERT INTO connection_model_locks (connection_id, model, locked_until) VALUES (?, ?, ?)
+       ON CONFLICT(connection_id, model) DO UPDATE SET locked_until = MAX(locked_until, excluded.locked_until)`
+    );
+    for (const row of orphaned) carry.run(row.id, row.cooldown_model, row.cooldown_until);
+    // In that design cooldown_until held the model's lock, not an account lock;
+    // carrying it over as-is would silently widen the lock to the whole account.
+    db.exec(`UPDATE connections SET cooldown_until = 0 WHERE cooldown_model IS NOT NULL`);
+    // Best effort: the column is unused after the move, and an old SQLite without
+    // DROP COLUMN support simply keeps a harmless NULL column behind.
+    try {
+      db.exec("ALTER TABLE connections DROP COLUMN cooldown_model");
+    } catch {}
   }
 }
 
@@ -311,13 +358,50 @@ export function deleteConnection(id) {
 }
 
 /**
- * Set temporary rate-limit cooldown for a connection
+ * Cool a connection down until a timestamp.
+ *
+ * Pass a model when the failure is about that model only (rate limit, upstream
+ * 5xx): the lock is stored per (connection, model) pair, so other models on the
+ * account stay usable — which is what a combo chain needs to reach its next
+ * member. Pass nothing when the credential itself is broken (401/402/403 that did
+ * not survive a refresh) and the whole account must stay parked.
+ *
+ * Neither kind of lock is ever shortened: a shorter deadline over an active lock
+ * would unpark an account a previous failure had already ruled unusable.
  */
-export function setConnectionCooldown(id, cooldownUntilTimestamp) {
+export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null) {
   const db = getDb();
-  const stmt = db.prepare(`UPDATE connections SET cooldown_until = ? WHERE id = ?`);
-  stmt.run(Number(cooldownUntilTimestamp), Number(id));
+  if (model) {
+    db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ? AND locked_until <= ?`).run(
+      Number(id),
+      Date.now()
+    );
+    db.prepare(
+      `INSERT INTO connection_model_locks (connection_id, model, locked_until) VALUES (?, ?, ?)
+       ON CONFLICT(connection_id, model) DO UPDATE SET locked_until = MAX(locked_until, excluded.locked_until)`
+    ).run(Number(id), String(model), Number(cooldownUntilTimestamp));
+    return true;
+  }
+  const now = Date.now();
+  db.prepare(
+    `UPDATE connections SET cooldown_until = CASE WHEN cooldown_until > ? THEN cooldown_until ELSE ? END WHERE id = ?`
+  ).run(now, Number(cooldownUntilTimestamp), Number(id));
   return true;
+}
+
+/**
+ * Active per-model lock deadline for a connection, or null when the model is
+ * not locked (never locked, lock expired, or unknown pair).
+ */
+export function getModelLockUntil(connectionId, model) {
+  if (!connectionId || !model) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT locked_until FROM connection_model_locks
+       WHERE connection_id = ? AND model = ? AND locked_until > ?`
+    )
+    .get(Number(connectionId), String(model), Date.now());
+  return row ? Number(row.locked_until) : null;
 }
 
 /**

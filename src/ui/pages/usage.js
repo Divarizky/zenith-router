@@ -438,7 +438,7 @@ function renderRecentPanel(recent) {
       (r) => `
         <li class="recent-item">
           <div class="recent-line">
-            <code class="recent-model">${escapeHtml(r.model)}</code>
+            <code class="recent-model">${r.combo_name ? `${escapeHtml(r.combo_name)} &rarr; ` : ""}${escapeHtml(r.model)}</code>
             <span class="recent-when">${relWhen(r.timestamp)}</span>
           </div>
           <div class="recent-io">in ${fmtNum(r.input_tokens)} · out ${fmtNum(r.output_tokens)}</div>
@@ -758,7 +758,7 @@ function renderQuotaCard(s) {
         return Math.floor(h / 24) + "d ago";
       }
       function key(r) {
-        return [r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
+        return [r.combo_name || "", r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
       }
       function poll() {
         fetch("/api/usage/recent?limit=10", { cache: "no-store" })
@@ -776,7 +776,7 @@ function renderQuotaCard(s) {
               seen[key(r)] = true;
               return '<li class="recent-item' + (fresh ? ' recent-item-new' : '') + '">' +
                 '<div class="recent-line">' +
-                '<code class="recent-model">' + esc(r.model) + '</code>' +
+                '<code class="recent-model">' + esc(r.combo_name ? r.combo_name + ' \u2192 ' : '') + esc(r.model) + '</code>' +
                 '<span class="recent-when">' + esc(rel(r.timestamp)) + '</span>' +
                 '</div>' +
                 '<div class="recent-io">in ' + compact(r.input_tokens) + ' \u00b7 out ' + compact(r.output_tokens) + '</div>' +

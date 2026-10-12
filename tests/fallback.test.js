@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
-import { initDb, addConnection, getConnections, setConnectionCooldown } from "../src/db/index.js";
+import { initDb, getDb, addConnection, getConnections, getModelLockUntil, setConnectionCooldown } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 
 test("Failover - transparently retries on next account when first account returns 429", async () => {
@@ -43,10 +43,10 @@ test("Failover - transparently retries on next account when first account return
   assert.strictEqual(attempts[0], "Bearer key-1");
   assert.strictEqual(attempts[1], "Bearer key-2");
 
-  // Verify that Acc 1 is in cooldown
+  // Verify that Acc 1 is locked out for the model it failed on
   const updatedConns = getConnections("glm");
   const acc1 = updatedConns.find((c) => c.id === c1.id);
-  assert.ok(acc1.cooldown_until > Date.now());
+  assert.ok(getModelLockUntil(acc1.id, "glm-4-flash") > Date.now());
 
   setCustomExecutor(null);
 });
@@ -299,7 +299,10 @@ test("Mistral - 429 with a partly used token budget is still a normal rate limit
   const res = await mistralChat("mis/magistral-small-latest");
   assert.strictEqual(res.status, 429);
   const acc = getConnections("mistral").find((c) => c.id === conn.id);
-  assert.ok(acc.cooldown_until > Date.now(), "a real rate limit still cools the account down");
+  assert.ok(
+    getModelLockUntil(acc.id, "magistral-small-latest") > Date.now(),
+    "a real rate limit still locks the account for that model"
+  );
 
   setCustomExecutor(null);
 });
@@ -431,5 +434,47 @@ test("Mistral - 403 labs_not_enabled does not cool down the account", async () =
   assert.ok(!(acc.cooldown_until > Date.now()), "account is not cooled down");
   assert.strictEqual((await mistralChat("mis/ministral-3b-latest")).status, 200, "other models keep working");
 
+  setCustomExecutor(null);
+});
+
+test("Failover - a client abort neither cools accounts down nor burns the next one", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "glm", name: "GLM A", credentials: { api_key: "key-a" } });
+  addConnection({ provider: "glm", name: "GLM B", credentials: { api_key: "key-b" } });
+
+  const controller = new AbortController();
+  const calls = [];
+  setCustomExecutor({
+    async execute() {
+      calls.push(1);
+      controller.abort();
+      // Inilah bentuk yang dihasilkan executor saat fetch dibatalkan klien.
+      return new Response(JSON.stringify({ error: { message: "Upstream transport failed: The operation was aborted" } }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  const res = await app.request(
+    new Request("http://localhost/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "glm/glm-4-flash", messages: [{ role: "user", content: "hi" }] }),
+      signal: controller.signal,
+    })
+  );
+
+  assert.strictEqual(res.status, 502);
+  assert.strictEqual(calls.length, 1, "akun berikutnya tidak boleh dibakar untuk klien yang sudah pergi");
+  assert.strictEqual(
+    getDb().prepare("SELECT count(*) AS n FROM connection_model_locks").get().n,
+    0,
+    "abort bukan alasan menulis lock model"
+  );
+  assert.ok(
+    getConnections("glm").every((c) => !c.cooldown_until),
+    "abort bukan alasan mengunci akun"
+  );
   setCustomExecutor(null);
 });

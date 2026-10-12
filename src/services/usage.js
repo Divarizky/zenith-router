@@ -8,6 +8,7 @@ export function recordUsage({
   connectionId = null,
   apiKeyId = null,
   provider = null,
+  comboName = null,
   model,
   inputTokens = 0,
   outputTokens = 0,
@@ -25,11 +26,22 @@ export function recordUsage({
     const providerId = provider ? String(provider) : null;
 
     const stmt = db.prepare(`
-      INSERT INTO usage_history (connection_id, api_key_id, provider, model, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (connection_id, api_key_id, provider, model, combo_name, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const info = stmt.run(connId, keyId, providerId, model || "unknown", inTok, outTok, totalTok, dur, timestamp);
+    const info = stmt.run(
+      connId,
+      keyId,
+      providerId,
+      model || "unknown",
+      comboName || null,
+      inTok,
+      outTok,
+      totalTok,
+      dur,
+      timestamp
+    );
 
     captureLine(
       `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok} | ${dur}ms${
@@ -75,7 +87,7 @@ export function estimateTokens(textOrMessages) {
 /**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
-export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
+export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, comboName = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
   let inputTokens = 0;
   let outputTokens = 0;
   let streamedTextLength = 0;
@@ -145,6 +157,7 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
           connectionId,
           apiKeyId,
           provider,
+          comboName,
           model,
           inputTokens,
           outputTokens,
@@ -260,7 +273,7 @@ export function getRecentUsage(limit = 10) {
     return (
       db
         .prepare(
-          `SELECT model, input_tokens, output_tokens, duration_ms, timestamp
+          `SELECT model, combo_name, input_tokens, output_tokens, duration_ms, timestamp
            FROM usage_history
            ORDER BY timestamp DESC, id DESC
            LIMIT ?`

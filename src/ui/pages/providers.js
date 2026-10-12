@@ -1,6 +1,6 @@
 import { getConnections, addConnection, deleteConnection } from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
-import { isConnectionInCooldown } from "../../services/auth.js";
+import { isConnectionFullyCooledDown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import {
   listCustomModels,
@@ -23,6 +23,7 @@ import { getOAuthFlow } from "../../services/oauth/providers.js";
 import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
 import { renderLayout, capabilityIcons } from "../layout.js";
+import { renderCombosContent } from "./combos.js";
 import { escapeHtml } from "../html.js";
 import { getProviderIconPath } from "../assets.js";
 
@@ -174,7 +175,7 @@ function freeTierPills(providerId) {
 
 function accountStats(list) {
   const healthy = list.filter(
-    (c) => c.is_active === 1 && !isConnectionInCooldown(c) && !isConnectionExhausted(c)
+    (c) => c.is_active === 1 && !isConnectionFullyCooledDown(c) && !isConnectionExhausted(c)
   ).length;
   return { total: list.length, healthy };
 }
@@ -213,7 +214,8 @@ function statusPill(p, stats) {
 /**
  * Providers list: cards grouped by category, each linking to its detail page.
  */
-export function renderProvidersPage(port = 20120) {
+export function renderProvidersPage(port = 20120, query = {}) {
+  const activeTab = query.tab === "combos" ? "combos" : "providers";
   const connections = getConnections();
   const byProvider = new Map();
   for (const c of connections) {
@@ -269,7 +271,20 @@ export function renderProvidersPage(port = 20120) {
     </section>`;
   }).join("");
 
-  return renderLayout({ title: "Providers", activeTab: "providers", content: sections, port });
+  const tabBar = `
+    <div class="page-tabs">
+      <a class="page-tab ${activeTab === "providers" ? "active" : ""}" href="/dashboard/providers">Providers</a>
+      <a class="page-tab ${activeTab === "combos" ? "active" : ""}" href="/dashboard/providers?tab=combos">Combos</a>
+    </div>`;
+
+  const content = activeTab === "combos" ? tabBar + renderCombosContent(query) : tabBar + sections;
+
+  return renderLayout({
+    title: activeTab === "combos" ? "Combos — Zenith Router" : "Providers",
+    activeTab: "providers",
+    content,
+    port,
+  });
 }
 
 const LOGIN_LABELS = {
@@ -504,7 +519,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     .map((c) => {
       let status = `<span class="pill pill-success">Aktif</span>`;
       if (c.is_active !== 1) status = `<span class="pill">Nonaktif</span>`;
-      else if (isConnectionInCooldown(c)) status = `<span class="pill pill-warning">Cooldown</span>`;
+      else if (isConnectionFullyCooledDown(c)) status = `<span class="pill pill-warning">Cooldown</span>`;
       else if (isConnectionExhausted(c)) status = `<span class="pill pill-danger">Habis Kuota</span>`;
       return `
         <tr>

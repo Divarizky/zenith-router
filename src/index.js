@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 // Versi tampilan (banner CLI, /health, sidebar) dibaca dari package.json agar tidak basi saat bump.
 import pkg from "../package.json" with { type: "json" };
 import { streamSSE } from "hono/streaming";
-import { handleListModels } from "./gateway/models.js";
+import { handleListModels, handleGetModelOptions } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
@@ -44,6 +44,14 @@ import {
   handleImportLocalLogin,
 } from "./ui/pages/oauth.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
+import {
+  handleCreateCombo,
+  handleUpdateCombo,
+  handleReorderCombo,
+  handleRenameCombo,
+  handleToggleCombo,
+  handleDeleteCombo,
+} from "./ui/pages/combos.js";
 import { renderTokenSaverPage, handleSaveTokenSaver } from "./ui/pages/tokenSaver.js";
 import {
   renderSettingsPage,
@@ -112,7 +120,7 @@ app.get("/", (c) => c.html(renderOverviewPage(PORT)));
 app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
 
 // Dashboard Providers: accounts + models per provider (9router-style list and detail)
-app.get("/dashboard/providers", (c) => c.html(renderProvidersPage(PORT)));
+app.get("/dashboard/providers", (c) => c.html(renderProvidersPage(PORT, c.req.query())));
 app.post("/dashboard/providers/accounts/add", handleAddAccount);
 app.post("/dashboard/providers/accounts/delete", handleDeleteAccount);
 app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
@@ -146,6 +154,18 @@ app.post("/dashboard/token-saver", handleSaveTokenSaver);
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query())));
 app.post("/dashboard/settings", handleSaveSettings);
 
+// Dashboard Combos UI & Actions
+app.get("/dashboard/combos", (c) => {
+  const qs = new URLSearchParams(c.req.query()).toString();
+  return c.redirect(qs ? `/dashboard/providers?tab=combos&${qs}` : "/dashboard/providers?tab=combos");
+});
+app.post("/dashboard/combos/create", (c) => handleCreateCombo(c));
+app.post("/dashboard/combos/update", (c) => handleUpdateCombo(c));
+app.post("/dashboard/combos/reorder", (c) => handleReorderCombo(c));
+app.post("/dashboard/combos/rename", (c) => handleRenameCombo(c));
+app.post("/dashboard/combos/toggle", (c) => handleToggleCombo(c));
+app.post("/dashboard/combos/delete", (c) => handleDeleteCombo(c));
+
 // Dashboard API Keys UI & Actions
 app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT, null, c.req.query())));
 app.post("/dashboard/keys/create", (c) => handleCreateApiKey(c, PORT));
@@ -167,6 +187,7 @@ app.post("/v1/responses", handleResponses);
 // Analytics & Usage
 app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
+app.get("/api/models", handleGetModelOptions);
 // Recent usage entries consumed by the live "Recent Requests" panel (no page reload).
 app.get("/api/usage/recent", (c) => {
   const raw = String(c.req.query("limit") || "10");

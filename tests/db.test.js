@@ -1,4 +1,8 @@
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import assert from "node:assert";
 import {
   initDb,
@@ -10,6 +14,7 @@ import {
   updateConnection,
   deleteConnection,
   setConnectionCooldown,
+  getModelLockUntil,
 } from "../src/db/index.js";
 
 test("Database - initializes tables in in-memory mode", () => {
@@ -160,4 +165,101 @@ test("Database - migrates a pre-api_key_id usage_history table on startup", asyn
   assert.ok(indexes.includes("idx_usage_api_key"));
   assert.strictEqual(db.prepare("SELECT total_tokens FROM usage_history").get().total_tokens, 42, "existing rows kept");
   assert.strictEqual(getDb(), db);
+});
+
+// Two shapes of pre-upgrade database must come out right: one that predates
+// per-model locks entirely, and one that carried them in the short-lived
+// connections.cooldown_model column.
+test("Migration - upgrades databases from both pre-lock designs", () => {
+  const tmp = join(tmpdir(), `zenith-migrate-${process.pid}-${Math.floor(process.uptime() * 1000)}.db`);
+  try {
+    const legacy = new DatabaseSync(tmp);
+    legacy.exec(`
+      CREATE TABLE connections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL,
+        name TEXT,
+        auth_type TEXT NOT NULL DEFAULT 'api_key',
+        credentials TEXT NOT NULL DEFAULT '{}',
+        proxy_url TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        last_used_at INTEGER DEFAULT 0,
+        cooldown_until INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE combos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        strategy TEXT NOT NULL DEFAULT 'fallback',
+        models TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO connections (provider, name, credentials, created_at)
+        VALUES ('mistral', 'Lama', '{"api_key":"k"}', 1);
+      ALTER TABLE connections ADD COLUMN cooldown_model TEXT;
+      INSERT INTO connections (provider, name, credentials, cooldown_until, cooldown_model, created_at)
+        VALUES ('glm', 'Terbatas', '{"api_key":"g"}', ${Date.now() + 60000}, 'glm-4-flash', 2);
+      INSERT INTO combos (name, models, created_at) VALUES ('lama', '["mistral/mistral-large-latest"]', 1);
+    `);
+    legacy.close();
+
+    initDb(tmp);
+
+    const cols = getDb().prepare("PRAGMA table_info(connections)").all().map((c) => c.name);
+    assert.ok(!cols.includes("cooldown_model"), "kolom lock model lama harus dibuang");
+
+    const comboCols = getDb().prepare("PRAGMA table_info(combos)").all().map((c) => c.name);
+    assert.ok(comboCols.includes("enabled") && comboCols.includes("updated_at"));
+
+    // Data lama utuh. Lock model pindah ke tabel per-pasangan dan tidak ikut
+    // melebar jadi lock akun; lock akun yang asli tetap berlaku.
+    assert.strictEqual(getConnectionById(1).name, "Lama");
+    assert.strictEqual(getConnectionById(2).cooldown_until, 0, "lock model tidak boleh melebar jadi lock akun");
+    const modelLock = getModelLockUntil(2, "glm-4-flash");
+    assert.ok(modelLock > Date.now(), "lock model harus pindah ke tabel per-pasangan");
+    assert.strictEqual(getModelLockUntil(2, "mistral-large-latest"), null);
+
+    // Jalankan lagi: tidak boleh gagal maupun menggandakan lock.
+    initDb(tmp);
+    const carried = getDb().prepare("SELECT count(*) AS n FROM connection_model_locks").get().n;
+    assert.strictEqual(carried, 1);
+    assert.strictEqual(getConnections("mistral").length, 1);
+  } finally {
+    closeDb();
+    try { rmSync(tmp, { force: true }); } catch {}
+  }
+});
+
+test("Cooldown locks - neither kind of lock is ever shortened or widened", () => {
+  initDb(":memory:");
+  const conn = addConnection({ provider: "mistral", name: "M", credentials: { api_key: "k" } });
+
+  // Lock model yang aktif tidak boleh dipendekkan oleh deadline yang lebih singkat.
+  const modelLong = Date.now() + 3600_000;
+  setConnectionCooldown(conn.id, modelLong, "mistral-large-latest");
+  setConnectionCooldown(conn.id, Date.now() + 60_000, "mistral-large-latest");
+  assert.ok(
+    getModelLockUntil(conn.id, "mistral-large-latest") >= modelLong - 100,
+    "lock model tidak boleh dipendekkan"
+  );
+
+  // Lock akun yang aktif tidak boleh dipendekkan, dan lock model lain tidak
+  // boleh menyempitkannya jadi lock satu model.
+  const accountLong = Date.now() + 600_000;
+  setConnectionCooldown(conn.id, accountLong);
+  setConnectionCooldown(conn.id, Date.now() + 60_000, "mistral-small-latest");
+  assert.ok(getConnectionById(conn.id).cooldown_until >= accountLong - 100, "lock akun harus bertahan");
+  assert.ok(getModelLockUntil(conn.id, "mistral-small-latest") > Date.now());
+  assert.strictEqual(
+    getModelLockUntil(conn.id, "mistral-code-latest"),
+    null,
+    "model yang tidak kena error tidak ikut terkunci"
+  );
+
+  // Lock yang sudah lewat waktu tidak lagi menghalangi apa pun (dan deadline
+  // lampau memang tidak bisa menghapus lock yang masih aktif — itu bagian dari
+  // aturan tidak pernah dipendekkan).
+  setConnectionCooldown(conn.id, Date.now() - 1000, "mistral-code-latest");
+  assert.strictEqual(getModelLockUntil(conn.id, "mistral-code-latest"), null);
+  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "lock aktif tetap utuh");
 });

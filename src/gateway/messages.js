@@ -1,18 +1,14 @@
-import { resolveModel } from "../providers/index.js";
-import { getExecutor } from "../executors/base.js";
-import { opencodePathForModel } from "../executors/opencode.js";
-import { captureLine } from "../services/logger.js";
+import { routeRequest } from "./route.js";
+import { translateResponse, createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
-import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
-import { getAllSettings } from "../services/settings.js";
-import { executeWithFallback } from "../services/fallback.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
-import {
-  translateRequest,
-  translateResponse,
-  createTransformStream,
-  FORMATS,
-} from "../translator/index.js";
+
+const upstreamBaseUrl = (provider, targetFormat) =>
+  targetFormat === FORMATS.OPENAI
+    ? provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions"
+    : provider.transport?.messagesUrl ||
+      provider.transport?.baseUrl ||
+      "https://api.anthropic.com/v1/messages";
 
 function isWarmupOrNamingRequest(body, userAgent = "") {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
@@ -166,95 +162,36 @@ export async function handleMessages(c) {
     );
   }
 
-  // Resolve target provider and model
-  const resolved = resolveModel(body.model);
-  if (!resolved || !resolved.provider) {
-    return c.json(
-      {
-        type: "error",
-        error: {
-          type: "not_found_error",
-          message: `Model '${body.model}' not found in registry`,
-        },
-      },
-      404
-    );
-  }
-
-  const { provider, targetModel } = resolved;
-  captureLine(`[MESSAGES] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
-  const startTime = Date.now();
-  const executor = getExecutor(provider);
-
-  let targetFormat = provider.format || provider.transport?.format || FORMATS.CLAUDE;
-  if (provider.id === "opencode") {
-    const path = opencodePathForModel(targetModel);
-    if (path.endsWith("/responses")) targetFormat = FORMATS.OPENAI_RESPONSES;
-    else if (path.endsWith("/messages")) targetFormat = FORMATS.CLAUDE;
-  }
-  const clientStream = Boolean(body.stream);
-  const upstreamStream = clientStream || Boolean(provider.transport?.forceStream);
-  const translatedPayload = translateRequest(
-    FORMATS.CLAUDE,
-    targetFormat,
-    { ...body, stream: upstreamStream },
-    targetModel
-  );
-
-  // Apply in-process Token Saver (RTK + Caveman) with fail-open, as configured in Settings
-  const upstreamPayload = applyTokenSaver(
-    translatedPayload,
-    targetFormat,
-    tokenSaverOptions(getAllSettings(), c.req.header("x-zenith-token-saver"))
-  );
-
-  const upstreamUrl = targetFormat === FORMATS.OPENAI
-    ? (provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions")
-    : (provider.transport?.messagesUrl || provider.transport?.baseUrl || "https://api.anthropic.com/v1/messages");
-  const baseHeaders = {
-    "Content-Type": "application/json",
-    ...(provider.transport?.headers || {}),
-  };
-
-  if (targetFormat === FORMATS.CLAUDE && !baseHeaders["Anthropic-Version"]) {
-    baseHeaders["Anthropic-Version"] = "2023-06-01";
-  }
-
-  const anthropicBeta = c.req.header("anthropic-beta");
-  if (anthropicBeta) {
-    baseHeaders["anthropic-beta"] = anthropicBeta;
-  }
-
   try {
-    const result = await executeWithFallback({
-      provider,
-      targetFormat,
-      upstreamPayload,
-      baseHeaders,
-      executor,
+    const routed = await routeRequest({
+      model: body.model,
+      body,
       signal: c.req.raw.signal,
-      stream: upstreamStream,
-      targetModel,
-      resolveUrl: (conn) => {
-        let url = upstreamUrl;
-        if (url.includes("{accountId}") && conn?.credentials) {
-          const acc =
-            conn.credentials.account_id ||
-            conn.credentials.accountId ||
-            (typeof conn.credentials.api_key === "string" && conn.credentials.api_key.includes(":")
-              ? conn.credentials.api_key.split(":")[0]
-              : "");
-          url = url.replace("{accountId}", acc);
-        }
-        return url;
-      },
+      sourceFormat: FORMATS.CLAUDE,
+      defaultFormat: FORMATS.CLAUDE,
+      tokenSaverHeader: c.req.header("x-zenith-token-saver"),
+      extraHeaders: c.req.header("anthropic-beta") ? { "anthropic-beta": c.req.header("anthropic-beta") } : null,
+      baseUrlFor: upstreamBaseUrl,
     });
 
-    if (!result.ok) {
-      return result.response;
+    if (routed.notFound) {
+      return c.json(
+        {
+          type: "error",
+          error: {
+            type: "not_found_error",
+            message: `Model '${body.model}' not found in registry`,
+          },
+        },
+        404
+      );
     }
 
-    const { upstreamRes, connection } = result;
+    if (!routed.ok) {
+      return routed.response;
+    }
+
+    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName } = routed;
     const apiKeyId = c.get("apiKeyId") || null;
 
     if (body.stream) {
@@ -270,6 +207,7 @@ export async function handleMessages(c) {
           connectionId: connection?.id,
           apiKeyId,
           provider: provider?.id,
+          comboName,
           model: targetModel,
           startTime,
           estimatedInputTokens: estimateTokens(body.messages),
@@ -297,6 +235,7 @@ export async function handleMessages(c) {
         connectionId: connection?.id,
         apiKeyId,
         provider: provider?.id,
+        comboName,
         model: targetModel,
         inputTokens,
         outputTokens,

@@ -1,18 +1,10 @@
-import { resolveModel } from "../providers/index.js";
-import { getExecutor } from "../executors/base.js";
-import { opencodePathForModel } from "../executors/opencode.js";
-import {
-  translateRequest,
-  translateResponse,
-  createTransformStream,
-  FORMATS,
-} from "../translator/index.js";
-import { captureLine } from "../services/logger.js";
+import { routeRequest } from "./route.js";
+import { createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
-import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
-import { getAllSettings } from "../services/settings.js";
-import { executeWithFallback } from "../services/fallback.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
+
+const upstreamBaseUrl = (provider) =>
+  provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
 
 export async function handleChat(c) {
   let body;
@@ -44,91 +36,37 @@ export async function handleChat(c) {
     );
   }
 
-  const resolved = resolveModel(body.model);
-  if (!resolved || !resolved.provider) {
-    return c.json(
-      {
-        error: {
-          message: `Model '${body.model}' not found in registry`,
-          type: "invalid_request_error",
-          code: "model_not_found",
-        },
-      },
-      404
-    );
-  }
-
-  const { provider, targetModel } = resolved;
-  captureLine(`[CHAT] model=${body.model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(body.stream)}`);
-  const startTime = Date.now();
-  const executor = getExecutor(provider);
-
-  let targetFormat = provider.format || provider.transport?.format || FORMATS.OPENAI;
-  if (provider.id === "opencode") {
-    const path = opencodePathForModel(targetModel);
-    if (path.endsWith("/responses")) targetFormat = FORMATS.OPENAI_RESPONSES;
-    else if (path.endsWith("/messages")) targetFormat = FORMATS.CLAUDE;
-  }
-  const clientStream = Boolean(body.stream);
-  const upstreamStream = clientStream || Boolean(provider.transport?.forceStream);
-  const translatedPayload = translateRequest(
-    FORMATS.OPENAI,
-    targetFormat,
-    { ...body, stream: upstreamStream },
-    targetModel
-  );
-
-  const upstreamPayload = applyTokenSaver(
-    translatedPayload,
-    targetFormat,
-    tokenSaverOptions(getAllSettings(), c.req.header("x-zenith-token-saver"))
-  );
-
-  if (upstreamStream && targetFormat === FORMATS.OPENAI) {
-    upstreamPayload.stream_options = { include_usage: true, ...(body.stream_options || {}) };
-  }
-
-  const baseHeaders = {
-    "Content-Type": "application/json",
-    ...(provider.transport?.headers || {}),
-  };
-
-  if (targetFormat === FORMATS.CLAUDE && !baseHeaders["Anthropic-Version"]) {
-    baseHeaders["Anthropic-Version"] = "2023-06-01";
-  }
-
-  const upstreamUrlBase = provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
-
   try {
-    const result = await executeWithFallback({
-      provider,
-      targetFormat,
-      upstreamPayload,
-      baseHeaders,
-      executor,
+    const routed = await routeRequest({
+      model: body.model,
+      body,
       signal: c.req.raw.signal,
-      stream: upstreamStream,
-      targetModel,
-      resolveUrl: (conn) => {
-        let url = upstreamUrlBase;
-        if (url.includes("{accountId}") && conn?.credentials) {
-          const acc =
-            conn.credentials.account_id ||
-            conn.credentials.accountId ||
-            (typeof conn.credentials.api_key === "string" && conn.credentials.api_key.includes(":")
-              ? conn.credentials.api_key.split(":")[0]
-              : "");
-          url = url.replace("{accountId}", acc);
-        }
-        return url;
-      },
+      sourceFormat: FORMATS.OPENAI,
+      defaultFormat: FORMATS.OPENAI,
+      tokenSaverHeader: c.req.header("x-zenith-token-saver"),
+      withUsageChunk: true,
+      streamOptions: body.stream_options,
+      baseUrlFor: upstreamBaseUrl,
     });
 
-    if (!result.ok) {
-      return result.response;
+    if (routed.notFound) {
+      return c.json(
+        {
+          error: {
+            message: `Model '${body.model}' not found in registry`,
+            type: "invalid_request_error",
+            code: "model_not_found",
+          },
+        },
+        404
+      );
     }
 
-    const { upstreamRes, connection } = result;
+    if (!routed.ok) {
+      return routed.response;
+    }
+
+    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName } = routed;
     const apiKeyId = c.get("apiKeyId") || null;
 
     if (body.stream) {
@@ -144,6 +82,7 @@ export async function handleChat(c) {
           connectionId: connection?.id,
           apiKeyId,
           provider: provider?.id,
+          comboName,
           model: targetModel,
           startTime,
           estimatedInputTokens: estimateTokens(body.messages),
@@ -170,6 +109,7 @@ export async function handleChat(c) {
         connectionId: connection?.id,
         apiKeyId,
         provider: provider?.id,
+        comboName,
         model: targetModel,
         inputTokens,
         outputTokens,

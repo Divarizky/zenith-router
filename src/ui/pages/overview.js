@@ -1,5 +1,5 @@
 import { getConnections } from "../../db/index.js";
-import { isConnectionInCooldown } from "../../services/auth.js";
+import { isConnectionFullyCooledDown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import { getUsageStats } from "../../services/usage.js";
 import { getAvailableModels } from "../../providers/index.js";
@@ -13,7 +13,7 @@ import { getLocalBaseUrl } from "../../security.js";
 export function renderOverviewPage(port = 20120) {
   const connections = getConnections();
   const activeCount = connections.filter(
-    (c) => c.is_active === 1 && !isConnectionInCooldown(c) && !isConnectionExhausted(c)
+    (c) => c.is_active === 1 && !isConnectionFullyCooledDown(c) && !isConnectionExhausted(c)
   ).length;
 
   const usageToday = getUsageStats({ days: 1 });

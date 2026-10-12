@@ -241,3 +241,45 @@ test("GET /dashboard/usage - quota cards use a fixed 2-column grid", async () =>
   assert.ok(html.includes("grid-template-columns: repeat(2, minmax(0, 1fr))"));
   assert.ok(!html.includes("auto-fit, minmax(300px"));
 });
+
+test("POST /dashboard/settings - combo hold count is saved and clamped to at least one", async () => {
+  initDb(":memory:");
+
+  const ok = new FormData();
+  ok.append("combo_round_robin_count", "3");
+  const res = await app.request("/dashboard/settings", { method: "POST", body: ok });
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(getSetting("combo_round_robin_count"), "3");
+
+  const html = await (await app.request("/dashboard/settings")).text();
+  assert.ok(html.includes('name="combo_round_robin_count"'), "field batas giliran harus tampil di halaman");
+
+  for (const bad of ["-5", "abc", ""]) {
+    const form = new FormData();
+    form.append("combo_round_robin_count", bad);
+    await app.request("/dashboard/settings", { method: "POST", body: form });
+    assert.strictEqual(getSetting("combo_round_robin_count"), "1", `"${bad}" harus jatuh ke 1`);
+  }
+});
+
+test("GET /dashboard/usage - the recent panel attributes a request to its combo", async () => {
+  initDb(":memory:");
+
+  const conn = addConnection({ provider: "glm", name: "GLM Key", credentials: { api_key: "k1" } });
+  recordUsage({
+    connectionId: conn.id,
+    provider: "glm",
+    model: "glm-4-flash",
+    comboName: "antai-utama",
+    inputTokens: 10,
+    outputTokens: 20,
+    durationMs: 100,
+  });
+
+  const html = await (await app.request("/dashboard/usage")).text();
+  assert.ok(html.includes("antai-utama"), "nama combo tampil di panel request terbaru");
+  assert.ok(html.includes("esc(r.combo_name"), "pembaruan live merender nama combo, bukan sekadar memuatnya");
+
+  const api = JSON.parse(await (await app.request("/api/usage/recent")).text());
+  assert.strictEqual(api.recent[0].combo_name, "antai-utama");
+});

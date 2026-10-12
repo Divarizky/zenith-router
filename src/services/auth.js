@@ -1,5 +1,6 @@
 import {
   getConnections,
+  getModelLockUntil,
   setConnectionCooldown,
   updateConnectionLastUsed,
 } from "../db/index.js";
@@ -8,20 +9,38 @@ import { isConnectionExhausted } from "./quota.js";
 import pkg from "../../package.json" with { type: "json" };
 
 /**
- * Check if a connection is currently locked under cooldown
+ * Check if a connection is currently locked under cooldown for a given model.
+ *
+ * Two independent locks exist: the account-wide one on the connection row
+ * (broken credentials) blocks every model, and the per-pair one in
+ * connection_model_locks (rate limit) blocks only that model. Omitting the model
+ * asks the account-wide question only.
  */
-export function isConnectionInCooldown(connection) {
-  if (!connection || !connection.cooldown_until) return false;
-  return connection.cooldown_until > Date.now();
+export function isConnectionInCooldown(connection, model = null) {
+  if (!connection) return false;
+  if (connection.cooldown_until && connection.cooldown_until > Date.now()) return true;
+  if (model && getModelLockUntil(connection.id, model)) return true;
+  return false;
 }
 
 /**
- * Mark a connection as unavailable under rate-limit cooldown
+ * True when the whole account is parked, with no usable model left.
+ *
+ * A per-model lock is not an outage: the account still serves every other model,
+ * and the dashboard must not paint it as dead.
  */
-export function markConnectionCooldown(connectionId, durationMs = 60000) {
+export function isConnectionFullyCooledDown(connection) {
+  return Boolean(connection?.cooldown_until && connection.cooldown_until > Date.now());
+}
+
+/**
+ * Mark a connection as unavailable under rate-limit cooldown. Pass a model when
+ * only that model is unusable, leave it out to park the whole account.
+ */
+export function markConnectionCooldown(connectionId, durationMs = 60000, model = null) {
   if (!connectionId) return;
   const until = Date.now() + durationMs;
-  setConnectionCooldown(connectionId, until);
+  setConnectionCooldown(connectionId, until, model);
 }
 
 /**

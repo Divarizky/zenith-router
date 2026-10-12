@@ -5,7 +5,7 @@ import pkg from "../../package.json" with { type: "json" };
 
 const NAV = [
   { id: "overview", label: "Overview", href: "/dashboard", icon: "home" },
-  { id: "providers", label: "Providers", href: "/dashboard/providers", icon: "link" },
+  { id: "providers", label: "Providers & Combos", href: "/dashboard/providers", icon: "link" },
   { id: "usage", label: "Usage & Quota", href: "/dashboard/usage", icon: "chart" },
   { id: "tokensaver", label: "Token Saver", href: "/dashboard/token-saver", icon: "bolt" },
   { id: "keys", label: "API Keys", href: "/dashboard/keys", icon: "key" },
@@ -21,6 +21,7 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1c-.6 0-1.2.4-1.5 1z"/>',
   brain: '<path d="M12 4.6a3 3 0 0 0-5.7-1.1A2.6 2.6 0 0 0 4 6a2.5 2.5 0 0 0 .5 4.8 2.8 2.8 0 0 0 1.4 4.6A2.5 2.5 0 0 0 8.6 18H12z"/><path d="M12 4.6a3 3 0 0 1 5.7-1.1A2.6 2.6 0 0 1 20 6a2.5 2.5 0 0 1-.5 4.8 2.8 2.8 0 0 1-1.4 4.6A2.5 2.5 0 0 1 15.4 18H12z"/><path d="M12 4.6V18"/><path d="M9.2 8.2h1.4M13.4 8.2h1.4M9.2 12.4h1.4M13.4 12.4h1.4"/>',
   eye: '<path d="M2.5 12S6.5 5.5 12 5.5 21.5 12 21.5 12 17.5 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
 };
 
 function icon(name) {
@@ -124,6 +125,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     }
     .nav-link:hover { background: var(--surface-2); color: var(--text); }
     .nav-link.active { background: var(--surface-3); color: var(--text); }
+    .page-tabs { display: flex; gap: 0.35rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); }
+    .page-tab { padding: 0.45rem 0.9rem; color: var(--text-muted); text-decoration: none; font-size: 0.88rem; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .page-tab:hover { color: var(--text); }
+    .page-tab.active { color: var(--text); border-bottom-color: var(--text); }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border-subtle); color: var(--text-subtle); font-size: 0.72rem; }
     /* Main */
     .main { flex: 1; min-width: 0; padding: 1.75rem 2rem 3rem; }
@@ -161,6 +166,17 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 .provider-icon-fb { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--pi, 32px) * 0.38); font-weight: 700; color: var(--text-muted); }
 .cap-icons { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.45rem; vertical-align: middle; }
 .cap-icon { display: inline-flex; color: var(--text-muted); cursor: help; }
+.combo-member { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+.combo-member code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.combo-move { display: flex; gap: 0.15rem; flex: none; }
+.combo-move .btn { padding: 0.1rem 0.4rem; line-height: 1.1; }
+.combo-move .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.combo-order {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 1.35rem; height: 1.35rem; border-radius: 6px;
+  background: rgba(255,255,255,.06); color: var(--text-muted);
+  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+}
 .cap-icon svg { width: 15px; height: 15px; }
 .cap-icon:hover { color: var(--text); }
 .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
@@ -227,6 +243,8 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     input:focus, select:focus { outline: none; border-color: var(--text-subtle); box-shadow: 0 0 0 3px rgba(255,255,255,0.08); }
     select option { background: var(--surface); color: var(--text); }
     .input-select { width: auto; min-width: 140px; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); font-size: 0.85rem; }
+    .btn-ghost { padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); font-size: 0.78rem; }
+    .btn-ghost:hover { background: rgba(255,255,255,.05); color: var(--text); }
     code { background: var(--surface-2); padding: 0.15rem 0.4rem; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; color: var(--text); }
     table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
     /* Wide tables (accounts, models, keys) scroll inside their card instead of pushing the page sideways. */

@@ -12,6 +12,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
 
   const isRequireAuth = settings.require_api_key === "true";
   const rotationStrategy = settings.account_rotation || "lru";
+  const comboHoldCount = settings.combo_round_robin_count || "1";
   const isTrafficGuard = settings.traffic_guard_enabled !== "false";
   const maxConcurrency = settings.max_account_concurrency || "2";
   const isJitter = settings.request_jitter_enabled !== "false";
@@ -67,6 +68,16 @@ export function renderSettingsPage(port = 20120, query = {}) {
               <option value="lru" ${rotationStrategy === "lru" ? "selected" : ""}>LRU (Giliran Akun)</option>
               <option value="sticky" ${rotationStrategy === "sticky" ? "selected" : ""}>Sticky (Akun Sama)</option>
             </select>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Batas Giliran Combo</strong>
+            <p class="hint">Jumlah request berturut-turut yang memakai anggota yang sama sebelum rotasi maju. Hanya berlaku pada combo berstrategi giliran; default 1.</p>
+          </div>
+          <div class="setting-action">
+            <input type="number" min="1" step="1" name="combo_round_robin_count" class="input-select" value="${escapeHtml(comboHoldCount)}" />
           </div>
         </div>
 
@@ -137,12 +148,14 @@ export async function handleSaveSettings(c) {
   const trafficGuard = body.traffic_guard_enabled === "true" || body.traffic_guard_enabled === "on" ? "true" : "false";
   const maxConcurrency = String(Number(body.max_account_concurrency) || 2);
   const requestJitter = body.request_jitter_enabled === "true" || body.request_jitter_enabled === "on" ? "true" : "false";
+  const comboHoldCount = String(Math.max(1, Math.trunc(Number(body.combo_round_robin_count) || 1)));
 
   setSetting("require_api_key", requireKey);
   setSetting("account_rotation", rotation);
   setSetting("traffic_guard_enabled", trafficGuard);
   setSetting("max_account_concurrency", maxConcurrency);
   setSetting("request_jitter_enabled", requestJitter);
+  setSetting("combo_round_robin_count", comboHoldCount);
 
   return c.redirect("/dashboard/settings?saved=1");
 }

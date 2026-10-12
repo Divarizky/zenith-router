@@ -1,5 +1,6 @@
 import {
   getConnections,
+  getModelLockUntil,
   setConnectionCooldown,
   updateConnectionLastUsed,
 } from "../db/index.js";
@@ -13,13 +14,13 @@ import { getSetting } from "./settings.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 
-export function listAvailableConnections(providerId, { rotation = null } = {}) {
+export function listAvailableConnections(providerId, { rotation = null, model = null } = {}) {
   if (!providerId) return [];
   const providerDef = getProvider(providerId);
   const connections = getConnections(providerId);
 
   const available = connections.filter(
-    (c) => c.is_active === 1 && !isConnectionInCooldown(c) && !isConnectionExhausted(c)
+    (c) => c.is_active === 1 && !isConnectionInCooldown(c, model) && !isConnectionExhausted(c)
   );
 
   const strategy = rotation || getSetting("account_rotation", "lru");
@@ -45,8 +46,8 @@ export function listAvailableConnections(providerId, { rotation = null } = {}) {
   return available;
 }
 
-export function getNextConnection(providerId, triedIds = []) {
-  const available = listAvailableConnections(providerId);
+export function getNextConnection(providerId, triedIds = [], model = null) {
+  const available = listAvailableConnections(providerId, { model });
   for (const c of available) {
     if (!triedIds.includes(c.id)) {
       if (c.id) updateConnectionLastUsed(c.id);
@@ -216,12 +217,12 @@ export async function executeWithFallback({
   }
 
   const triedIds = [];
-  const available = listAvailableConnections(provider.id);
+  const available = listAvailableConnections(provider.id, { model: modelId });
   const maxAttempts = Math.max(1, available.length);
   let lastFailureResponse = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let connection = getNextConnection(provider.id, triedIds);
+    let connection = getNextConnection(provider.id, triedIds, modelId);
     if (!connection) break;
     triedIds.push(connection.id);
 
@@ -321,10 +322,13 @@ export async function executeWithFallback({
 
     // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
+      // A client abort reaches us as a 502 from the executor. Parking accounts
+      // for a request nobody is waiting for would penalise every other caller.
+      if (signal?.aborted) return { ok: false, response: lastFailureResponse };
       if (connection.id) {
         const retryAfterSec = Number(res.headers?.get?.("retry-after"));
         const cooldownMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec * 1000 : 60000 * attempt;
-        setConnectionCooldown(connection.id, Date.now() + cooldownMs);
+        setConnectionCooldown(connection.id, Date.now() + cooldownMs, modelId);
       }
       await applyReactiveJitter(signal);
       continue;
@@ -371,13 +375,15 @@ export async function executeWithFallback({
         }
         lastFailureResponse = buildErrorResponse(res, await res.text(), targetFormat);
         if (res.status === 429 || res.status >= 500) {
-          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 60000);
+          if (signal?.aborted) return { ok: false, response: lastFailureResponse };
+          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 60000, modelId);
           await applyReactiveJitter(signal);
           continue;
         }
         return { ok: false, response: lastFailureResponse };
       } catch (err) {
         if (releaseSlot) releaseSlot();
+        if (signal?.aborted) return { ok: false, response: lastFailureResponse };
         console.error(`[zenith] Reactive refresh error for ${connection.id}:`, err.message);
         if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
         if (attempt < maxAttempts) continue;
@@ -408,11 +414,19 @@ export async function executeWithFallback({
 
   captureLine(`[ROUTING] No available connection for provider '${provider.id}'`);
 
-  // Tell the client how long the cooldown lasts instead of a bare 503.
+  // Tell the client how long the cooldown lasts instead of a bare 503. Only the
+  // locks that actually block this model count: the account-wide one and this
+  // model's own lock. A per-model lock for a different model stays invisible.
   const now = Date.now();
-  const cooldownEnds = getConnections(provider.id)
-    .filter((c) => c.is_active === 1 && Number(c.cooldown_until) > now)
-    .map((c) => Number(c.cooldown_until));
+  const cooldownEnds = [];
+  for (const c of getConnections(provider.id)) {
+    if (c.is_active !== 1) continue;
+    if (Number(c.cooldown_until) > now) cooldownEnds.push(Number(c.cooldown_until));
+    if (modelId) {
+      const lock = getModelLockUntil(c.id, modelId);
+      if (lock) cooldownEnds.push(lock);
+    }
+  }
   const retryAfterSec = cooldownEnds.length ? Math.ceil((Math.min(...cooldownEnds) - now) / 1000) : 0;
   let message = `No available connection for provider '${provider.id}'.`;
   if (retryAfterSec) {

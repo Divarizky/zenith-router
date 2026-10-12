@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
-import { initDb } from "../src/db/index.js";
+import { initDb, addConnection, setConnectionCooldown } from "../src/db/index.js";
 
 test("GET /dashboard/providers/:id - selection is behind a toggle button and rows are clickable", async () => {
   initDb(":memory:");
@@ -35,4 +35,28 @@ test("GET /dashboard/providers/:id - model rows show thinking and vision icons f
   const page = await (await app.request("/dashboard/providers/mistral")).text();
   const codestral = page.split("\n").find((line) => line.includes("/codestral-2508</code>")) || "";
   assert.ok(!codestral.includes("cap-icons"), "text-only model shows no icons");
+});
+
+// A rate limit on one model no longer takes the whole account down, so the
+// dashboard must not count it as unhealthy or paint a Cooldown pill.
+test("Dashboard - a model scoped cooldown does not mark the account as down", async () => {
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "mistral",
+    name: "Mistral Acc",
+    credentials: { api_key: "mis-key" },
+  });
+  setConnectionCooldown(conn.id, Date.now() + 60000, "mistral-large-latest");
+
+  const scoped = await (await app.request("/dashboard/providers/mistral")).text();
+  assert.ok(!scoped.includes(">Cooldown<"), "lock satu model bukan outage akun");
+  assert.ok(!scoped.includes("Habis Kuota"));
+
+  const overview = await (await app.request("/dashboard")).text();
+  assert.ok(!overview.includes(">Cooldown<"));
+
+  // Lock seluruh koneksi tetap harus terlihat sebagai Cooldown.
+  setConnectionCooldown(conn.id, Date.now() + 60000, null);
+  const full = await (await app.request("/dashboard/providers/mistral")).text();
+  assert.ok(full.includes(">Cooldown<"), "lock penuh harus tampil sebagai Cooldown");
 });

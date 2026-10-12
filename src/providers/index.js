@@ -162,6 +162,26 @@ export function resolveModel(modelStr) {
 }
 
 /**
+ * Capabilities of one canonical `provider/model` combo member, resolved the same
+ * way the catalog resolves provider models: stored sync data first, then the
+ * pattern table. Null when nothing is known — same rule as modelCapabilityFields,
+ * so both the catalog rollup and the vision reorder stay honest about what they
+ * do not know.
+ */
+export function memberCapabilities(member) {
+  const resolved = resolveModel(member);
+  if (!resolved) return null;
+  let stored = null;
+  try {
+    stored =
+      listSyncedModels(resolved.provider.id).find((m) => m.model_id === resolved.targetModel)?.capabilities || null;
+  } catch {
+    stored = null;
+  }
+  return resolveCapabilities(resolved.targetModel, stored);
+}
+
+/**
  * Return list of all available models in OpenAI Model List format.
  *
  * Mirroring 9router `buildModelsList` (src/app/api/v1/models/route.js) and

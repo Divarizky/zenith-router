@@ -2,6 +2,36 @@
 
 Semua perubahan penting Zenith Router dicatat di sini. Format mengikuti [Keep a Changelog](https://keepachangelog.com/id/1.1.0/), versi memakai [Semantic Versioning](https://semver.org/lang/id/).
 
+## [0.1.2] - 12-10-2026
+
+Fitur combo dari routing sampai dashboard, digabung dengan halaman Providers.
+
+### Rantai model (combo)
+
+- Combo memanggil beberapa model lintas provider lewat satu nama. Strategi `fallback` menurut urutan anggota, atau `round-robin` yang bergiliran per request; jumlah model per giliran diatur lewat setting `combo_round_robin_count`.
+- Rate limit pada satu model hanya mengunci pasangan (koneksi, model) itu, bukan seluruh akun. Kunci akun dan kunci model disimpan terpisah dan tidak pernah dipendekkan.
+- Request berisi gambar otomatis memprioritaskan anggota yang mendukung vision, dan error combo mengikuti format endpoint yang dipanggil (OpenAI atau Anthropic).
+- Entri combo di `GET /v1/models` membawa rollup kapabilitas seluruh anggota dan context window terkecil di rantainya.
+
+### Dashboard combo
+
+- Halaman combo: membuat, mengubah urutan anggota, mengganti strategi, mengaktifkan/menonaktifkan, menghapus, dan mengganti nama. Tiap combo dirender sebagai kartu dengan satu bagian Edit.
+- Dialog "Pilih model" menampilkan model dari provider yang terhubung, dikelompokkan per provider lengkap dengan ikon, badge vision/reasoning, dan context window; pencarian langsung dan multi-select tanpa menutup dialog. Tanpa JavaScript, textarea biasa tetap berfungsi penuh.
+- Riwayat pemakaian mencatat nama combo (`combo_name`) pada ketiga gateway untuk jalur stream dan non-stream; panel Recent Requests menampilkan "combo → model".
+
+### Penyatuan halaman
+
+- Menu Combos digabung ke halaman Providers lewat tab Providers/Combos; label sidebar menjadi "Providers & Combos". URL `/dashboard/combos` lama tetap hidup sebagai redirect dengan query diteruskan.
+
+### Upgrade otomatis
+
+- Sidebar memeriksa rilis terbaru di GitHub lalu menawarkan Upgrade sekali klik: backup database via `VACUUM INTO`, checkout tag, `npm install`, dan restart otomatis dengan health check. Instalasi yang bukan clone git hanya menerima tautan unduhan, dan semua kejadian tercatat di `data/updater.log`.
+
+### Proyek
+
+- Suite 370 test dengan enam file test baru; perubahan krusial diverifikasi mutation testing.
+- Konsep rantai combo dan dialog pemilih model mengacu pada 9router (MIT).
+
 ## [0.1.1] - 12-10-2026
 
 Perbaikan untuk kompatibilitas provider, observabilitas, dan dashboard.

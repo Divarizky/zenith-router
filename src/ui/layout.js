@@ -129,6 +129,9 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .page-tab { padding: 0.45rem 0.9rem; color: var(--text-muted); text-decoration: none; font-size: 0.88rem; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .page-tab:hover { color: var(--text); }
     .page-tab.active { color: var(--text); border-bottom-color: var(--text); }
+    .update-banner { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.6rem; border: 1px solid var(--warning, #f0b429); border-radius: 8px; background: rgba(240, 180, 41, 0.12); font-size: 0.75rem; flex-wrap: wrap; color: var(--text); }
+    .update-banner a { color: inherit; text-decoration: underline; }
+    #upgrade-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.72); color: #fff; font-size: 1rem; text-align: center; padding: 2rem; }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border-subtle); color: var(--text-subtle); font-size: 0.72rem; }
     /* Main */
     .main { flex: 1; min-width: 0; padding: 1.75rem 2rem 3rem; }
@@ -287,7 +290,7 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
   <aside class="sidebar">
     <div class="brand">
       <img src="${logoUri}" alt="Zenith Router" class="brand-logo" />
-      <div><h1>Zenith Router</h1><small>v${pkg.version}</small></div>
+      <div><h1>Zenith Router</h1><small>v${pkg.version}</small><span id="update-badge"></span></div>
     </div>
     <nav>${navHtml}</nav>
     <div class="sidebar-footer">Ultra-lightweight personal AI gateway</div>
@@ -410,6 +413,89 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
         if (el.name === name && el.checked) n++;
       }
       return n > 0 && confirm('Hapus ' + n + ' ' + label + '?');
+    }
+    // Update badge: tanya versi terbaru sekali, 2,5 detik setelah halaman siap
+    // (pola 9router) supaya render awal tidak menunggu jaringan.
+    setTimeout(function () {
+      var badge = document.getElementById("update-badge");
+      if (!badge) return;
+      fetch("/api/version", { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (info) {
+          if (!info || !info.hasUpdate) return;
+          var wrap = document.createElement("div");
+          wrap.className = "update-banner";
+          var label = document.createElement("span");
+          label.textContent = "v" + info.latest + " tersedia";
+          wrap.appendChild(label);
+          if (info.url && /^https:\\/\\//.test(info.url)) {
+            var link = document.createElement("a");
+            link.href = info.url;
+            link.target = "_blank";
+            link.rel = "noreferrer";
+            link.textContent = "rilis";
+            wrap.appendChild(link);
+          }
+          if (info.upgrade && info.upgrade.mode === "auto") {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn btn-primary";
+            btn.textContent = "Upgrade";
+            btn.addEventListener("click", function () { startUpgrade(info); });
+            wrap.appendChild(btn);
+          }
+          badge.appendChild(wrap);
+        })
+        .catch(function () {});
+    }, 2500);
+
+    function startUpgrade(info) {
+      if (!window.confirm("Upgrade ke " + info.tag + "? Database akan dibackup, berkas di-checkout, lalu server restart. Lanjutkan?")) return;
+      showUpgradeOverlay("Server sedang upgrade ke " + info.tag + "\u2026");
+      fetch("/api/version/upgrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "version=" + encodeURIComponent(info.tag)
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok) { waitUntilUp(info, 0); return; }
+          hideUpgradeOverlay();
+          window.alert("Upgrade gagal: " + (d && d.error ? d.error : "tidak diketahui"));
+        })
+        .catch(function () {
+          // Respons bisa hilang karena proses keluar sebelum sempat terkirim;
+          // anggap berjalan dan pantau saja.
+          waitUntilUp(info, 0);
+        });
+    }
+
+    function waitUntilUp(info, tries) {
+      if (tries > 60) {
+        hideUpgradeOverlay();
+        window.alert("Server belum menjawab dalam 60 detik. Buka data/updater.log lalu jalankan ulang dari terminal.");
+        return;
+      }
+      setTimeout(function () {
+        fetch("/api/version", { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d && d.current === info.latest) { location.reload(); }
+            else { waitUntilUp(info, tries + 1); }
+          })
+          .catch(function () { waitUntilUp(info, tries + 1); });
+      }, 1000);
+    }
+
+    function showUpgradeOverlay(text) {
+      var ov = document.createElement("div");
+      ov.id = "upgrade-overlay";
+      ov.textContent = text;
+      document.body.appendChild(ov);
+    }
+    function hideUpgradeOverlay() {
+      var ov = document.getElementById("upgrade-overlay");
+      if (ov) ov.remove();
     }
   </script>
   ${extraScripts}

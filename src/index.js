@@ -14,6 +14,8 @@ import { handleResponses } from "./gateway/responses.js";
 import { handleGetUsage, getLastProvider, getRecentUsage } from "./services/usage.js";
 import { getActiveProviders } from "./services/trafficGuard.js";
 import { handleGetQuota, handleSyncQuotaForm } from "./services/quota.js";
+import { getVersionInfo } from "./services/version.js";
+import { handleUpgradeRequest, getUpgradeCapability } from "./services/upgrade.js";
 import {
   initConsoleLogCapture,
   getConsoleLogs,
@@ -188,6 +190,12 @@ app.post("/v1/responses", handleResponses);
 app.get("/api/usage", handleGetUsage);
 app.get("/api/quota", handleGetQuota);
 app.get("/api/models", handleGetModelOptions);
+app.get("/api/version", async (c) => {
+  const info = await getVersionInfo();
+  const upgrade = await getUpgradeCapability();
+  return c.json({ ...info, upgrade });
+});
+app.post("/api/version/upgrade", (c) => handleUpgradeRequest(c));
 // Recent usage entries consumed by the live "Recent Requests" panel (no page reload).
 app.get("/api/usage/recent", (c) => {
   const raw = String(c.req.query("limit") || "10");

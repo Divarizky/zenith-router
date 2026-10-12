@@ -12,3 +12,7 @@ Thumbs.db
 .freebuff/
 
 .workspace/
+
+# Agent profile (lokal saja, jangan di-commit)
+AGENTS.md
+CLAUDE.md

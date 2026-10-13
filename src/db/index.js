@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS connections (
   auth_type TEXT NOT NULL DEFAULT 'apikey',
   credentials TEXT NOT NULL DEFAULT '{}',
   proxy_url TEXT,
+  proxy_pool_id INTEGER,
   is_active INTEGER NOT NULL DEFAULT 1,
   last_used_at INTEGER DEFAULT 0,
   cooldown_until INTEGER DEFAULT 0,
@@ -54,6 +55,21 @@ CREATE TABLE IF NOT EXISTS combos (
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+-- Central proxy registry (F-08). One row = one proxy URL; connections point
+-- back through proxy_pool_id (list beats the per-account proxy_url, which stays
+-- as a lower-priority fallback and is never migrated).
+CREATE TABLE IF NOT EXISTS proxy_pools (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  url TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  last_test_at INTEGER,
+  last_test_ok INTEGER,
+  last_test_ms INTEGER,
+  last_test_error TEXT,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -211,6 +227,13 @@ function migrateSchema(db) {
   // Move model-scoped locks written by the previous single-column design
   // (connections.cooldown_model) into the per-pair table, then drop the column.
   const connectionColumns = db.prepare("PRAGMA table_info(connections)").all();
+  if (!connectionColumns.some((col) => col.name === "proxy_pool_id")) {
+    db.exec("ALTER TABLE connections ADD COLUMN proxy_pool_id INTEGER");
+  }
+  const proxyPoolColumns = db.prepare("PRAGMA table_info(proxy_pools)").all();
+  if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === "last_test_ms")) {
+    db.exec("ALTER TABLE proxy_pools ADD COLUMN last_test_ms INTEGER");
+  }
   if (connectionColumns.some((col) => col.name === "cooldown_model")) {
     const orphaned = db
       .prepare(`SELECT id, cooldown_until, cooldown_model FROM connections WHERE cooldown_model IS NOT NULL`)
@@ -277,6 +300,7 @@ export function addConnection({
   auth_type = "apikey",
   credentials = {},
   proxy_url = null,
+  proxy_pool_id = null,
   is_active = 1,
 }) {
   const db = getDb();
@@ -284,11 +308,11 @@ export function addConnection({
   const credsJson = JSON.stringify(credentials || {});
 
   const stmt = db.prepare(`
-    INSERT INTO connections (provider, name, auth_type, credentials, proxy_url, is_active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO connections (provider, name, auth_type, credentials, proxy_url, proxy_pool_id, is_active, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const info = stmt.run(provider, name, auth_type, credsJson, proxy_url, is_active ? 1 : 0, now);
+  const info = stmt.run(provider, name, auth_type, credsJson, proxy_url, proxy_pool_id ?? null, is_active ? 1 : 0, now);
   return getConnectionById(Number(info.lastInsertRowid));
 }
 
@@ -335,15 +359,16 @@ export function updateConnection(id, fields = {}) {
     ? JSON.stringify(fields.credentials)
     : JSON.stringify(current.credentials);
   const proxy_url = fields.proxy_url !== undefined ? fields.proxy_url : current.proxy_url;
+  const proxy_pool_id = fields.proxy_pool_id !== undefined ? fields.proxy_pool_id ?? null : current.proxy_pool_id;
   const is_active = fields.is_active !== undefined ? (fields.is_active ? 1 : 0) : current.is_active;
 
   const stmt = db.prepare(`
     UPDATE connections
-    SET name = ?, auth_type = ?, credentials = ?, proxy_url = ?, is_active = ?
+    SET name = ?, auth_type = ?, credentials = ?, proxy_url = ?, proxy_pool_id = ?, is_active = ?
     WHERE id = ?
   `);
 
-  stmt.run(name, auth_type, credentials, proxy_url, is_active, Number(id));
+  stmt.run(name, auth_type, credentials, proxy_url, proxy_pool_id, is_active, Number(id));
   return getConnectionById(id);
 }
 
@@ -411,4 +436,62 @@ export function updateConnectionLastUsed(id) {
   const db = getDb();
   const stmt = db.prepare(`UPDATE connections SET last_used_at = ? WHERE id = ?`);
   stmt.run(Date.now(), Number(id));
+}
+
+/**
+ * Proxy pool registry (F-08)
+ */
+export function addProxyPool({ name, url, is_active = 1 }) {
+  const db = getDb();
+  const info = db
+    .prepare(
+      "INSERT INTO proxy_pools (name, url, is_active, created_at) VALUES (?, ?, ?, ?)"
+    )
+    .run(String(name), String(url), is_active ? 1 : 0, Date.now());
+  return getProxyPoolById(Number(info.lastInsertRowid));
+}
+
+export function getProxyPools() {
+  return getDb().prepare("SELECT * FROM proxy_pools ORDER BY id ASC").all();
+}
+
+export function getProxyPoolById(id) {
+  return getDb().prepare("SELECT * FROM proxy_pools WHERE id = ?").get(Number(id)) || null;
+}
+
+/** How many accounts route through a pool (displayed on the Proxy tab). */
+export function countProxyAccounts(poolId) {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM connections WHERE proxy_pool_id = ?")
+    .get(Number(poolId));
+  return Number(row?.n || 0);
+}
+
+/** Partial update of a proxy pool row (name, url, flags, last test result). */
+export function updateProxyPool(id, fields) {
+  const current = getProxyPoolById(id);
+  if (!current) return null;
+  const value = (key) => (fields[key] !== undefined ? fields[key] : current[key]);
+  getDb()
+    .prepare(
+      `UPDATE proxy_pools
+       SET name = ?, url = ?, is_active = ?, last_test_at = ?, last_test_ok = ?, last_test_ms = ?, last_test_error = ?
+       WHERE id = ?`
+    )
+    .run(
+      value("name"),
+      value("url"),
+      value("is_active"),
+      value("last_test_at"),
+      value("last_test_ok"),
+      value("last_test_ms"),
+      value("last_test_error"),
+      Number(id)
+    );
+  return getProxyPoolById(id);
+}
+
+/** Remove a pool row. Callers must check account usage first (F-08 AC-12). */
+export function removeProxyPool(id) {
+  getDb().prepare("DELETE FROM proxy_pools WHERE id = ?").run(Number(id));
 }

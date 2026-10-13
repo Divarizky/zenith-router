@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 
 /**
  * Fetch live quota for GLM (Z.ai Coding Plan)
@@ -13,7 +14,7 @@ export async function fetchGlmQuota(connection) {
     Accept: "application/json",
   };
 
-  const res = await oauthFetch(url, { headers }, { proxyUrl: connection.proxy_url });
+  const res = await oauthFetch(url, { headers }, { proxyUrl: requireResolvedProxy(connection) });
   if (!res.ok) {
     throw new Error(`GLM quota API returned HTTP ${res.status}`);
   }

@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
 
 const ANTIGRAVITY_QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
@@ -71,7 +72,7 @@ async function postQuota(url, connection, projectId) {
     "User-Agent": "antigravity/ide/0.0.1 darwin/arm64",
   };
   const body = projectId ? JSON.stringify({ project: projectId }) : "{}";
-  return oauthFetch(url, { method: "POST", headers, body }, { proxyUrl: connection.proxy_url });
+  return oauthFetch(url, { method: "POST", headers, body }, { proxyUrl: requireResolvedProxy(connection) });
 }
 
 /** Subscription tier name (e.g. "Google AI Pro") from loadCodeAssist; null on any failure. */
@@ -88,7 +89,7 @@ async function fetchPlanName(connection) {
         },
         body: JSON.stringify({ metadata: { ideType: 9, pluginType: 2 } }),
       },
-      { proxyUrl: connection.proxy_url }
+      { proxyUrl: requireResolvedProxy(connection) }
     );
     if (!res.ok) return null;
     const data = await res.json();

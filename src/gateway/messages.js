@@ -1,4 +1,5 @@
 import { routeRequest } from "./route.js";
+import { clientSessionKey } from "./session.js";
 import { translateResponse, createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
@@ -172,6 +173,7 @@ export async function handleMessages(c) {
       tokenSaverHeader: c.req.header("x-zenith-token-saver"),
       extraHeaders: c.req.header("anthropic-beta") ? { "anthropic-beta": c.req.header("anthropic-beta") } : null,
       baseUrlFor: upstreamBaseUrl,
+      sessionKey: clientSessionKey({ header: (n) => c.req.header(n), body, apiKeyId: c.get("apiKeyId") }),
     });
 
     if (routed.notFound) {

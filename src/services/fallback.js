@@ -13,6 +13,7 @@ import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh
 import { getSetting } from "./settings.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
+import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
 
 export function listAvailableConnections(providerId, { rotation = null, model = null } = {}) {
   if (!providerId) return [];
@@ -20,7 +21,13 @@ export function listAvailableConnections(providerId, { rotation = null, model = 
   const connections = getConnections(providerId);
 
   const available = connections.filter(
-    (c) => c.is_active === 1 && !isConnectionInCooldown(c, model) && !isConnectionExhausted(c)
+    (c) =>
+      c.is_active === 1 &&
+      !isConnectionInCooldown(c, model) &&
+      !isConnectionExhausted(c) &&
+      // F-08 AC-06: an account whose list proxy is inactive or gone is skipped
+      // here and never falls back to a direct connection.
+      !resolveConnectionProxy(c).blocked
   );
 
   const strategy = rotation || getSetting("account_rotation", "lru");
@@ -186,6 +193,7 @@ export async function executeWithFallback({
   resolveUrl,
   stream = false,
   targetModel = "",
+  sessionKey = null,
 }) {
   const modelId = targetModel || upstreamPayload?.model || "";
   const reasoningKey = `${provider.id}/${modelId}`;
@@ -218,13 +226,29 @@ export async function executeWithFallback({
 
   const triedIds = [];
   const available = listAvailableConnections(provider.id, { model: modelId });
-  const maxAttempts = Math.max(1, available.length);
+  // F-08 AC-15/AC-16: provider tanpa akun dilayani koneksi virtual. Saat
+  // strategi rotasi aktif dan ada proxy aktif, satu request mencoba sampai
+  // tiga proxy berbeda; proxy yang gagal dilewati ke berikutnya dalam request
+  // yang sama. Tanpa proxy aktif, koneksi virtual tetap memakai koneksi
+  // langsung seperti sebelumnya.
+  const virtualOnly = available.length === 1 && available[0].id === null;
+  const rotationProxies = virtualOnly
+    ? planProxyRotation(provider.id, getProxyRotationStrategy(provider.id))
+    : [];
+  const maxAttempts =
+    rotationProxies.length > 0 ? rotationProxies.length : Math.max(1, available.length);
   let lastFailureResponse = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let connection = getNextConnection(provider.id, triedIds, modelId);
-    if (!connection) break;
-    triedIds.push(connection.id);
+    let connection;
+    if (rotationProxies.length > 0) {
+      // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
+      connection = available[0];
+    } else {
+      connection = getNextConnection(provider.id, triedIds, modelId);
+      if (!connection) break;
+      triedIds.push(connection.id);
+    }
 
     // Proactive token refresh if near expiry
     if (needsTokenRefresh(connection)) {
@@ -248,6 +272,8 @@ export async function executeWithFallback({
     const headers = { ...baseHeaders };
     applyConnectionAuth(headers, connection);
     const url = resolveUrl(connection);
+    const proxyUrl =
+      rotationProxies.length > 0 ? rotationProxies[attempt - 1] ?? null : requireResolvedProxy(connection);
 
     let res;
     try {
@@ -257,11 +283,12 @@ export async function executeWithFallback({
         headers,
         body: bodyForConnection(connection),
         signal,
-        proxyUrl: connection?.proxy_url,
+        proxyUrl,
         connection,
         stream,
         targetModel,
         targetFormat,
+        sessionKey,
       });
     } catch (err) {
       if (releaseSlot) releaseSlot();
@@ -357,11 +384,12 @@ export async function executeWithFallback({
             headers,
             body: bodyForConnection(connection),
             signal,
-            proxyUrl: connection?.proxy_url,
+            proxyUrl: requireResolvedProxy(connection),
             connection,
             stream,
             targetModel,
             targetFormat,
+            sessionKey,
           });
         } catch (err) {
           if (releaseSlot) releaseSlot();

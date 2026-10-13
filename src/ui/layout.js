@@ -6,6 +6,7 @@ import pkg from "../../package.json" with { type: "json" };
 const NAV = [
   { id: "overview", label: "Overview", href: "/dashboard", icon: "home" },
   { id: "providers", label: "Providers & Combos", href: "/dashboard/providers", icon: "link" },
+  { id: "proxies", label: "Proxy Pools", href: "/dashboard/proxies", icon: "lan" },
   { id: "usage", label: "Usage & Quota", href: "/dashboard/usage", icon: "chart" },
   { id: "tokensaver", label: "Token Saver", href: "/dashboard/token-saver", icon: "bolt" },
   { id: "keys", label: "API Keys", href: "/dashboard/keys", icon: "key" },
@@ -15,6 +16,7 @@ const NAV = [
 const ICONS = {
   home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  lan: '<rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="4" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V10"/>',
   chart: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
   bolt: '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m16 7 3 3"/>',
@@ -22,10 +24,16 @@ const ICONS = {
   brain: '<path d="M12 4.6a3 3 0 0 0-5.7-1.1A2.6 2.6 0 0 0 4 6a2.5 2.5 0 0 0 .5 4.8 2.8 2.8 0 0 0 1.4 4.6A2.5 2.5 0 0 0 8.6 18H12z"/><path d="M12 4.6a3 3 0 0 1 5.7-1.1A2.6 2.6 0 0 1 20 6a2.5 2.5 0 0 1-.5 4.8 2.8 2.8 0 0 1-1.4 4.6A2.5 2.5 0 0 1 15.4 18H12z"/><path d="M12 4.6V18"/><path d="M9.2 8.2h1.4M13.4 8.2h1.4M9.2 12.4h1.4M13.4 12.4h1.4"/>',
   eye: '<path d="M2.5 12S6.5 5.5 12 5.5 21.5 12 21.5 12 17.5 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
   list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  science: '<path d="M9 3h6M10 3v6l-4 9a2 2 0 0 0 1.8 3h8.4a2 2 0 0 0 1.8-3l-4-9V3"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+  trash: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
 };
 
-function icon(name) {
-  return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+export function icon(name, size = 18) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
 }
 
 /**
@@ -234,16 +242,33 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .btn:hover { background: var(--surface-3); }
     .btn-primary { background: var(--accent); color: #0a0a0a; border-color: var(--accent); }
     .btn-primary:hover { background: #d4d4d4; }
+    .btn-secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .btn-secondary:hover { background: var(--surface-3); }
     .btn-danger { color: var(--danger); border-color: rgba(248,113,113,.35); background: transparent; }
     .btn-danger:hover { background: rgba(248,113,113,.1); }
     .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
     .btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 0.3rem; min-width: 1.9rem; min-height: 1.9rem; line-height: 1; }
     .btn-icon svg { flex-shrink: 0; }
+    /* Proxy pool rows */
+    .proxy-list { display: flex; flex-direction: column; }
+    .proxy-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 0.85rem 0.25rem; border-bottom: 1px solid var(--border-subtle); transition: background 0.12s; }
+    .proxy-row:last-child { border-bottom: none; }
+    .proxy-info { display: flex; align-items: flex-start; gap: 0.75rem; flex: 1; min-width: 0; }
+    .proxy-main { flex: 1; min-width: 0; }
+    .proxy-title-line { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
+    .proxy-name { font-weight: 600; font-size: 0.92rem; color: var(--text); }
+    .proxy-url-line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; color: var(--text-muted); word-break: break-all; margin-bottom: 0.25rem; }
+    .proxy-meta-line { font-size: 0.75rem; color: var(--text-subtle); }
+    .proxy-actions { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
+    .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 0.35rem; }
+    .bulk-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.65rem 0.9rem; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); margin-bottom: 1rem; }
     /* Forms */
     .field { margin-bottom: 0.9rem; }
     .field label { display: block; font-size: 0.8rem; color: var(--text-muted); font-weight: 500; margin-bottom: 0.3rem; }
-    input, select { width: 100%; background: #0d0d0d; border: 1px solid var(--border); color: var(--text); padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.88rem; }
-    input:focus, select:focus { outline: none; border-color: var(--text-subtle); box-shadow: 0 0 0 3px rgba(255,255,255,0.08); }
+    input, select, textarea { width: 100%; background: #0d0d0d; border: 1px solid var(--border); color: var(--text); padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.88rem; font-family: inherit; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--text-subtle); box-shadow: 0 0 0 3px rgba(255,255,255,0.08); }
+    textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
+    .textarea-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; tab-size: 2; white-space: pre; }
     select option { background: var(--surface); color: var(--text); }
     .input-select { width: auto; min-width: 140px; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); font-size: 0.85rem; }
     .btn-ghost { padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); font-size: 0.78rem; }

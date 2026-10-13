@@ -21,8 +21,24 @@ function extractAccountId(credentials) {
   return null;
 }
 
+// The ChatGPT Codex backend rejects an output budget (9router codex executor
+// drops it for the same reason), so the translator's max_output_tokens never
+// reaches it.
+function stripUnsupportedFields(body) {
+  if (typeof body !== "string") return body;
+  try {
+    const parsed = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object" || !("max_output_tokens" in parsed)) return body;
+    delete parsed.max_output_tokens;
+    return JSON.stringify(parsed);
+  } catch {
+    return body;
+  }
+}
+
 export class CodexExecutor extends BaseExecutor {
   async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel }) {
+    body = stripUnsupportedFields(body);
     const accountId = extractAccountId(connection?.credentials);
     const codexHeaders = {
       ...headers,

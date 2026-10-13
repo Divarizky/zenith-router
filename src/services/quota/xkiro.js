@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 
 const XKIRO_USAGE_URL = "https://api.xkiro.com/v1/usage";
 
@@ -28,7 +29,7 @@ export async function fetchXkiroQuota(connection) {
   const res = await oauthFetch(
     XKIRO_USAGE_URL,
     { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } },
-    { proxyUrl: connection.proxy_url }
+    { proxyUrl: requireResolvedProxy(connection) }
   );
   if (!res.ok) {
     throw new Error(`xKiro usage API returned HTTP ${res.status}`);

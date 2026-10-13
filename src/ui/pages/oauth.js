@@ -10,7 +10,7 @@ import {
   renderCallbackPage,
 } from "../../services/oauth/flows.js";
 
-const PROXY_RE = /^https?:\/\/[^\s]+$/i;
+import { validateProxyAddress } from "../../services/proxyPools.js";
 
 async function readJsonBody(c) {
   try {
@@ -27,7 +27,8 @@ export async function handleOAuthStart(c) {
   if (!provider) return c.json({ error: "Provider tidak dikenal." }, 400);
   if (!getOAuthFlow(provider.id)) return c.json({ error: "Provider ini tidak mendukung login OAuth." }, 400);
   const proxyUrl = String(body.proxy_url || "").trim();
-  if (proxyUrl && !PROXY_RE.test(proxyUrl)) return c.json({ error: "Proxy URL harus http(s)://..." }, 400);
+  const proxyError = proxyUrl ? validateProxyAddress(proxyUrl) : null;
+  if (proxyError) return c.json({ error: proxyError }, 400);
 
   try {
     const result = await startOAuthFlow({
@@ -75,7 +76,7 @@ export async function handleImportLocalLogin(c) {
   if (!provider) return c.redirect("/dashboard/providers");
   const back = `/dashboard/providers/${encodeURIComponent(provider.id)}`;
   const proxyUrl = String(body.proxy_url || "").trim();
-  if (proxyUrl && !PROXY_RE.test(proxyUrl)) return c.redirect(`${back}?notice=import_failed`);
+  if (proxyUrl && validateProxyAddress(proxyUrl)) return c.redirect(`${back}?notice=proxy_invalid`);
 
   try {
     await importLocalLogin(provider.id, { name: String(body.name || "").trim(), proxyUrl });

@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
 
 const CW_HOST = "https://codewhisperer.us-east-1.amazonaws.com";
@@ -108,7 +109,7 @@ export async function fetchKiroQuota(connection) {
             ...externalIdpHeaders,
           },
         },
-        { proxyUrl: connection.proxy_url }
+        { proxyUrl: requireResolvedProxy(connection) }
       );
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) sawAuthError = true;

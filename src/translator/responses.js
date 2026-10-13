@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
 
+// Chat Completions names a forced tool under `function`; the Responses API
+// expects the name at the top level. Strings ("auto", "none", "required") and
+// choices already in Responses shape pass through.
+function toResponsesToolChoice(choice) {
+  if (!choice) return undefined;
+  if (typeof choice === "object" && choice.type === "function" && typeof choice.function?.name === "string") {
+    return { type: "function", name: choice.function.name };
+  }
+  return choice;
+}
+
 /**
  * Translate OpenAI Chat Completions request to OpenAI Responses API format (Codex)
  */
@@ -95,15 +106,21 @@ export function openaiToResponsesRequest(body, targetModel) {
     });
   }
 
+  // The chat budget becomes the Responses field. Providers that refuse it (the
+  // Codex backend) strip it in their executor; OpenCode clamps it there.
+  const rawTokens = body.max_output_tokens ?? body.max_tokens;
+  const max_output_tokens = typeof rawTokens === "number" && !Number.isNaN(rawTokens) ? rawTokens : undefined;
+
   return {
     model: targetModel || body.model,
     input,
     instructions: instructions || undefined,
     tools,
-    tool_choice: body.tool_choice || undefined,
+    tool_choice: toResponsesToolChoice(body.tool_choice),
     stream: true, // Codex requires stream
     store: false,
     parallel_tool_calls: body.parallel_tool_calls,
+    ...(max_output_tokens !== undefined ? { max_output_tokens } : {}),
   };
 }
 

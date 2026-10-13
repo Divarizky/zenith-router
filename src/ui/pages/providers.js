@@ -1,4 +1,4 @@
-import { getConnections, addConnection, deleteConnection } from "../../db/index.js";
+import { getConnections, addConnection, deleteConnection, getConnectionById, updateConnection, getProxyPoolById } from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionFullyCooledDown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
@@ -24,6 +24,13 @@ import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
 import { renderLayout, capabilityIcons } from "../layout.js";
 import { renderCombosContent } from "./combos.js";
+import {
+  maskProxyUrl,
+  listProxyPools,
+  validateProxyAddress,
+  getProxyRotationStrategy,
+  setProxyRotationStrategy,
+} from "../../services/proxyPools.js";
 import { escapeHtml } from "../html.js";
 import { getProviderIconPath } from "../assets.js";
 
@@ -62,6 +69,14 @@ const IMPORT_MODE_LABELS = {
 function importNotice(query = {}) {
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
   if (query.notice === "account_deleted") return { ok: true, text: "Akun berhasil dihapus." };
+  if (query.notice === "proxy_invalid") {
+    return { ok: false, text: "Alamat proxy tidak valid. Gunakan skema http:// — aturan yang sama dengan daftar proxy." };
+  }
+  if (query.notice === "proxy_updated") return { ok: true, text: "Proxy akun diperbarui." };
+  if (query.notice === "rotation_updated") return { ok: true, text: "Strategi rotasi proxy diperbarui." };
+  if (query.notice === "rotation_invalid") {
+    return { ok: false, text: "Strategi rotasi tidak dikenal. Pilih Tidak aktif, Bergiliran, atau Acak." };
+  }
   if (query.notice === "import_failed") {
     return { ok: false, text: "Import gagal: login tidak ditemukan di aplikasi lokal. Login dulu di CLI/IDE provider ini." };
   }
@@ -277,10 +292,18 @@ export function renderProvidersPage(port = 20120, query = {}) {
       <a class="page-tab ${activeTab === "combos" ? "active" : ""}" href="/dashboard/providers?tab=combos">Combos</a>
     </div>`;
 
-  const content = activeTab === "combos" ? tabBar + renderCombosContent(query) : tabBar + sections;
+  const content =
+    activeTab === "combos"
+      ? tabBar + renderCombosContent(query)
+      : tabBar + sections;
 
   return renderLayout({
-    title: activeTab === "combos" ? "Combos — Zenith Router" : "Providers",
+    title:
+      activeTab === "combos"
+        ? "Combos — Zenith Router"
+        : activeTab === "proxy"
+          ? "Proxy — Zenith Router"
+          : "Providers",
     activeTab: "providers",
     content,
     port,
@@ -419,8 +442,16 @@ function renderAddAccountModal(p) {
             ${p.keyUrl ? `<p class="hint">Belum punya key? ${keyLink(p)}</p>` : ""}
           </div>
           <div class="field">
-            <label for="proxy_url">URL Proxy (Opsional)</label>
-            <input type="text" id="proxy_url" name="proxy_url" placeholder="http://127.0.0.1:7890" />
+            <label for="proxy_choice">Proxy</label>
+            <select id="proxy_choice" name="proxy_choice">
+              <option value="">Koneksi langsung</option>
+              ${listProxyPools()
+                .map((p) => `<option value="pool:${p.id}">${escapeHtml(p.name)}</option>`)
+                .join("")}
+              <option value="manual">Alamat manual…</option>
+            </select>
+            <input type="text" name="proxy_url" placeholder="http://user:pass@host:port" style="margin-top: 0.4rem;" />
+            <p class="hint">Pilih proxy daftar, isi alamat manual, atau biarkan kosong untuk koneksi langsung. Daftar diprioritaskan di atas alamat manual.</p>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn" data-close-modal="add-account-modal">Batal</button>
@@ -501,6 +532,43 @@ function renderAddAccountModal(p) {
 }
 
 /**
+ * Account row proxy cell (F-08): shows the effective binding plus an inline
+ * form to rebind it at any time. The manual address itself is never echoed.
+ */
+function accountProxyCell(c, id, pools) {
+  const poolById = new Map(pools.map((p) => [p.id, p]));
+  let label;
+  if (c.proxy_pool_id) {
+    const pool = poolById.get(c.proxy_pool_id);
+    if (!pool) label = `<span class="pill pill-danger">Proxy dihapus</span>`;
+    else if (!pool.is_active) label = `<span class="pill pill-warning">Daftar nonaktif: ${escapeHtml(pool.name)}</span>`;
+    else label = `<span class="pill pill-success">Daftar: ${escapeHtml(pool.name)}</span>`;
+  } else if (c.proxy_url) {
+    label = `<code>${escapeHtml(maskProxyUrl(c.proxy_url))}</code>`;
+  } else {
+    label = `<span class="hint">Langsung</span>`;
+  }
+  return `
+            ${label}
+            <form action="/dashboard/providers/accounts/set-proxy" method="POST" style="display: flex; gap: 0.35rem; margin-top: 0.4rem; flex-wrap: wrap;">
+              <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
+              <input type="hidden" name="provider" value="${id}" />
+              <select name="proxy_choice">
+                <option value="" ${!c.proxy_pool_id && !c.proxy_url ? "selected" : ""}>Langsung</option>
+                ${pools
+                  .map(
+                    (p) =>
+                      `<option value="pool:${p.id}" ${c.proxy_pool_id === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`
+                  )
+                  .join("")}
+                <option value="manual" ${!c.proxy_pool_id && c.proxy_url ? "selected" : ""}>Manual…</option>
+              </select>
+              <input type="text" name="proxy_url" placeholder="alamat manual baru" style="min-width: 9rem;" />
+              <button type="submit" class="btn btn-sm">Simpan</button>
+            </form>`;
+}
+
+/**
  * Provider detail: accounts, models (built-in + custom) with enable/disable.
  * Returns null when the provider id is unknown.
  */
@@ -514,6 +582,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const accounts = getConnections().filter((c) => c.provider === p.id);
   const stats = accountStats(accounts);
   const id = escapeHtml(p.id);
+  const proxyPools = listProxyPools();
+  const proxyRotationStrategy = getProxyRotationStrategy(p.id);
 
   const accountRows = accounts
     .map((c) => {
@@ -525,7 +595,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         <tr>
           <td><strong>${escapeHtml(c.name)}</strong></td>
           <td>${escapeHtml(c.auth_type)}</td>
-          <td>${c.proxy_url ? `<code>${escapeHtml(c.proxy_url)}</code>` : `<span class="hint">-</span>`}</td>
+          <td>${accountProxyCell(c, id, proxyPools)}</td>
           <td>${status}</td>
           <td class="actions">
             <form action="/dashboard/providers/accounts/delete" method="POST">
@@ -678,6 +748,31 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       ${accountsBody}
     </div>
 
+    ${
+      p.noAuth
+        ? `<div class="card">
+      <div class="card-head">
+        <h3>Rotasi Proxy</h3>
+      </div>
+      <form action="/dashboard/providers/proxy-rotation" method="POST">
+        <input type="hidden" name="provider" value="${id}" />
+        <div class="field">
+          <label for="proxy-rotation-strategy">Strategi</label>
+          <select id="proxy-rotation-strategy" name="strategy">
+            <option value="off" ${proxyRotationStrategy === "off" ? "selected" : ""}>Tidak aktif</option>
+            <option value="round_robin" ${proxyRotationStrategy === "round_robin" ? "selected" : ""}>Bergiliran</option>
+            <option value="random" ${proxyRotationStrategy === "random" ? "selected" : ""}>Acak</option>
+          </select>
+        </div>
+        <p class="hint">Saat aktif, setiap request ke provider ini memakai proxy aktif dari daftar Proxy dan pindah ke proxy berikutnya bila gagal, maksimal tiga percobaan per request. Daftar proxy aktif yang kosong berarti request tetap lewat koneksi langsung.</p>
+        <div class="modal-actions">
+          <button type="submit" class="btn btn-primary">Simpan Strategi</button>
+        </div>
+      </form>
+    </div>`
+        : ""
+    }
+
     <div class="card">
       <div class="card-head">
         <h3>Model (${totalModels})</h3>
@@ -754,9 +849,22 @@ export async function handleAddAccount(c) {
   const secret = String(body.api_key || "").trim();
   const refreshToken = String(body.refresh_token || "").trim();
   const proxy_url = body.proxy_url ? String(body.proxy_url).trim() : "";
-  const proxyValid = !proxy_url || /^https?:\/\/[^\s]+$/i.test(proxy_url);
+  // Form baru memakai proxy_choice; form lama (zrCopyAccount) hanya mengirim proxy_url.
+  const choice = body.proxy_choice !== undefined ? String(body.proxy_choice) : null;
+  let proxy_pool_id = null;
+  let manualUrl = "";
+  if (choice === null || choice === "manual") {
+    manualUrl = proxy_url;
+  } else if (choice.startsWith("pool:")) {
+    proxy_pool_id = Number(choice.slice(5)) || null;
+  }
+  // choice "" (koneksi langsung) mengabaikan proxy_url yang ikut terkirim.
+  const proxyError = manualUrl ? validateProxyAddress(manualUrl) : null;
+  const poolMissing = proxy_pool_id && !getProxyPoolById(proxy_pool_id);
 
-  if (provider && !provider.noAuth && secret && proxyValid) {
+  if (proxyError || poolMissing) return c.redirect(`${backTo(body.provider)}?notice=proxy_invalid`);
+
+  if (provider && !provider.noAuth && secret) {
     // Anthropic console keys are plain API keys (x-api-key), not OAuth tokens.
     const oauth = usesLogin(provider) && !(provider.id === "claude" && secret.startsWith("sk-ant-api"));
     let credentials = { api_key: secret };
@@ -772,11 +880,49 @@ export async function handleAddAccount(c) {
       name,
       auth_type: oauth ? "oauth" : "apikey",
       credentials,
-      proxy_url: proxy_url || null,
+      proxy_url: manualUrl || null,
+      proxy_pool_id,
     });
     return c.redirect(`${backTo(body.provider)}?notice=account_added`);
   }
   return c.redirect(backTo(body.provider));
+}
+
+export async function handleSetAccountProxy(c) {
+  const body = await c.req.parseBody();
+  const id = Number(body.id);
+  const provider = String(body.provider || "");
+  if (!getConnectionById(id)) return c.redirect(backTo(provider));
+
+  const choice = String(body.proxy_choice || "");
+  if (choice.startsWith("pool:")) {
+    const pool = getProxyPoolById(Number(choice.slice(5)));
+    if (!pool) return c.redirect(`${backTo(provider)}?notice=proxy_invalid`);
+    // Alamat manual dipertahankan; prioritas daftar membuatnya tidak berpengaruh.
+    updateConnection(id, { proxy_pool_id: pool.id });
+    return c.redirect(`${backTo(provider)}?notice=proxy_updated`);
+  }
+  if (choice === "manual") {
+    const manual = String(body.proxy_url || "").trim();
+    if (validateProxyAddress(manual)) return c.redirect(`${backTo(provider)}?notice=proxy_invalid`);
+    updateConnection(id, { proxy_pool_id: null, proxy_url: manual });
+    return c.redirect(`${backTo(provider)}?notice=proxy_updated`);
+  }
+  updateConnection(id, { proxy_pool_id: null, proxy_url: null });
+  return c.redirect(`${backTo(provider)}?notice=proxy_updated`);
+}
+
+export async function handleSetProxyRotation(c) {
+  const body = await c.req.parseBody();
+  const provider = getProvider(String(body.provider || "").trim());
+  if (!provider || !provider.noAuth) return c.redirect("/dashboard/providers");
+
+  const strategy = String(body.strategy || "");
+  if (strategy === "off" || strategy === "round_robin" || strategy === "random") {
+    setProxyRotationStrategy(provider.id, strategy);
+    return c.redirect(`${backTo(provider.id)}?notice=rotation_updated`);
+  }
+  return c.redirect(`${backTo(provider.id)}?notice=rotation_invalid`);
 }
 
 export async function handleDeleteAccount(c) {

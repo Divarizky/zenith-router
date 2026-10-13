@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
 
 /** "Weekly (7d)" / "Session (5h)" from the window length; null when unknown. */
@@ -43,7 +44,7 @@ export async function fetchCodexQuota(connection) {
     "User-Agent": "codex_cli_rs/0.159.0",
   };
 
-  const res = await oauthFetch(url, { headers }, { proxyUrl: connection.proxy_url });
+  const res = await oauthFetch(url, { headers }, { proxyUrl: requireResolvedProxy(connection) });
   if (!res.ok) {
     throw new Error(`Codex usage API returned HTTP ${res.status}`);
   }

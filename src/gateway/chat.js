@@ -1,4 +1,5 @@
 import { routeRequest } from "./route.js";
+import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
@@ -47,6 +48,7 @@ export async function handleChat(c) {
       withUsageChunk: true,
       streamOptions: body.stream_options,
       baseUrlFor: upstreamBaseUrl,
+      sessionKey: clientSessionKey({ header: (n) => c.req.header(n), body, apiKeyId: c.get("apiKeyId") }),
     });
 
     if (routed.notFound) {

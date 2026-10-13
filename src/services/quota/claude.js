@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -21,7 +22,7 @@ export async function fetchClaudeQuota(connection) {
         "anthropic-version": "2023-06-01",
       },
     },
-    { proxyUrl: connection.proxy_url }
+    { proxyUrl: requireResolvedProxy(connection) }
   );
   if (!res.ok) {
     throw new Error(`Claude usage endpoint returned HTTP ${res.status}`);

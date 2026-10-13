@@ -3,6 +3,7 @@ import { getProvider, getProviderModels } from "../providers/index.js";
 import { getExecutor } from "../executors/base.js";
 import { applyConnectionAuth } from "./auth.js";
 import { MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
+import { requireResolvedProxy } from "./proxyPools.js";
 import { capabilitiesFromApi } from "../providers/capabilities.js";
 
 const IMPORT_TIMEOUT_MS = 20000;
@@ -266,13 +267,13 @@ export async function fetchProviderModels(provider) {
       method: "GET",
       headers,
       timeoutMs: IMPORT_TIMEOUT_MS,
-      proxyUrl: connection?.proxy_url || null,
+      proxyUrl: requireResolvedProxy(connection),
     });
     if (!res.ok) return { ok: false, code: "upstream_error", status: res.status };
     let models = importer.parse(await res.json()).filter((m) => typeof m.id === "string" && m.id);
     if (importer.checkAccess) {
       const executor = getExecutor(provider.id);
-      models = await importer.checkAccess(models, { executor, headers, proxyUrl: connection?.proxy_url || null });
+      models = await importer.checkAccess(models, { executor, headers, proxyUrl: requireResolvedProxy(connection) });
     }
     return { ok: true, models };
   } catch {

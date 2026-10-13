@@ -15,6 +15,7 @@ export default {
     messagesUrl: "https://opencode.ai/zen/v1/messages",
     responsesUrl: "https://opencode.ai/zen/v1/responses",
     format: "openai",
+    forceStream: true,
     headers: {
       "x-opencode-client": "desktop",
     },

@@ -1,4 +1,5 @@
 import { routeRequest } from "./route.js";
+import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
@@ -47,7 +48,7 @@ function convertResponsesToChatBody(body) {
     tool_choice: body.tool_choice,
     temperature: body.temperature,
     top_p: body.top_p,
-    max_tokens: body.max_tokens,
+    max_tokens: body.max_tokens ?? body.max_output_tokens,
   };
 }
 
@@ -94,6 +95,7 @@ export async function handleResponses(c) {
       withUsageChunk: true,
       streamOptions: rawBody.stream_options,
       baseUrlFor: upstreamBaseUrl,
+      sessionKey: clientSessionKey({ header: (n) => c.req.header(n), body: rawBody, apiKeyId: c.get("apiKeyId") }),
     });
 
     if (routed.notFound) {

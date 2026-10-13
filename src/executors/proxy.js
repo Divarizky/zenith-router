@@ -1,26 +1,66 @@
 import http from "node:http";
 import https from "node:https";
-import net from "node:net";
 import tls from "node:tls";
 import { Readable } from "node:stream";
 
 /**
- * Execute HTTP/HTTPS fetch through an HTTP proxy without third-party dependencies
+ * Build a Proxy-Authorization header value from proxy URL userinfo, or null.
+ */
+function proxyAuthValue(proxy) {
+  if (!proxy.username || !proxy.password) return null;
+  const creds = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+  return `Basic ${Buffer.from(creds).toString("base64")}`;
+}
+
+/**
+ * Strip the proxy password and full proxy URL from an error message before it
+ * reaches the client. Returns the original error when nothing needs masking.
+ * Exported for direct unit testing.
+ */
+export function sanitizeError(err, proxy) {
+  const msg = err?.message || String(err);
+  const pass = proxy.password ? decodeURIComponent(proxy.password) : "";
+  let safe = msg;
+  // Full URL first (it contains the password), then any bare password that
+  // remains outside the URL.
+  if (proxy.href !== proxy.origin) safe = safe.replaceAll(proxy.href, proxy.origin);
+  if (pass) safe = safe.replaceAll(pass, "***");
+  if (safe === msg) return err;
+  const e = new Error(safe);
+  e.cause = err;
+  return e;
+}
+
+/**
+ * Execute HTTP/HTTPS fetch through an HTTP proxy without third-party dependencies.
+ *
+ * - Sends Proxy-Authorization when the proxy URL carries user:pass credentials.
+ * - Honors AbortSignal in every phase, including the CONNECT negotiation, so a
+ *   proxy that accepts TCP but never answers the tunnel request ends with a
+ *   timeout (via the caller's headers timeout) instead of hanging forever.
+ * - Error messages are sanitized so the proxy password never leaks to the client.
  */
 export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
   const target = new URL(targetUrl);
   const proxy = new URL(proxyUrl);
 
+  if (options.signal?.aborted) {
+    throw options.signal.reason || new Error("Request aborted");
+  }
+
   const method = (options.method || "GET").toUpperCase();
   const headers = options.headers instanceof Headers
     ? Object.fromEntries(options.headers.entries())
     : { ...(options.headers || {}) };
+  const auth = proxyAuthValue(proxy);
 
   const isHttps = target.protocol === "https:";
   const targetPort = target.port || (isHttps ? 443 : 80);
   const proxyPort = Number(proxy.port || 80);
 
   return new Promise((resolve, reject) => {
+    const fail = (err) => reject(sanitizeError(err, proxy));
+
     // If target is HTTP, send standard proxy request
     if (!isHttps) {
       const reqOptions = {
@@ -31,6 +71,7 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
         headers: {
           ...headers,
           Host: target.host,
+          ...(auth ? { "Proxy-Authorization": auth } : {}),
         },
       };
 
@@ -45,9 +86,9 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
         );
       });
 
-      req.on("error", reject);
+      req.on("error", fail);
       if (options.signal) {
-        options.signal.addEventListener("abort", () => req.destroy(new Error("Request aborted")));
+        options.signal.addEventListener("abort", () => req.destroy(new Error("Request aborted")), { once: true });
       }
       if (options.body) {
         req.write(options.body);
@@ -64,13 +105,22 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
       path: `${target.hostname}:${targetPort}`,
       headers: {
         Host: `${target.hostname}:${targetPort}`,
+        ...(auth ? { "Proxy-Authorization": auth } : {}),
       },
     });
 
+    // Abort must reach the CONNECT phase too: a proxy that accepts TCP but
+    // never answers the tunnel request would otherwise hang forever.
+    const onAbort = () => connectReq.destroy(new Error("Request aborted"));
+    if (options.signal) {
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     connectReq.on("connect", (res, socket, head) => {
+      options.signal?.removeEventListener("abort", onAbort);
       if (res.statusCode !== 200) {
         socket.destroy();
-        return reject(new Error(`Proxy CONNECT failed with HTTP ${res.statusCode}`));
+        return fail(new Error(`Proxy CONNECT failed with HTTP ${res.statusCode}`));
       }
 
       const tlsSocket = tls.connect({
@@ -99,9 +149,9 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
         );
       });
 
-      req.on("error", reject);
+      req.on("error", fail);
       if (options.signal) {
-        options.signal.addEventListener("abort", () => req.destroy(new Error("Request aborted")));
+        options.signal.addEventListener("abort", () => req.destroy(new Error("Request aborted")), { once: true });
       }
       if (options.body) {
         req.write(options.body);
@@ -109,7 +159,7 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
       req.end();
     });
 
-    connectReq.on("error", reject);
+    connectReq.on("error", fail);
     connectReq.end();
   });
 }

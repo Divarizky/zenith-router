@@ -57,6 +57,75 @@ export function claudeToOpenAIResponse(data, defaultModel = "claude") {
 }
 
 /**
+ * Normalize common parameter alias hallucinations from non-Anthropic models
+ * when calling Claude Code built-in tools. Names are matched exactly as Claude
+ * Code declares them, so clients with their own lowercase `read`/`write` tools
+ * (and their own parameter names) are left alone.
+ */
+export function normalizeClaudeToolInput(toolName, args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+  const name = String(toolName || "");
+
+  if (name === "Bash") {
+    if (args.command === undefined) {
+      const alt = args.cmd ?? args.script ?? args.command_line ?? args.commandLine ?? args.input ?? args.code;
+      if (typeof alt === "string") args.command = alt;
+    }
+    for (const k of ["cmd", "script", "command_line", "commandLine", "input", "code"]) {
+      if (args.command !== undefined && k in args) delete args[k];
+    }
+  } else if (name === "Read" || name === "Edit" || name === "Write" || name === "MultiEdit") {
+    if (args.file_path === undefined) {
+      const alt = args.path ?? args.file ?? args.filepath ?? args.filePath ?? args.filename;
+      if (typeof alt === "string") args.file_path = alt;
+    }
+    for (const k of ["path", "file", "filepath", "filePath", "filename"]) {
+      if (args.file_path !== undefined && k in args) delete args[k];
+    }
+    if (name === "Edit") {
+      if (args.old_string === undefined && typeof args.old_text === "string") args.old_string = args.old_text;
+      if (args.new_string === undefined && typeof args.new_text === "string") args.new_string = args.new_text;
+      delete args.old_text;
+      delete args.new_text;
+    }
+    if (name === "Write") {
+      if (args.content === undefined && typeof args.text === "string") args.content = args.text;
+      delete args.text;
+    }
+  } else if (name === "Glob" || name === "Grep") {
+    // Grep has a real `glob` parameter (file filter), so `glob` is an alias for
+    // the pattern only on the Glob tool.
+    const aliases = name === "Glob" ? ["query", "search", "regex", "glob"] : ["query", "search", "regex"];
+    if (args.pattern === undefined) {
+      const alt = aliases.map((k) => args[k]).find((v) => typeof v === "string");
+      if (alt !== undefined) args.pattern = alt;
+    }
+    for (const k of aliases) {
+      if (args.pattern !== undefined && k in args) delete args[k];
+    }
+    if (args.path === undefined) {
+      const alt = args.dir ?? args.directory;
+      if (typeof alt === "string") args.path = alt;
+    }
+    for (const k of ["dir", "directory"]) {
+      if (args.path !== undefined && k in args) delete args[k];
+    }
+  }
+
+  return args;
+}
+
+export function sanitizeClaudeToolArgs(toolName, argsJson) {
+  try {
+    const parsed = JSON.parse(argsJson);
+    normalizeClaudeToolInput(toolName, parsed);
+    return JSON.stringify(parsed);
+  } catch {
+    return argsJson;
+  }
+}
+
+/**
  * Convert OpenAI chat.completion JSON to Claude message JSON
  */
 export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
@@ -65,11 +134,21 @@ export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
   const content = [{ type: "text", text: typeof msg.content === "string" ? msg.content : "" }];
   if (Array.isArray(msg.tool_calls)) {
     for (const tc of msg.tool_calls) {
+      let parsed = {};
+      try {
+        parsed =
+          typeof tc.function?.arguments === "string"
+            ? JSON.parse(tc.function.arguments || "{}")
+            : tc.function?.arguments || {};
+      } catch {
+        parsed = {};
+      }
+      normalizeClaudeToolInput(tc.function?.name || "", parsed);
       content.push({
         type: "tool_use",
         id: tc.id || `call_${Date.now()}`,
         name: tc.function?.name || "tool_call",
-        input: typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments || "{}") : (tc.function?.arguments || {}),
+        input: parsed,
       });
     }
   }
@@ -108,6 +187,8 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
   let textBlockOpen = false;
   let textBlockIndex = null;
   const toolBlockIndexByOpenAI = new Map();
+  const toolNamesByIndex = new Map();
+  const toolArgBuffers = new Map();
 
   function claudeEvent(type, data) {
     return textEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -129,10 +210,23 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
   }
 
   function closeToolBlocks(controller) {
-    for (const idx of toolBlockIndexByOpenAI.values()) {
+    for (const [key, idx] of toolBlockIndexByOpenAI.entries()) {
+      const rawArgs = toolArgBuffers.get(idx);
+      if (rawArgs !== undefined && rawArgs !== "") {
+        const sanitized = sanitizeClaudeToolArgs(toolNamesByIndex.get(idx) || "", rawArgs);
+        controller.enqueue(
+          claudeEvent("content_block_delta", {
+            type: "content_block_delta",
+            index: idx,
+            delta: { type: "input_json_delta", partial_json: sanitized },
+          })
+        );
+      }
       controller.enqueue(claudeEvent("content_block_stop", { type: "content_block_stop", index: idx }));
     }
     toolBlockIndexByOpenAI.clear();
+    toolNamesByIndex.clear();
+    toolArgBuffers.clear();
   }
 
   return new TransformStream({
@@ -256,15 +350,20 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
                   if (idx === undefined) {
                     idx = nextContentIndex++;
                     toolBlockIndexByOpenAI.set(key, idx);
+                    toolNamesByIndex.set(idx, tc.function?.name || "tool_call");
+                    toolArgBuffers.set(idx, "");
                     controller.enqueue(claudeEvent("content_block_start", {
                       type: "content_block_start",
                       index: idx,
                       content_block: { type: "tool_use", id: tc.id || `toolu_${idx}`, name: tc.function?.name || "tool_call", input: {} },
                     }));
                   }
+                  if (tc.function?.name) {
+                    toolNamesByIndex.set(idx, tc.function.name);
+                  }
                   const args = tc.function?.arguments;
                   if (args) {
-                    controller.enqueue(claudeEvent("content_block_delta", { type: "content_block_delta", index: idx, delta: { type: "input_json_delta", partial_json: args } }));
+                    toolArgBuffers.set(idx, (toolArgBuffers.get(idx) || "") + args);
                   }
                 }
               }

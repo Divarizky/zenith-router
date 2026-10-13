@@ -27,6 +27,8 @@ import {
   renderProvidersPage,
   renderProviderDetailPage,
   handleAddAccount,
+  handleSetAccountProxy,
+  handleSetProxyRotation,
   handleDeleteAccount,
   handleAddCustomModel,
   handleDeleteCustomModel,
@@ -37,6 +39,18 @@ import {
   handleDeleteImported,
   handleSyncFreeModels,
 } from "./ui/pages/providers.js";
+import {
+  renderProxiesPage,
+  handleAddProxy,
+  handleImportProxies,
+  handleTestProxy,
+  handleUpdateProxy,
+  handleDeleteProxy,
+  handleToggleProxy,
+  handleBulkEnableProxies,
+  handleBulkDisableProxies,
+  handleBulkDeleteProxies,
+} from "./ui/pages/proxies.js";
 import {
   handleOAuthStart,
   handleOAuthPoll,
@@ -122,9 +136,19 @@ app.get("/", (c) => c.html(renderOverviewPage(PORT)));
 app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
 
 // Dashboard Providers: accounts + models per provider (9router-style list and detail)
-app.get("/dashboard/providers", (c) => c.html(renderProvidersPage(PORT, c.req.query())));
+app.get("/dashboard/providers", (c) => {
+  if (c.req.query("tab") === "proxy") {
+    const q = new URLSearchParams(c.req.query());
+    q.delete("tab");
+    const qs = q.toString();
+    return c.redirect(qs ? `/dashboard/proxies?${qs}` : "/dashboard/proxies");
+  }
+  return c.html(renderProvidersPage(PORT, c.req.query()));
+});
 app.post("/dashboard/providers/accounts/add", handleAddAccount);
 app.post("/dashboard/providers/accounts/delete", handleDeleteAccount);
+app.post("/dashboard/providers/accounts/set-proxy", handleSetAccountProxy);
+app.post("/dashboard/providers/proxy-rotation", handleSetProxyRotation);
 app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
 
 // OAuth login flows (9router-style): browser redirect to /callback, or device code polling
@@ -167,6 +191,27 @@ app.post("/dashboard/combos/reorder", (c) => handleReorderCombo(c));
 app.post("/dashboard/combos/rename", (c) => handleRenameCombo(c));
 app.post("/dashboard/combos/toggle", (c) => handleToggleCombo(c));
 app.post("/dashboard/combos/delete", (c) => handleDeleteCombo(c));
+
+// Dashboard Proxy Tab UI & Actions (F-08)
+// Dashboard Proxy Pools UI & Actions
+app.get("/dashboard/proxies", (c) => c.html(renderProxiesPage(PORT, c.req.query())));
+app.get("/dashboard/proxy-pools", (c) => c.redirect("/dashboard/proxies"));
+app.post("/dashboard/proxies/add", (c) => handleAddProxy(c));
+app.post("/dashboard/proxies/import", (c) => handleImportProxies(c));
+app.post("/dashboard/proxies/test", (c) => handleTestProxy(c));
+app.post("/dashboard/proxies/update", (c) => handleUpdateProxy(c));
+app.post("/dashboard/proxies/delete", (c) => handleDeleteProxy(c));
+app.post("/dashboard/proxies/toggle", (c) => handleToggleProxy(c));
+app.post("/dashboard/proxies/bulk-enable", (c) => handleBulkEnableProxies(c));
+app.post("/dashboard/proxies/bulk-disable", (c) => handleBulkDisableProxies(c));
+app.post("/dashboard/proxies/bulk-delete", (c) => handleBulkDeleteProxies(c));
+
+// Kompatibilitas mundur rute proxy lama
+app.post("/dashboard/providers/proxies/add", (c) => handleAddProxy(c));
+app.post("/dashboard/providers/proxies/import", (c) => handleImportProxies(c));
+app.post("/dashboard/providers/proxies/test", (c) => handleTestProxy(c));
+app.post("/dashboard/providers/proxies/update", (c) => handleUpdateProxy(c));
+app.post("/dashboard/providers/proxies/delete", (c) => handleDeleteProxy(c));
 
 // Dashboard API Keys UI & Actions
 app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT, null, c.req.query())));

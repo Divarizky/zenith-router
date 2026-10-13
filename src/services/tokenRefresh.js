@@ -1,6 +1,7 @@
 import { getConnectionById, getConnections, updateConnection } from "../db/index.js";
 import { logQuiet } from "./logger.js";
 import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn } from "./oauth/providers.js";
+import { requireResolvedProxy } from "./proxyPools.js";
 
 let customTokenRefresher = null;
 const inFlightRefreshes = new Map();
@@ -170,7 +171,7 @@ const REFRESHERS = {
 async function defaultRefreshHandler(connection) {
   const refresher = REFRESHERS[connection.provider];
   if (!refresher) throw new Error(`Token refresh is not supported for ${connection.provider}`);
-  return refresher(connection.credentials || {}, connection.proxy_url || null);
+  return refresher(connection.credentials || {}, requireResolvedProxy(connection));
 }
 
 /**

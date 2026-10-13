@@ -145,6 +145,7 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     stream: upstreamStream,
     targetModel,
     resolveUrl,
+    sessionKey: endpoint.sessionKey,
   });
 
   if (!result.ok) return { ok: false, response: result.response, status: result.response.status };

@@ -1,4 +1,5 @@
 import { oauthFetch } from "../oauth/providers.js";
+import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
 
 /** Used/total from one paid-plan quota snapshot. */
@@ -58,7 +59,7 @@ export async function fetchGitHubQuota(connection) {
     "X-GitHub-Api-Version": "2022-11-28",
   };
 
-  const res = await oauthFetch(url, { headers }, { proxyUrl: connection.proxy_url });
+  const res = await oauthFetch(url, { headers }, { proxyUrl: requireResolvedProxy(connection) });
   if (!res.ok) {
     throw new Error(`GitHub Copilot user API returned HTTP ${res.status}`);
   }

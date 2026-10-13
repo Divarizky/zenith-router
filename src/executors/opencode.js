@@ -1,7 +1,11 @@
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { randomBytes } from "node:crypto";
+import { prepareResponsesBody, restoreResponsesToolNames } from "./opencodeResponses.js";
 
-const OPENCODE_UA = "opencode/1.18.31";
+export const OPENCODE_UA = "opencode/1.19.0";
+export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
+export const OPENCODE_REQUEST_RE = /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
+
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 function randBase62(n) {
@@ -11,16 +15,79 @@ function randBase62(n) {
   return out;
 }
 
-function randHex(n) {
-  return randomBytes(n).toString("hex").slice(0, n);
+let lastSessionTimestamp = 0;
+let sessionCounter = 0;
+
+export function opencodeSessionId(timestamp = Date.now()) {
+  if (timestamp !== lastSessionTimestamp) {
+    lastSessionTimestamp = timestamp;
+    sessionCounter = 0;
+  }
+  sessionCounter++;
+
+  const current = BigInt(timestamp) * 0x1000n + BigInt(sessionCounter);
+  const value = ~current;
+  const time = Array.from({ length: 6 }, (_, index) =>
+    Number((value >> BigInt(40 - 8 * index)) & 0xffn)
+      .toString(16)
+      .padStart(2, "0")
+  ).join("");
+  return `ses_${time}${randBase62(14)}`;
 }
 
-export function opencodeSessionId() {
-  return `ses_${randHex(12)}${randBase62(14)}`;
+export function opencodeRequestId(timestamp = Date.now()) {
+  const current = BigInt(timestamp) * 0x1000n + 1n;
+  const time = Array.from({ length: 6 }, (_, index) =>
+    Number((current >> BigInt(40 - 8 * index)) & 0xffn)
+      .toString(16)
+      .padStart(2, "0")
+  ).join("");
+  return `msg_${time}${randBase62(14)}`;
 }
 
-export function opencodeRequestId() {
-  return `msg_${randHex(12)}${randBase62(14)}`;
+const translatedSessions = new Map();
+export const MAX_OPENCODE_SESSIONS = 1000;
+export const OPENCODE_SESSION_TTL_MS = 1800000; // 30 menit
+
+export function resetOpencodeSessionCache() {
+  translatedSessions.clear();
+}
+
+export function getOpencodeSessionCacheSize() {
+  return translatedSessions.size;
+}
+
+export function translateOpencodeSession(sessionId, clientTool = "", opts = {}) {
+  const trimmed = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (trimmed && OPENCODE_SESSION_RE.test(trimmed)) {
+    return trimmed;
+  }
+
+  const now = opts.now ?? Date.now();
+  const ttlMs = opts.ttlMs ?? OPENCODE_SESSION_TTL_MS;
+  const maxSessions = opts.maxSessions ?? MAX_OPENCODE_SESSIONS;
+
+  const key = `opencode:ses:${clientTool || "generic"}:${trimmed || "default"}`;
+  const existing = translatedSessions.get(key);
+
+  if (existing) {
+    if (now - existing.lastUsed <= ttlMs) {
+      existing.lastUsed = now;
+      translatedSessions.delete(key);
+      translatedSessions.set(key, existing);
+      return existing.sessionId;
+    }
+    translatedSessions.delete(key);
+  }
+
+  const newId = opencodeSessionId(now);
+  if (translatedSessions.size >= maxSessions) {
+    const oldestKey = translatedSessions.keys().next().value;
+    if (oldestKey !== undefined) translatedSessions.delete(oldestKey);
+  }
+
+  translatedSessions.set(key, { sessionId: newId, lastUsed: now });
+  return newId;
 }
 
 const RESPONSES_MODELS = new Set([
@@ -61,7 +128,7 @@ function ensureFingerprintTools(body, path = "/zen/v1/chat/completions") {
 }
 
 export class OpencodeExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, targetFormat }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
     let parsed = null;
     try {
       parsed = body ? JSON.parse(body) : null;
@@ -73,23 +140,30 @@ export class OpencodeExecutor extends BaseExecutor {
     else if (String(targetFormat) === "claude") path = "/zen/v1/messages";
     const finalUrl = `https://opencode.ai${path}`;
 
+    let toolNameMap = null;
     if (parsed && typeof parsed === "object") {
       ensureFingerprintTools(parsed, path);
+      parsed.stream = true;
+      if (path.endsWith("/responses")) toolNameMap = prepareResponsesBody(parsed);
       body = JSON.stringify(parsed);
     }
+
+    // Executor headers are built by the gateway and never carry client headers,
+    // so the conversation identity arrives as sessionKey (src/gateway/session.js).
+    const session = translateOpencodeSession(sessionKey || "default", "desktop");
 
     const opencodeHeaders = {
       ...headers,
       Authorization: "Bearer public",
       "User-Agent": OPENCODE_UA,
       "x-opencode-client": "desktop",
-      "x-opencode-session": headers["x-opencode-session"] || opencodeSessionId(),
-      "x-opencode-request": headers["x-opencode-request"] || opencodeRequestId(),
-      "x-opencode-project": headers["x-opencode-project"] || "global",
+      "x-opencode-session": session,
+      "x-opencode-request": opencodeRequestId(),
+      "x-opencode-project": "global",
       Accept: "text/event-stream",
     };
 
-    return super.execute({
+    const res = await super.execute({
       url: finalUrl,
       method,
       headers: opencodeHeaders,
@@ -98,6 +172,7 @@ export class OpencodeExecutor extends BaseExecutor {
       timeoutMs,
       proxyUrl,
     });
+    return restoreResponsesToolNames(res, toolNameMap);
   }
 }
 

@@ -113,7 +113,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       top: 0;
       height: 100vh;
     }
-    .brand { display: flex; align-items: center; gap: 0.75rem; padding: 0 0.5rem 1.25rem; }
+    .brand { display: flex; align-items: center; gap: 0.75rem; padding: 0 0.5rem 1rem; }
     .brand-logo {
       width: 36px; height: 36px; border-radius: 8px;
       object-fit: cover;
@@ -121,8 +121,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       background: transparent;
       flex-shrink: 0;
     }
-    .brand h1 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
-    .brand small { display: block; color: var(--text-subtle); font-size: 0.7rem; }
+    .brand h1 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; }
+    .brand small { display: block; color: var(--text-subtle); font-size: 0.72rem; font-weight: 500; }
     nav { display: flex; flex-direction: column; gap: 2px; }
     .nav-link {
       display: flex; align-items: center; gap: 0.65rem;
@@ -137,9 +137,104 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .page-tab { padding: 0.45rem 0.9rem; color: var(--text-muted); text-decoration: none; font-size: 0.88rem; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .page-tab:hover { color: var(--text); }
     .page-tab.active { color: var(--text); border-bottom-color: var(--text); }
-    .update-banner { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.6rem; border: 1px solid var(--warning, #f0b429); border-radius: 8px; background: rgba(240, 180, 41, 0.12); font-size: 0.75rem; flex-wrap: wrap; color: var(--text); }
-    .update-banner a { color: inherit; text-decoration: underline; }
-    #upgrade-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.72); color: #fff; font-size: 1rem; text-align: center; padding: 2rem; }
+    #update-badge:empty { display: none; }
+    .update-banner {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 0.45rem 0.5rem;
+      margin: 0 0.25rem 0.85rem;
+      padding: 0.65rem 0.75rem;
+      background: linear-gradient(180deg, rgba(251, 191, 36, 0.08) 0%, rgba(251, 191, 36, 0.03) 100%);
+      border: 1px solid rgba(251, 191, 36, 0.22);
+      border-radius: var(--radius);
+      font-size: 0.75rem;
+      color: var(--text);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: fadeIn 0.2s ease-in-out;
+    }
+    .update-banner > span {
+      font-weight: 600;
+      color: #fef08a;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.76rem;
+    }
+    .update-banner > span::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--warning, #fbbf24);
+      box-shadow: 0 0 8px rgba(251, 191, 36, 0.9);
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .update-banner > a {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-decoration: none;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: color 0.12s, background 0.12s, border-color 0.12s;
+      justify-self: end;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+    }
+    .update-banner > a::after {
+      content: " ↗";
+      font-size: 0.65rem;
+      opacity: 0.75;
+    }
+    .update-banner > a:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+    .update-banner > button {
+      grid-column: 1 / -1;
+      width: 100%;
+      margin-top: 0.15rem;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--warning, #fbbf24);
+      color: #1c1917;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      transition: background 0.12s, transform 0.08s;
+    }
+    .update-banner > button:hover {
+      background: #f59e0b;
+    }
+    .update-banner > button:active {
+      transform: scale(0.98);
+    }
+    #upgrade-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(6px);
+      color: #fff;
+      font-size: 0.95rem;
+      text-align: center;
+      padding: 2rem;
+    }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border-subtle); color: var(--text-subtle); font-size: 0.72rem; }
     /* Main */
     .main { flex: 1; min-width: 0; padding: 1.75rem 2rem 3rem; }
@@ -315,8 +410,12 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
   <aside class="sidebar">
     <div class="brand">
       <img src="${logoUri}" alt="Zenith Router" class="brand-logo" />
-      <div><h1>Zenith Router</h1><small>v${pkg.version}</small><span id="update-badge"></span></div>
+      <div>
+        <h1>Zenith Router</h1>
+        <small>v${pkg.version}</small>
+      </div>
     </div>
+    <div id="update-badge"></div>
     <nav>${navHtml}</nav>
     <div class="sidebar-footer">Ultra-lightweight personal AI gateway</div>
   </aside>

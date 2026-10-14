@@ -6,6 +6,7 @@ import { fetchAntigravityQuota } from "./antigravity.js";
 import { fetchGitHubQuota } from "./github.js";
 import { fetchGlmQuota } from "./glm.js";
 import { fetchOpenRouterQuota } from "./openrouter.js";
+import { fetchCommandCodeQuota } from "./commandcode.js";
 
 const QUOTA_FETCHERS = {
   codex: fetchCodexQuota,
@@ -16,6 +17,7 @@ const QUOTA_FETCHERS = {
   github: fetchGitHubQuota,
   glm: fetchGlmQuota,
   openrouter: fetchOpenRouterQuota,
+  commandcode: fetchCommandCodeQuota,
 };
 
 /**

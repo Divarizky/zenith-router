@@ -1,3 +1,5 @@
+import "../../executors/cline.js";
+
 // Cline quirks (from 9router/OmniRoute): non-streaming requests are forced to
 // stream upstream, then SSE is aggregated back into a normal completion. Some
 // non-streaming responses are wrapped in {"success":true,"data":{...}} and are
@@ -11,6 +13,9 @@ export default {
   // so sync works without an account (9router clinepassModels.js).
   freeModelSync: "merge",
   format: "openai",
+  // Envelope {"success":false} dengan HTTP 200 diubah jadi status error
+  // supaya fallback dan combo berjalan (src/executors/cline.js).
+  executor: "cline",
   transport: {
     baseUrl: "https://api.cline.bot/api/v1/chat/completions",
     forceStream: true,

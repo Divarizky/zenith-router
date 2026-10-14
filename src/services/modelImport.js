@@ -1,6 +1,6 @@
 import { getDb, getConnections } from "../db/index.js";
 import { getProvider, getProviderModels } from "../providers/index.js";
-import { getExecutor } from "../executors/base.js";
+import { getExecutor, BaseExecutor } from "../executors/base.js";
 import { applyConnectionAuth } from "./auth.js";
 import { MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { requireResolvedProxy } from "./proxyPools.js";
@@ -223,6 +223,28 @@ const IMPORTERS = {
         isFree: payloadSaysFree(m) || m.access_tier === "free" || String(m.id).endsWith(":free"),
       })),
   },
+  commandcode: {
+    url: "https://api.commandcode.ai/provider/v1/models",
+    public: true,
+    modes: ["all", "free"],
+    // CommandCodeExecutor menerjemahkan semua request ke format /alpha/generate
+    // dan menolak tanpa Authorization, jadi GET daftar model memakai transport
+    // HTTP biasa lewat BaseExecutor.
+    rawTransport: true,
+    parse: (json) =>
+      listOf(json)
+        // Model Claude hanya melayani /messages di Provider API; endpoint CLI
+        // /alpha/generate yang dipakai Zenith belum terbukti menerimanya.
+        .filter((m) => {
+          const eps = m.supported_endpoints;
+          return !Array.isArray(eps) || eps.some((e) => e !== "/messages");
+        })
+        .map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          isFree: /:free$|-free$/.test(String(m.id)),
+        })),
+  },
 };
 
 export function getImporter(providerId) {
@@ -262,7 +284,11 @@ export async function fetchProviderModels(provider) {
   applyConnectionAuth(headers, connection);
 
   try {
-    const res = await getExecutor(provider.id).execute({
+    // rawTransport: executor khusus provider (mis. CommandCodeExecutor)
+    // menulis ulang request ke format endpoint chat-nya, jadi daftar model
+    // diambil lewat transport HTTP biasa.
+    const listExecutor = importer.rawTransport ? new BaseExecutor() : getExecutor(provider.id);
+    const res = await listExecutor.execute({
       url: importer.url,
       method: "GET",
       headers,

@@ -116,6 +116,18 @@ const XKIRO = {
   },
 };
 
+const CMC_SYNC = {
+  payload: {
+    object: "list",
+    data: [
+      { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", supported_endpoints: ["/chat/completions"] },
+      { id: "stealth/glyph-cluster:free", name: "Glyph", supported_endpoints: ["/chat/completions"] },
+      { id: "poolside/laguna-s-2.1-free", name: "Laguna", supported_endpoints: ["/chat/completions"] },
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5", supported_endpoints: ["/messages"] },
+    ],
+  },
+};
+
 const ids = () => getAvailableModels({ all: true }).map((m) => m.id);
 
 test("opencode sync - live free list replaces the hardcoded list; paid Zen models excluded", async (t) => {
@@ -317,15 +329,30 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "ollama.com": { payload: { data: [{ id: "gpt-oss:120b" }] } },
     "xkiro.com": XKIRO,
   });
+  // commandcode memakai transport mentah (BaseExecutor) agar tidak ditulis
+  // ulang oleh CommandCodeExecutor; mock di sini meniru transport itu.
+  const { BaseExecutor } = await import("../src/executors/base.js");
+  const originalExecute = BaseExecutor.prototype.execute;
+  BaseExecutor.prototype.execute = async function (req) {
+    calls.push(req);
+    return new Response(JSON.stringify(CMC_SYNC.payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  t.after(() => { BaseExecutor.prototype.execute = originalExecute; });
 
   assert.strictEqual((await syncFreeModels("together")).code, "unsupported");
-  assert.strictEqual((await syncFreeModels("commandcode")).code, "unsupported");
   assert.strictEqual((await syncFreeModels("kiro")).code, "unsupported");
+  const cmc = await syncFreeModels("commandcode");
+  assert.strictEqual(cmc.code, "synced");
+  assert.strictEqual(cmc.count, 2, "hanya model :free, Claude tersaring");
 
   const results = await syncAllFreeModels();
   assert.deepStrictEqual(Object.keys(results).sort(), [
     "bazaarlink",
     "cline",
+    "commandcode",
     "freebuff",
     "glm",
     "kilocode",
@@ -335,8 +362,8 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "openrouter",
     "xkiro",
   ]);
-  // 6 public providers make calls; bazaarlink, freebuff, glm, and mistral return no_account without making calls
-  assert.strictEqual(calls.length, 6);
+  // 7 public providers make calls (+1 dari sync commandcode langsung di atas); bazaarlink, freebuff, glm, dan mistral return no_account tanpa calls
+  assert.strictEqual(calls.length, 8);
 
   disableModel("opencode", "exo-free");
   assert.ok(!ids().includes("oc/exo-free"));

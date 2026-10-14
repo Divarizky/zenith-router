@@ -7,6 +7,9 @@ export default {
   category: "oauth",
   executor: "commandcode",
   format: "openai",
+  // Model gratis (:free/-free) dari Provider API tersinkron otomatis;
+  // impor manual menawarkan mode all saja.
+  freeModelSync: "merge",
   transport: {
     baseUrl: "https://api.commandcode.ai/alpha/generate",
     format: "openai",

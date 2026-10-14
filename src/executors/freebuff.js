@@ -41,10 +41,20 @@ function generateClientSessionId() {
   return out;
 }
 
-function getClientUserAgent() {
-  const platform = process.platform === "win32" ? "win32" : process.platform;
-  const arch = process.arch === "x64" ? "x64" : process.arch;
-  return `codebuff/0.1.0 (${platform}-${arch})`;
+// Dari proxy referensi freebuff (dinarw88/freebuff-proxy): backend Codebuff
+// mem-fingerprint traffic CLI resmi dan menolak panggilan langsung dengan
+// 403 free_mode_cli_required, jadi tiap request memakai salah satu UA mirip
+// CLI resmi secara acak. Versi CLI berubah-ubah sehingga daftar diputar,
+// bukan ditiru satu versi.
+export const FREEBUFF_USER_AGENTS = [
+  "codebuff-cli/1.0.0 (Windows; Node.js v22.3.0)",
+  "codebuff-cli/1.1.2 (darwin; Node.js v22.5.1)",
+  "freebuff/0.2.4 (linux; Node.js v20.11.1)",
+  "ai-sdk/openai-compatible/1.0.25/codebuff",
+];
+
+export function randomFreebuffUA() {
+  return FREEBUFF_USER_AGENTS[randomInt(FREEBUFF_USER_AGENTS.length)];
 }
 
 function getLocalTimezone() {
@@ -55,12 +65,61 @@ function getLocalTimezone() {
   }
 }
 
+// Cache pasangan session+run per identitas klien supaya request berurutan
+// dalam satu percakapan tidak terlihat seperti session baru setiap kali.
+// Pola sama seperti cache sesi OpenCode (TTL 30 menit, 1000 LRU).
+const freebuffSessions = new Map();
+export const MAX_FREEBUFF_SESSIONS = 1000;
+export const FREEBUFF_SESSION_TTL_MS = 1800000; // 30 menit
+
+export function resetFreebuffSessionCache() {
+  freebuffSessions.clear();
+}
+
+export function getFreebuffSessionCacheSize() {
+  return freebuffSessions.size;
+}
+
+export function lookupFreebuffSession(key, opts = {}) {
+  const trimmed = typeof key === "string" ? key.trim() : "";
+  const cacheKey = `freebuff:run:${trimmed || "default"}`;
+  const now = opts.now ?? Date.now();
+  const ttlMs = opts.ttlMs ?? FREEBUFF_SESSION_TTL_MS;
+  const existing = freebuffSessions.get(cacheKey);
+  if (!existing) return null;
+  if (now - existing.lastUsed > ttlMs) {
+    freebuffSessions.delete(cacheKey);
+    return null;
+  }
+  existing.lastUsed = now;
+  freebuffSessions.delete(cacheKey);
+  freebuffSessions.set(cacheKey, existing);
+  return existing;
+}
+
+export function storeFreebuffSession(key, session, opts = {}) {
+  const trimmed = typeof key === "string" ? key.trim() : "";
+  const cacheKey = `freebuff:run:${trimmed || "default"}`;
+  const now = opts.now ?? Date.now();
+  const maxSessions = opts.maxSessions ?? MAX_FREEBUFF_SESSIONS;
+  if (freebuffSessions.size >= maxSessions && !freebuffSessions.has(cacheKey)) {
+    const oldestKey = freebuffSessions.keys().next().value;
+    if (oldestKey !== undefined) freebuffSessions.delete(oldestKey);
+  }
+  freebuffSessions.set(cacheKey, { ...session, lastUsed: now });
+}
+
+export function dropFreebuffSession(key) {
+  const trimmed = typeof key === "string" ? key.trim() : "";
+  freebuffSessions.delete(`freebuff:run:${trimmed || "default"}`);
+}
+
 export class FreebuffExecutor extends BaseExecutor {
   constructor(options = {}) {
     super(options);
   }
 
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, sessionKey = null }) {
     const rawHeaders = headers instanceof Headers ? Object.fromEntries(headers.entries()) : headers;
     const authHeader = rawHeaders["Authorization"] || rawHeaders["authorization"] || "";
 
@@ -93,20 +152,31 @@ export class FreebuffExecutor extends BaseExecutor {
     const fetcher = (targetUrl, init) =>
       proxyUrl ? proxyFetch(targetUrl, init, proxyUrl) : this.fetchFn(targetUrl, init);
 
-    const userAgent = getClientUserAgent();
     const timezone = getLocalTimezone();
 
+    // Satu UA per request (bukan per panggilan) supaya session, run, dan
+    // chat terlihat datang dari satu klien CLI yang sama.
+    const requestUA = randomFreebuffUA();
     const baseAuthHeaders = {
       Authorization: authHeader,
       "Content-Type": "application/json",
-      "User-Agent": userAgent,
+      "User-Agent": requestUA,
       "x-freebuff-client": "cli",
       "x-fb-timezone": timezone,
     };
 
     let instanceId = "";
     let runId = "";
+    // Session terikat ke model (header x-freebuff-model + agentId), jadi
+    // kunci cache mencakup model yang diminta.
+    const sessionCacheKey = `${sessionKey || "default"}::${requestedModel}`;
+    const cached = lookupFreebuffSession(sessionCacheKey);
+    if (cached) {
+      instanceId = cached.instanceId;
+      runId = cached.runId;
+    }
 
+    if (!cached) {
     // 1. Session acquisition
     try {
       const sessionRes = await fetcher("https://www.codebuff.com/api/v1/freebuff/session", {
@@ -180,6 +250,13 @@ export class FreebuffExecutor extends BaseExecutor {
         runId = runData.runId || "";
       }
     } catch {}
+    } // end if (!cached)
+
+    // Simpan pasangan baru ke cache; entri lama yang kedaluwarsa di
+    // tengah jalan dibuang supaya request berikutnya membuat yang baru.
+    if (!cached && instanceId && runId) {
+      storeFreebuffSession(sessionCacheKey, { instanceId, runId });
+    }
 
     // 3. Prepare Chat Payload & Buffy System Prompt
     const incomingMessages = Array.isArray(payload.messages)
@@ -205,11 +282,17 @@ export class FreebuffExecutor extends BaseExecutor {
         ? payload.codebuff_metadata
         : {};
 
+    // Dari proxy referensi: CLI resmi selalu mengirim penanda penolakan
+    // pengumpulan data dan sentinel stop cb_easp. Klien yang mengirim stop
+    // sendiri tidak diubah.
     const upstreamBody = {
       ...payload,
       model: requestedModel,
       messages: incomingMessages,
-      stream: payload.stream !== false,
+      // Lapis kedua di samping forceStream registry: CLI resmi selalu stream.
+      stream: true,
+      provider: { data_collection: "deny" },
+      ...("stop" in payload ? {} : { stop: ["cb_easp"] }),
       codebuff_metadata: {
         run_id: runId,
         cost_mode: "free",
@@ -222,7 +305,7 @@ export class FreebuffExecutor extends BaseExecutor {
     const completionHeaders = {
       Authorization: authHeader,
       "Content-Type": "application/json",
-      "User-Agent": "ai-sdk/openai-compatible/1.0.25/codebuff",
+      "User-Agent": requestUA,
       Accept: "application/json, text/event-stream",
       "x-freebuff-instance-id": instanceId,
       "x-freebuff-client": "cli",
@@ -269,8 +352,15 @@ export class FreebuffExecutor extends BaseExecutor {
       } catch {}
     }
 
+    // Session yang dipakai ulang tidak di-FINISH — run tetap hidup untuk
+    // request berikutnya, seperti CLI resmi. Hanya run yang baru dibuat
+    // (atau yang gagal sehingga tidak di-cache) yang dibersihkan.
+    if (!response.ok && (response.status === 401 || response.status === 403)) {
+      dropFreebuffSession(sessionCacheKey);
+    }
+
     // 5. Finish agent run (background cleanup)
-    if (runId) {
+    if (runId && !cached) {
       fetcher("https://www.codebuff.com/api/v1/agent-runs", {
         method: "POST",
         headers: baseAuthHeaders,

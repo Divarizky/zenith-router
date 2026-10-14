@@ -48,7 +48,7 @@ test("import modes - free-only import is dropped for providers that sync free mo
   assert.deepStrictEqual(getImportModes(getProvider("ollama")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("ovhcloud")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("xkiro")), ["all"]);
-  assert.deepStrictEqual(getImportModes(getProvider("commandcode")), []);
+  assert.deepStrictEqual(getImportModes(getProvider("commandcode")), ["all"], "mode free disinkron otomatis");
   assert.deepStrictEqual(getImportModes(getProvider("kiro")), []);
 });
 
@@ -215,4 +215,65 @@ test("POST /dashboard/providers/models/import/delete - removes only the selected
   });
   assert.strictEqual(other.headers.get("location"), "/dashboard/providers/glm?import=deleted&count=0");
   assert.strictEqual(listImportedModels("kilocode").length, 2);
+});
+
+const CMC_LIST = {
+  object: "list",
+  data: [
+    { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", context_length: 100000, supported_endpoints: ["/chat/completions", "/responses"] },
+    { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", context_length: 1000000, supported_endpoints: ["/messages"] },
+    { id: "stealth/glyph-cluster:free", name: "Glyph", supported_endpoints: ["/chat/completions"] },
+    { id: "xai/grok-4.7", name: "Grok 4.7", supported_endpoints: ["/chat/completions", "/responses"] },
+  ],
+};
+
+test("commandcode import - importer exists, filters messages-only models, flags free ids", async (t) => {
+  const { getImporter, fetchProviderModels } = await import("../src/services/modelImport.js");
+  const { BaseExecutor } = await import("../src/executors/base.js");
+  const importer = getImporter("commandcode");
+  assert.ok(importer, "importer commandcode terdaftar");
+  assert.strictEqual(importer.url, "https://api.commandcode.ai/provider/v1/models");
+  assert.strictEqual(importer.public, true, "endpoint daftar model publik tanpa login");
+  assert.strictEqual(importer.rawTransport, true, "GET daftar model tidak lewat CommandCodeExecutor");
+
+  const parsed = importer.parse(CMC_LIST);
+  assert.deepStrictEqual(
+    parsed.map((m) => m.id),
+    ["deepseek/deepseek-v4-pro", "stealth/glyph-cluster:free", "xai/grok-4.7"],
+    "model yang hanya melayani /messages (Claude) disaring"
+  );
+  assert.deepStrictEqual(
+    parsed.map((m) => m.isFree),
+    [false, true, false],
+    "isFree dari akhiran :free/-free"
+  );
+});
+
+test("commandcode import - full import writes imported rows without an account", async (t) => {
+  const { BaseExecutor } = await import("../src/executors/base.js");
+  const original = BaseExecutor.prototype.execute;
+  const seen = [];
+  BaseExecutor.prototype.execute = async function (req) {
+    seen.push(req);
+    return new Response(JSON.stringify(CMC_LIST), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  t.after(() => { BaseExecutor.prototype.execute = original; });
+  initDb(":memory:");
+
+  const { fetchProviderModels, importProviderModels } = await import("../src/services/modelImport.js");
+  const fetched = await fetchProviderModels(getProvider("commandcode"));
+  assert.strictEqual(fetched.ok, true);
+  assert.strictEqual(fetched.models.length, 3);
+  assert.strictEqual(seen[0].method, "GET");
+  assert.strictEqual(seen[0].url, "https://api.commandcode.ai/provider/v1/models");
+
+  assert.deepStrictEqual(getImportModes(getProvider("commandcode")), ["all"], "mode free disinkron otomatis");
+  const res = await importProviderModels("commandcode", "all");
+  assert.strictEqual(res.code, "imported");
+  // deepseek-v4-pro sudah ada di daftar statis registry, jadi hanya 2 baris baru.
+  assert.strictEqual(res.count, 2);
+  assert.deepStrictEqual(
+    listImportedModels("commandcode").map((m) => m.model_id).sort(),
+    ["stealth/glyph-cluster:free", "xai/grok-4.7"]
+  );
 });

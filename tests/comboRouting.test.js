@@ -221,6 +221,130 @@ test("combo chain - streaming reaches the client only after a member succeeds", 
   setCustomExecutor(null);
 });
 
+function sseError(message) {
+  return new Response(`data: ${JSON.stringify({ error: { message } })}\n\ndata: [DONE]\n\n`, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function sseOk(text) {
+  return new Response(
+    `data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"${text}"},"finish_reason":null}]}\n\ndata: [DONE]\n\n`,
+    { status: 200, headers: { "Content-Type": "text/event-stream" } }
+  );
+}
+
+test("combo chain - a rate limit sent inside an HTTP 200 stream hands a streaming request to the next member", async () => {
+  seedChain();
+  chainCombo();
+
+  const calls = [];
+  setCustomExecutor({
+    async execute({ url }) {
+      calls.push(url);
+      if (url.includes(MISTRAL_URL)) return sseError("Rate limit exceeded for free model");
+      return sseOk("dari anggota kedua");
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }], stream: true }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const text = await res.text();
+  assert.match(text, /dari anggota kedua/);
+  assert.doesNotMatch(text, /Rate limit exceeded/, "error anggota pertama tidak boleh sampai ke klien");
+  assert.strictEqual(calls.length, 2, "anggota kedua harus dicoba");
+
+  const conn = getDb().prepare("SELECT id FROM connections WHERE provider = 'mistral'").get();
+  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "limit di dalam stream harus mengunci model");
+  setCustomExecutor(null);
+});
+
+test("combo chain - a rate limit sent inside an HTTP 200 stream hands a non-streaming request to the next member", async () => {
+  seedChain();
+  chainCombo();
+
+  setCustomExecutor({
+    async execute({ url }) {
+      if (url.includes(MISTRAL_URL)) return sseError("Rate limit exceeded for free model");
+      return okOpenAI("dari anggota kedua");
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const data = await res.json();
+  assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
+  setCustomExecutor(null);
+});
+
+test("combo chain - an error event in the stream of a plain model request answers with an error status", async () => {
+  seedChain();
+
+  setCustomExecutor({
+    async execute() {
+      return new Response(`data: ${JSON.stringify({ error: { message: "insufficient credits", code: 402 } })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "mistral/mistral-large-latest",
+      messages: [{ role: "user", content: "halo" }],
+      stream: true,
+    }),
+  });
+
+  assert.strictEqual(res.status, 402);
+  const data = await res.json();
+  assert.strictEqual(data.error.message, "insufficient credits");
+  setCustomExecutor(null);
+});
+
+test("combo chain - a healthy stream with a leading keep-alive comment reaches the client intact", async () => {
+  seedChain();
+
+  const body =
+    ': ping\n\ndata: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo"},"finish_reason":null}]}\n\ndata: [DONE]\n\n';
+  setCustomExecutor({
+    async execute() {
+      return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "mistral/mistral-large-latest",
+      messages: [{ role: "user", content: "halo" }],
+      stream: true,
+    }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const text = await res.text();
+  assert.match(text, /: ping/);
+  assert.match(text, /"content":"halo"/);
+  assert.match(text, /\[DONE\]/);
+  setCustomExecutor(null);
+});
+
 test("combo chain - an unknown name still answers 404", async () => {
   seedChain();
 

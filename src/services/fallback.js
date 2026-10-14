@@ -14,6 +14,7 @@ import { getSetting } from "./settings.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
+import { probeStreamError } from "./streamProbe.js";
 
 export function listAvailableConnections(providerId, { rotation = null, model = null } = {}) {
   if (!providerId) return [];
@@ -290,6 +291,9 @@ export async function executeWithFallback({
         targetFormat,
         sessionKey,
       });
+      // An HTTP 200 stream whose first event is an error (rate limit, quota)
+      // must fail here, or the error reaches the client as a success.
+      res = await probeStreamError(res, signal);
     } catch (err) {
       if (releaseSlot) releaseSlot();
       throw err;
@@ -391,6 +395,7 @@ export async function executeWithFallback({
             targetFormat,
             sessionKey,
           });
+          res = await probeStreamError(res, signal);
         } catch (err) {
           if (releaseSlot) releaseSlot();
           throw err;

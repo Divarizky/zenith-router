@@ -448,3 +448,102 @@ test("Live Quota - expired OAuth token is refreshed before the quota call", asyn
     setOAuthFetch(null);
   }
 });
+
+function commandCodeFetch({ credits, subscription, subscriptionStatus = 200 }) {
+  const seen = [];
+  setOAuthFetch(async (url, init) => {
+    seen.push({ url, auth: init?.headers?.Authorization });
+    if (url.includes("/alpha/billing/credits")) return new Response(JSON.stringify(credits), { status: 200 });
+    if (url.includes("/alpha/billing/subscriptions")) {
+      return new Response(JSON.stringify(subscription || {}), { status: subscriptionStatus });
+    }
+    return new Response("Not found", { status: 404 });
+  });
+  return seen;
+}
+
+test("Live Quota - Command Code parses 5-hour and weekly windows plus credits", async () => {
+  initDb(":memory:");
+  const seen = commandCodeFetch({
+    credits: {
+      credits: { monthlyCredits: 9.5607332, purchasedCredits: 0, freeCredits: 0.5 },
+      windowLimits: {
+        limited: true,
+        exceeded: null,
+        fiveHour: { used: 0.75, cap: 3, exceeded: false, resetAt: 1791979402793 },
+        weekly: { used: 3, cap: 6, exceeded: false, resetAt: 1792566202793 },
+      },
+    },
+    subscription: { success: true, data: { status: "active", planId: "individual-go-v1" } },
+  });
+
+  const conn = addConnection({
+    provider: "commandcode",
+    name: "Command Code",
+    auth_type: "apikey",
+    credentials: { api_key: "user_mock" },
+  });
+
+  const quota = await syncProviderQuota(conn);
+  assert.strictEqual(quota.provider, "commandcode");
+  assert.strictEqual(quota.plan, "Go");
+  assert.strictEqual(quota.is_exhausted, false);
+  assert.strictEqual(quota.quotas.five_hour.remainingPercentage, 75);
+  assert.strictEqual(quota.quotas.five_hour.resetAt, new Date(1791979402793).toISOString());
+  assert.strictEqual(quota.quotas.weekly.remainingPercentage, 50);
+  assert.strictEqual(quota.quotas.credits.usedLabel, "$10.06 left");
+  assert.ok(seen.every((s) => s.auth === "Bearer user_mock"));
+  assert.ok(!isConnectionExhausted(getConnectionById(conn.id)));
+
+  setOAuthFetch(null);
+});
+
+test("Live Quota - Command Code marks the account exhausted when a window is exceeded", async () => {
+  initDb(":memory:");
+  commandCodeFetch({
+    credits: {
+      credits: { monthlyCredits: 4, purchasedCredits: 0, freeCredits: 0 },
+      windowLimits: {
+        fiveHour: { used: 3, cap: 3, exceeded: true, resetAt: 1791979402793 },
+        weekly: { used: 3, cap: 6, exceeded: false, resetAt: 1792566202793 },
+      },
+    },
+    subscriptionStatus: 500,
+  });
+
+  const conn = addConnection({
+    provider: "commandcode",
+    name: "Command Code",
+    auth_type: "apikey",
+    credentials: { api_key: "user_mock" },
+  });
+
+  const quota = await syncProviderQuota(conn);
+  assert.strictEqual(quota.is_exhausted, true);
+  assert.strictEqual(quota.plan, null, "subscription yang gagal tidak menggagalkan sync");
+  assert.strictEqual(quota.quotas.five_hour.remainingPercentage, 0);
+  assert.ok(isConnectionExhausted(getConnectionById(conn.id)));
+
+  setOAuthFetch(null);
+});
+
+test("Live Quota - Command Code with an empty balance stays usable for free models", async () => {
+  initDb(":memory:");
+  commandCodeFetch({
+    credits: { credits: { monthlyCredits: 0, purchasedCredits: 0, freeCredits: 0 }, windowLimits: { limited: false } },
+  });
+
+  const conn = addConnection({
+    provider: "commandcode",
+    name: "Command Code",
+    auth_type: "apikey",
+    credentials: { api_key: "user_mock" },
+  });
+
+  const quota = await syncProviderQuota(conn);
+  assert.strictEqual(quota.is_exhausted, false);
+  assert.strictEqual(quota.quotas.five_hour, undefined);
+  assert.strictEqual(quota.quotas.credits.usedLabel, "$0.00 left");
+
+  setOAuthFetch(null);
+});

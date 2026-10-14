@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import tls from "node:tls";
 import { Readable } from "node:stream";
 
@@ -21,14 +22,213 @@ export function sanitizeError(err, proxy) {
   const msg = err?.message || String(err);
   const pass = proxy.password ? decodeURIComponent(proxy.password) : "";
   let safe = msg;
+  const origin = proxy.origin && proxy.origin !== "null"
+    ? proxy.origin
+    : `${proxy.protocol}//${proxy.host}`;
   // Full URL first (it contains the password), then any bare password that
   // remains outside the URL.
-  if (proxy.href !== proxy.origin) safe = safe.replaceAll(proxy.href, proxy.origin);
+  if (proxy.href !== origin) safe = safe.replaceAll(proxy.href, origin);
   if (pass) safe = safe.replaceAll(pass, "***");
   if (safe === msg) return err;
   const e = new Error(safe);
   e.cause = err;
   return e;
+}
+
+export const SOCKS5_REPLY_ERRORS = {
+  0x01: "general SOCKS server failure",
+  0x02: "connection not allowed by ruleset",
+  0x03: "network unreachable",
+  0x04: "host unreachable",
+  0x05: "connection refused",
+  0x06: "TTL expired",
+  0x07: "command not supported",
+  0x08: "address type not supported",
+};
+
+/**
+ * Read exactly `length` bytes from a readable socket using Node.js paused-mode stream.
+ */
+function readExactBytes(socket, length) {
+  return new Promise((resolve, reject) => {
+    const chunk = socket.read(length);
+    if (chunk) return resolve(chunk);
+
+    const onReadable = () => {
+      const chunk = socket.read(length);
+      if (chunk) {
+        cleanup();
+        resolve(chunk);
+      }
+    };
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("SOCKS5 connection closed unexpectedly"));
+    };
+
+    function cleanup() {
+      socket.removeListener("readable", onReadable);
+      socket.removeListener("error", onError);
+      socket.removeListener("close", onClose);
+      socket.removeListener("end", onClose);
+    }
+
+    socket.on("readable", onReadable);
+    socket.on("error", onError);
+    socket.on("close", onClose);
+    socket.on("end", onClose);
+  });
+}
+
+/**
+ * Establish a TCP tunnel through a SOCKS5 proxy server (RFC 1928, RFC 1929)
+ * using Node.js built-in `node:net` without external dependencies.
+ *
+ * - Always resolves destination hostname on the proxy (ATYP 0x03 DOMAINNAME)
+ *   to prevent local DNS leaks.
+ * - Supports anonymous (0x00) and username/password (0x02) authentication.
+ * - Honors AbortSignal during connection, greeting, auth, and connect command.
+ */
+export async function connectSocks5({ proxy, targetHost, targetPort, signal }) {
+  const proxyUrl = typeof proxy === "string" ? new URL(proxy) : proxy;
+  if (signal?.aborted) {
+    throw signal.reason || new Error("Request aborted");
+  }
+
+  const proxyPort = Number(proxyUrl.port || 1080);
+  const proxyHost = proxyUrl.hostname;
+
+  const socket = new net.Socket();
+
+  let onAbort = null;
+  if (signal) {
+    onAbort = () => socket.destroy(signal.reason || new Error("Request aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
+    await new Promise((resolve, reject) => {
+      const onConnect = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err) => {
+        cleanup();
+        reject(err);
+      };
+      const onClose = () => {
+        cleanup();
+        reject(new Error("SOCKS5 connection closed during connect"));
+      };
+      function cleanup() {
+        socket.removeListener("connect", onConnect);
+        socket.removeListener("error", onError);
+        socket.removeListener("close", onClose);
+      }
+      socket.once("connect", onConnect);
+      socket.once("error", onError);
+      socket.once("close", onClose);
+      socket.connect(proxyPort, proxyHost);
+    });
+
+    // 1. Send greeting
+    const hasAuth = Boolean(proxyUrl.username || proxyUrl.password);
+    const greeting = hasAuth
+      ? Buffer.from([0x05, 0x02, 0x00, 0x02])
+      : Buffer.from([0x05, 0x01, 0x00]);
+    socket.write(greeting);
+
+    const greetingRes = await readExactBytes(socket, 2);
+    if (greetingRes[0] !== 0x05) {
+      throw new Error(`Invalid SOCKS5 greeting version: 0x${greetingRes[0].toString(16)}`);
+    }
+    const chosenMethod = greetingRes[1];
+    if (chosenMethod === 0xff) {
+      throw new Error("SOCKS5 authentication method negotiation failed (no acceptable methods)");
+    }
+
+    // 2. Authenticate if required
+    if (chosenMethod === 0x02) {
+      const username = decodeURIComponent(proxyUrl.username || "");
+      const password = decodeURIComponent(proxyUrl.password || "");
+      const uBuf = Buffer.from(username);
+      const pBuf = Buffer.from(password);
+      if (uBuf.length > 255 || pBuf.length > 255) {
+        throw new Error("SOCKS5 username and password must be <= 255 bytes");
+      }
+      const authReq = Buffer.concat([
+        Buffer.from([0x01, uBuf.length]),
+        uBuf,
+        Buffer.from([pBuf.length]),
+        pBuf,
+      ]);
+      socket.write(authReq);
+
+      const authRes = await readExactBytes(socket, 2);
+      if (authRes[1] !== 0x00) {
+        throw new Error(`SOCKS5 authentication failed with status ${authRes[1]}`);
+      }
+    } else if (chosenMethod !== 0x00) {
+      throw new Error(`Unsupported SOCKS5 auth method selected by server: 0x${chosenMethod.toString(16)}`);
+    }
+
+    // 3. Send CONNECT request with domain name (ATYP 0x03)
+    const domainBuf = Buffer.from(targetHost);
+    if (domainBuf.length > 255) {
+      throw new Error("Target host length must be <= 255 bytes for SOCKS5 domain name");
+    }
+    const portBuf = Buffer.alloc(2);
+    portBuf.writeUInt16BE(Number(targetPort), 0);
+    const connectReq = Buffer.concat([
+      Buffer.from([0x05, 0x01, 0x00, 0x03, domainBuf.length]),
+      domainBuf,
+      portBuf,
+    ]);
+    socket.write(connectReq);
+
+    // 4. Read CONNECT response
+    const head = await readExactBytes(socket, 4);
+    if (head[0] !== 0x05) {
+      throw new Error(`Invalid SOCKS5 connect response version: 0x${head[0].toString(16)}`);
+    }
+    const rep = head[1];
+    if (rep !== 0x00) {
+      const errMsg = SOCKS5_REPLY_ERRORS[rep] || `error code 0x${rep.toString(16)}`;
+      throw new Error(`SOCKS5 connect failed: ${errMsg}`);
+    }
+
+    const atyp = head[3];
+    let remaining = 0;
+    if (atyp === 0x01) {
+      remaining = 6; // 4 bytes IPv4 + 2 bytes port
+    } else if (atyp === 0x04) {
+      remaining = 18; // 16 bytes IPv6 + 2 bytes port
+    } else if (atyp === 0x03) {
+      const lenBuf = await readExactBytes(socket, 1);
+      remaining = lenBuf[0] + 2;
+    } else {
+      throw new Error(`Unsupported SOCKS5 address type: 0x${atyp.toString(16)}`);
+    }
+
+    if (remaining > 0) {
+      await readExactBytes(socket, remaining);
+    }
+
+    if (onAbort && signal) {
+      signal.removeEventListener("abort", onAbort);
+    }
+    return socket;
+  } catch (err) {
+    if (onAbort && signal) {
+      signal.removeEventListener("abort", onAbort);
+    }
+    socket.destroy();
+    throw err;
+  }
 }
 
 /**

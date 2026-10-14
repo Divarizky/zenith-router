@@ -16,6 +16,9 @@ export default {
   transport: {
     baseUrl: "https://www.codebuff.com/api/v1/chat/completions",
     format: "openai",
+    // Seperti opencode: backend free tier menolak request non-stream,
+    // gateway mengagregasi SSE untuk klien non-stream secara transparan.
+    forceStream: true,
   },
   models: [
     { id: "mimo/mimo-v2.5", name: "MiMo 2.6 Flash (Default)" },

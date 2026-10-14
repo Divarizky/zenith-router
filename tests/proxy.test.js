@@ -3,7 +3,7 @@ import assert from "node:assert";
 import http from "node:http";
 import net from "node:net";
 import { BaseExecutor } from "../src/executors/base.js";
-import { proxyFetch } from "../src/executors/proxy.js";
+import { proxyFetch, connectSocks5, sanitizeError } from "../src/executors/proxy.js";
 
 test("proxyFetch - routes HTTP request through proxy server", async () => {
   let proxyHit = false;
@@ -273,7 +273,6 @@ test("proxyFetch - error messages never contain the proxy password", async () =>
 });
 
 test("sanitizeError - masks password and full proxy URL in error messages", async () => {
-  const { sanitizeError } = await import("../src/executors/proxy.js");
   const proxy = new URL("http://alice:S3cretP4ss@127.0.0.1:9999");
   const masked = sanitizeError(
     new Error("upstream via http://alice:S3cretP4ss@127.0.0.1:9999/ failed"),
@@ -286,7 +285,225 @@ test("sanitizeError - masks password and full proxy URL in error messages", asyn
   );
   assert.ok(masked.message.includes("http://127.0.0.1:9999"), "origin should remain");
   assert.strictEqual(masked.cause.message.includes("S3cretP4ss"), true, "cause preserves original");
+
+  // SOCKS5 URLs (where origin is null in WHATWG URL) should also preserve scheme and host without leaking password
+  const socksProxy = new URL("socks5://alice:S3cretP4ss@127.0.0.1:1080");
+  const socksMasked = sanitizeError(
+    new Error("connect via socks5://alice:S3cretP4ss@127.0.0.1:1080 failed"),
+    socksProxy
+  );
+  assert.ok(!socksMasked.message.includes("S3cretP4ss"), `password leaked: ${socksMasked.message}`);
+  assert.ok(socksMasked.message.includes("socks5://127.0.0.1:1080"), "origin should remain for socks5");
+
   // Without a password nothing is rewritten and the original error is returned.
   const plain = new Error("connect ECONNREFUSED 127.0.0.1:9999");
   assert.strictEqual(sanitizeError(plain, new URL("http://127.0.0.1:9999")), plain);
+});
+
+function createMockSocks5Server({ onConnect, expectedUser, expectedPass, rejectCode } = {}) {
+  return net.createServer((socket) => {
+    let stage = "greeting";
+    let buffer = Buffer.alloc(0);
+
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      if (stage === "greeting") {
+        if (buffer.length < 2) return;
+        const nMethods = buffer[1];
+        if (buffer.length < 2 + nMethods) return;
+        const methods = buffer.subarray(2, 2 + nMethods);
+        buffer = buffer.subarray(2 + nMethods);
+
+        if (expectedUser) {
+          if (!methods.includes(0x02)) {
+            socket.write(Buffer.from([0x05, 0xff]));
+            return socket.destroy();
+          }
+          socket.write(Buffer.from([0x05, 0x02]));
+          stage = "auth";
+        } else {
+          socket.write(Buffer.from([0x05, 0x00]));
+          stage = "connect";
+        }
+      }
+
+      if (stage === "auth") {
+        if (buffer.length < 2) return;
+        const uLen = buffer[1];
+        if (buffer.length < 2 + uLen + 1) return;
+        const user = buffer.subarray(2, 2 + uLen).toString();
+        const pLen = buffer[2 + uLen];
+        if (buffer.length < 2 + uLen + 1 + pLen) return;
+        const pass = buffer.subarray(2 + uLen + 1, 2 + uLen + 1 + pLen).toString();
+        buffer = buffer.subarray(2 + uLen + 1 + pLen);
+
+        if (user === expectedUser && pass === expectedPass) {
+          socket.write(Buffer.from([0x01, 0x00]));
+          stage = "connect";
+        } else {
+          socket.write(Buffer.from([0x01, 0x01]));
+          return socket.destroy();
+        }
+      }
+
+      if (stage === "connect") {
+        if (buffer.length < 4) return;
+        const atyp = buffer[3];
+        let targetHost = "";
+        let targetPort = 0;
+        let headLen = 0;
+
+        if (atyp === 0x03) {
+          if (buffer.length < 5) return;
+          const dLen = buffer[4];
+          if (buffer.length < 5 + dLen + 2) return;
+          targetHost = buffer.subarray(5, 5 + dLen).toString();
+          targetPort = buffer.readUInt16BE(5 + dLen);
+          headLen = 5 + dLen + 2;
+        } else if (atyp === 0x01) {
+          if (buffer.length < 10) return;
+          targetHost = `${buffer[4]}.${buffer[5]}.${buffer[6]}.${buffer[7]}`;
+          targetPort = buffer.readUInt16BE(8);
+          headLen = 10;
+        }
+        buffer = buffer.subarray(headLen);
+
+        if (rejectCode) {
+          socket.write(Buffer.from([0x05, rejectCode, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+          return socket.destroy();
+        }
+
+        socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x1f, 0x90]));
+        stage = "piped";
+        if (onConnect) onConnect({ targetHost, targetPort, socket, remaining: buffer });
+      }
+    });
+  });
+}
+
+test("connectSocks5 - connects anonymously and sends ATYP 0x03 domain name", async () => {
+  let connectedTarget = null;
+  const server = createMockSocks5Server({
+    onConnect: ({ targetHost, targetPort, socket }) => {
+      connectedTarget = { targetHost, targetPort };
+      socket.write(Buffer.from("HELLO_FROM_SOCKS5"));
+    },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  try {
+    const socket = await connectSocks5({
+      proxy: `socks5://127.0.0.1:${port}`,
+      targetHost: "opencode.ai",
+      targetPort: 443,
+    });
+
+    assert.strictEqual(connectedTarget.targetHost, "opencode.ai");
+    assert.strictEqual(connectedTarget.targetPort, 443);
+
+    const received = await new Promise((resolve) => {
+      socket.once("data", (chunk) => resolve(chunk.toString()));
+    });
+    assert.strictEqual(received, "HELLO_FROM_SOCKS5");
+    socket.destroy();
+  } finally {
+    server.close();
+  }
+});
+
+test("connectSocks5 - authenticates with username and password (RFC 1929)", async () => {
+  let authSuccess = false;
+  const server = createMockSocks5Server({
+    expectedUser: "warpuser",
+    expectedPass: "warppass",
+    onConnect: ({ socket }) => {
+      authSuccess = true;
+      socket.write(Buffer.from("AUTH_OK"));
+    },
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  try {
+    const socket = await connectSocks5({
+      proxy: `socks5://warpuser:warppass@127.0.0.1:${port}`,
+      targetHost: "api.example.com",
+      targetPort: 443,
+    });
+
+    assert.strictEqual(authSuccess, true);
+    const data = await new Promise((resolve) => socket.once("data", (c) => resolve(c.toString())));
+    assert.strictEqual(data, "AUTH_OK");
+    socket.destroy();
+  } finally {
+    server.close();
+  }
+});
+
+test("connectSocks5 - rejects on auth failure or server refusal", async () => {
+  const server = createMockSocks5Server({
+    expectedUser: "validuser",
+    expectedPass: "validpass",
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  try {
+    await assert.rejects(
+      connectSocks5({
+        proxy: `socks5://wronguser:wrongpass@127.0.0.1:${port}`,
+        targetHost: "api.example.com",
+        targetPort: 443,
+      }),
+      /SOCKS5 authentication failed/
+    );
+  } finally {
+    server.close();
+  }
+
+  const refuseServer = createMockSocks5Server({ rejectCode: 0x05 }); // connection refused
+  await new Promise((resolve) => refuseServer.listen(0, "127.0.0.1", resolve));
+  const refusePort = refuseServer.address().port;
+
+  try {
+    await assert.rejects(
+      connectSocks5({
+        proxy: `socks5://127.0.0.1:${refusePort}`,
+        targetHost: "api.example.com",
+        targetPort: 443,
+      }),
+      /connection refused/
+    );
+  } finally {
+    refuseServer.close();
+  }
+});
+
+test("connectSocks5 - abort signal cancels handshake promptly", async () => {
+  const server = net.createServer(() => {
+    // Deliberately hold connection without replying
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  try {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(new Error("Handshake timeout")), 50);
+
+    await assert.rejects(
+      connectSocks5({
+        proxy: `socks5://127.0.0.1:${port}`,
+        targetHost: "api.example.com",
+        targetPort: 443,
+        signal: ac.signal,
+      }),
+      /Handshake timeout/
+    );
+  } finally {
+    server.close();
+  }
 });

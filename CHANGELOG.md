@@ -2,6 +2,39 @@
 
 Semua perubahan penting Zenith Router dicatat di sini. Format mengikuti [Keep a Changelog](https://keepachangelog.com/id/1.1.0/), versi memakai [Semantic Versioning](https://semver.org/lang/id/).
 
+## [0.1.4] - 14-10-2026
+
+Pemeriksaan kuota live Command Code, failover combo pada error stream SSE, dukungan proxy SOCKS5 native, fingerprinting Freebuff, dan penyegaran UI update banner.
+
+### Kuota & Penggunaan
+
+- Fetcher kuota live Command Code (`src/services/quota/commandcode.js`) membaca endpoint `/alpha/billing/credits` dan `/alpha/billing/subscriptions` Command Code API dengan bearer auth.
+- Visualisasi di kartu Usage: menampilkan batas jendela 5 jam ("5-hour") dan mingguan ("Weekly") lengkap dengan persentase pemakaian dan hitung mundur reset, saldo kredit ("Credits"), serta pill nama paket langganan (seperti "Go", "Pro", "Ultra").
+- Akun ditandai habis (`is_exhausted`) otomatis hanya jika flag `exceeded` aktif pada jendela; saldo kredit kosong tidak mengunci model gratis.
+
+### Routing & Failover Combo
+
+- Probe error stream SSE (`src/services/streamProbe.js`): mendeteksi error upstream yang dikirim dengan status HTTP 200 di dalam stream SSE (seperti rate-limit atau quota error dari Cline).
+- Respons stream yang sehat di-replay utuh tanpa latensi tambahan bagi klien; jika event pertama berisi error, payload diubah menjadi status HTTP error (429/401/502).
+- Failover combo dan mekanisme cooldown akun terpicu saat anggota stream pertama gagal, alih-alih menampilkan error mentah ke pengguna.
+- Normalisasi envelope error Cline (`src/executors/cline.js`) berstatus HTTP 200 `{"success":false,"error":{...}}` menjadi respons error HTTP formal.
+
+### Jaringan & Transport Proxy
+
+- Dukungan proxy SOCKS5 native (`src/executors/proxy.js`) mengikuti RFC 1928 dan RFC 1929 menggunakan `node:net` bawaan tanpa dependensi eksternal.
+- Resolusi alamat target melalui proxy (ATYP `0x03` DOMAINNAME) untuk mencegah kebocoran DNS lokal.
+- Mendukung autentikasi username/password (metode `0x02`) maupun koneksi tanpa autentikasi (`0x00`), serta pembatalan melalui `AbortSignal`.
+
+### Penyedia & Eksekutor
+
+- Pengerasan Freebuff (`src/executors/freebuff.js`): cache sesi stabil in-memory (TTL 30 menit, kapasitas 1000 entri LRU) per pasangan model dan kunci sesi, rotasi User-Agent CLI resmi acak, header penolakan pengumpulan data (`provider: { data_collection: "deny" }`), dan sentinel stop `cb_easp` untuk mencegah error 403 `free_mode_cli_required`.
+- Pembaruan impor model Command Code (`src/services/modelImport.js`): pengambilan daftar model via `rawTransport` (HTTP langsung) dan penyaringan model `/messages` Claude yang belum didukung endpoint generate.
+
+### Tampilan & Pengujian
+
+- Desain ulang update banner sidebar (`src/ui/layout.js`) dengan badge indikator, kontras yang lebih tajam, dan tombol aksi pembaruan langsung.
+- Total 496 test (32 test baru) 100% lulus.
+
 ## [0.1.3] - 14-10-2026
 
 Manajemen Proxy Pool mandiri, rotasi proxy provider tanpa akun, pembaruan protokol OpenCode 1.19.0, dan normalisasi tool Claude Code.

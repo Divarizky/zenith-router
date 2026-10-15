@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { initDb, addConnection, getConnectionById } from "../src/db/index.js";
+import { initDb, addConnection, getConnectionById, mergeConnectionCredentials } from "../src/db/index.js";
 import {
   needsTokenRefresh,
   refreshOAuthToken,
@@ -83,6 +83,34 @@ test("tokenRefresh - refreshOAuthToken updates SQLite with new token", async () 
   assert.strictEqual(inDb.credentials.access_token, "newly_minted_access_token");
 
   setCustomTokenRefresher(null);
+});
+
+test("tokenRefresh - refresh keeps credentials written while it was in flight", async () => {
+  initDb(":memory:");
+
+  const conn = addConnection({
+    provider: "claude",
+    name: "Claude User",
+    auth_type: "oauth",
+    credentials: { access_token: "old", refresh_token: "keep-me", expires_at: Date.now() - 1000 },
+  });
+
+  setCustomTokenRefresher(async () => {
+    // A quota sync finishes while the token endpoint is still answering.
+    mergeConnectionCredentials(conn.id, { quota: { remaining: 7 } });
+    return { access_token: "fresh", expires_at: Date.now() + 3600 * 1000 };
+  });
+
+  try {
+    await refreshOAuthToken(conn);
+  } finally {
+    setCustomTokenRefresher(null);
+  }
+
+  const inDb = getConnectionById(conn.id);
+  assert.strictEqual(inDb.credentials.access_token, "fresh");
+  assert.strictEqual(inDb.credentials.refresh_token, "keep-me");
+  assert.strictEqual(inDb.credentials.quota.remaining, 7);
 });
 
 test("tokenRefresh - scanAndRefreshTokens renews all near-expiry accounts", async () => {

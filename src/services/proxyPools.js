@@ -171,12 +171,14 @@ export async function testProxyPool(id) {
   let ok = false;
   let error = null;
   try {
-    await proxyFetch(
+    const res = await proxyFetch(
       PROXY_TEST_URL,
       { method: "GET", signal: AbortSignal.timeout(PROXY_TEST_TIMEOUT_MS) },
       pool.url
     );
     ok = true;
+    // Only the status matters; drop the body so the socket is not left open.
+    await res?.body?.cancel().catch(() => {});
   } catch (err) {
     error = String(err?.message || err);
   }

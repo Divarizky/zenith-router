@@ -124,6 +124,171 @@ export function openaiToResponsesRequest(body, targetModel) {
   };
 }
 
+// Text of a Responses content value (string or part array), for roles and
+// outputs that Chat Completions only accepts as plain text.
+function responsesText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (typeof part === "string" ? part : typeof part?.text === "string" ? part.text : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function responsesPartToChat(part) {
+  if (typeof part === "string") return { type: "text", text: part };
+  if (!part || typeof part !== "object") return null;
+  if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+    return { type: "text", text: part.text || "" };
+  }
+  if (part.type === "input_image") {
+    const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
+    if (!url) return null;
+    return { type: "image_url", image_url: part.detail ? { url, detail: part.detail } : { url } };
+  }
+  if (part.type === "image_url") return part;
+  return null;
+}
+
+// User content keeps its parts only when an image needs them; plain text is
+// sent as a string, which every Chat Completions upstream accepts.
+function responsesUserContent(content) {
+  if (!Array.isArray(content)) return typeof content === "string" ? content : "";
+  const parts = content.map(responsesPartToChat).filter(Boolean);
+  if (parts.some((p) => p.type === "image_url")) return parts;
+  return parts.map((p) => p.text).join("\n");
+}
+
+function responsesToolToChat(tool) {
+  if (tool?.type === "function" && !tool.function && typeof tool.name === "string") {
+    const fn = { name: tool.name };
+    if (tool.description) fn.description = tool.description;
+    if (tool.parameters) fn.parameters = tool.parameters;
+    if (tool.strict !== undefined) fn.strict = tool.strict;
+    return { type: "function", function: fn };
+  }
+  return tool;
+}
+
+function responsesToolChoiceToChat(choice) {
+  if (choice && typeof choice === "object" && choice.type === "function" && typeof choice.name === "string") {
+    return { type: "function", function: { name: choice.name } };
+  }
+  return choice;
+}
+
+/**
+ * Translate an OpenAI Responses API request into Chat Completions, the pivot
+ * format. The inverse of openaiToResponsesRequest: function_call items become
+ * assistant tool_calls, function_call_output items become tool messages, and
+ * input_image parts become image_url parts. Reasoning items are dropped, since
+ * Chat Completions has no place for them.
+ */
+export function responsesToOpenAIRequest(body) {
+  if (!body) return {};
+  const messages = [];
+
+  if (body.instructions) {
+    messages.push({ role: "system", content: body.instructions });
+  }
+
+  const items = typeof body.input === "string" ? [body.input] : Array.isArray(body.input) ? body.input : [];
+  for (const item of items) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      messages.push({ role: "user", content: item });
+      continue;
+    }
+    if (typeof item !== "object") continue;
+
+    if (item.type === "function_call") {
+      const call = {
+        id: item.call_id || item.id || `call_${randomUUID().slice(0, 8)}`,
+        type: "function",
+        function: {
+          name: item.name || "unknown",
+          arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || {}),
+        },
+      };
+      // Parallel calls arrive as consecutive items; they share one assistant turn.
+      const last = messages[messages.length - 1];
+      if (last?.role === "assistant" && Array.isArray(last.tool_calls)) last.tool_calls.push(call);
+      else if (last?.role === "assistant" && !last.tool_calls) last.tool_calls = [call];
+      else messages.push({ role: "assistant", content: null, tool_calls: [call] });
+      continue;
+    }
+
+    if (item.type === "function_call_output") {
+      messages.push({
+        role: "tool",
+        tool_call_id: item.call_id || "",
+        content: typeof item.output === "string" ? item.output : responsesText(item.output) || JSON.stringify(item.output ?? ""),
+      });
+      continue;
+    }
+
+    if (item.type && item.type !== "message") continue; // reasoning and other non-message items
+
+    const role = item.role === "developer" ? "system" : item.role || "user";
+    if (role === "user") {
+      messages.push({ role, content: responsesUserContent(item.content) });
+    } else {
+      messages.push({ role, content: responsesText(item.content) });
+    }
+  }
+
+  if (messages.length === 0) {
+    messages.push({ role: "user", content: " " });
+  }
+
+  const tools = Array.isArray(body.tools) && body.tools.length > 0 ? body.tools.map(responsesToolToChat) : undefined;
+
+  return {
+    model: body.model,
+    messages,
+    stream: Boolean(body.stream),
+    tools,
+    tool_choice: responsesToolChoiceToChat(body.tool_choice),
+    parallel_tool_calls: tools ? body.parallel_tool_calls : undefined,
+    temperature: body.temperature,
+    top_p: body.top_p,
+    max_tokens: body.max_tokens ?? body.max_output_tokens,
+  };
+}
+
+/**
+ * The `output` array of a non-streaming Responses API reply, built from a Chat
+ * Completions message: its text as a message item, each tool call as a
+ * function_call item.
+ */
+export function openAIMessageToResponsesOutput(message) {
+  const output = [];
+  const text = typeof message?.content === "string" ? message.content : responsesText(message?.content);
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+
+  if (text || toolCalls.length === 0) {
+    output.push({
+      type: "message",
+      id: `msg_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+      status: "completed",
+      role: "assistant",
+      content: [{ type: "output_text", text: text || "", annotations: [] }],
+    });
+  }
+  for (const call of toolCalls) {
+    const args = call.function?.arguments;
+    output.push({
+      type: "function_call",
+      id: `fc_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+      call_id: call.id || `call_${randomUUID().slice(0, 8)}`,
+      name: call.function?.name || "unknown",
+      arguments: typeof args === "string" ? args : JSON.stringify(args || {}),
+      status: "completed",
+    });
+  }
+  return output;
+}
+
 /**
  * Transform Responses API SSE events to standard OpenAI Chat Completion chunks
  */

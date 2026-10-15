@@ -20,6 +20,13 @@ let execFn = defaultExec;
 let runnerFn = defaultRunner;
 let selfExitFn = defaultSelfExit;
 let capabilityCache = null;
+// Folder log dan backup default. Test mengarahkannya ke folder sementara agar
+// tidak pernah menulis ke data/ milik instalasi yang sedang dipakai.
+let dataDir = path.join(PROJECT_ROOT, "data");
+
+export function setUpgradeDataDir(dir) {
+  dataDir = dir || path.join(PROJECT_ROOT, "data");
+}
 
 export function setUpgradeExec(fn) {
   execFn = fn || defaultExec;
@@ -66,14 +73,11 @@ function defaultSelfExit(delayMs) {
   setTimeout(() => process.exit(0), delayMs).unref();
 }
 
-function logFile(repoDir = PROJECT_ROOT) {
-  return path.join(repoDir, "data", "updater.log");
-}
-
-function logLine(message, repoDir = PROJECT_ROOT) {
+function logLine(message) {
+  const file = path.join(dataDir, "updater.log");
   try {
-    fs.mkdirSync(path.dirname(logFile(repoDir)), { recursive: true });
-    fs.appendFileSync(logFile(repoDir), `[${new Date().toISOString()}] ${message}\n`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${message}\n`);
   } catch {
     // Log terbaik-saat-bisa; kegagalan menulis tidak boleh menggagalkan upgrade.
   }
@@ -116,7 +120,7 @@ async function tagExists(tag) {
  * Snapshot konsisten database lewat VACUUM INTO — aman walau koneksi masih
  * terbuka, dan menghasilkan file tunggal tanpa WAL yang menggantung.
  */
-export function backupDatabase(fromVersion, backupDir = path.join(PROJECT_ROOT, "data", "backups")) {
+export function backupDatabase(fromVersion, backupDir = path.join(dataDir, "backups")) {
   fs.mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const target = path.join(backupDir, `zenith-${fromVersion}-${stamp}.db`);

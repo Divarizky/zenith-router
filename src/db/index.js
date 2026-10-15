@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS usage_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_connection ON usage_history (connection_id, timestamp);
+-- Usage stats filter on a time window and the recent panel sorts by time.
+CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_history (timestamp);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -369,6 +371,24 @@ export function updateConnection(id, fields = {}) {
   `);
 
   stmt.run(name, auth_type, credentials, proxy_url, proxy_pool_id, is_active, Number(id));
+  return getConnectionById(id);
+}
+
+/**
+ * Merge `patch` into the stored credentials and return the updated connection.
+ *
+ * Callers that awaited the network (token refresh, quota sync) must use this
+ * instead of writing back their own snapshot: the read and the write happen in
+ * one synchronous step, so a refresh token rotated meanwhile by another task is
+ * kept rather than overwritten with a stale one.
+ */
+export function mergeConnectionCredentials(id, patch = {}) {
+  const current = getConnectionById(id);
+  if (!current) return null;
+  const credentials = { ...(current.credentials || {}), ...patch };
+  getDb()
+    .prepare(`UPDATE connections SET credentials = ? WHERE id = ?`)
+    .run(JSON.stringify(credentials), Number(id));
   return getConnectionById(id);
 }
 

@@ -23,7 +23,9 @@ export function getLocalBaseUrl(port) {
 export function isLoopbackHost(host) {
   if (!host) return false;
   const h = String(host).toLowerCase();
-  return LOOPBACK_HOSTNAMES.has(h) || h.startsWith("127.");
+  // Only a literal 127.x.x.x address: a domain like 127.attacker.example can be
+  // rebound to 127.0.0.1 and must not pass as loopback.
+  return LOOPBACK_HOSTNAMES.has(h) || /^127(\.\d{1,3}){3}$/.test(h);
 }
 
 function isLoopbackAddress(address) {
@@ -145,8 +147,10 @@ export async function corsOptIn(c, next) {
  */
 export async function requireJsonBody(c, next) {
   if (c.req.method === "POST") {
-    const contentType = (c.req.header("content-type") || "").toLowerCase();
-    if (!contentType.includes("application/json")) {
+    // Compare the MIME essence exactly: `text/plain; x=application/json` is still a
+    // CORS-safelisted type and would otherwise slip through without a preflight.
+    const contentType = (c.req.header("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (contentType !== "application/json") {
       return gatewayError(c, 415, "invalid_request_error", "Content-Type must be application/json");
     }
   }

@@ -3,54 +3,12 @@ import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
+import { responsesToOpenAIRequest, openAIMessageToResponsesOutput } from "../translator/responses.js";
 
 const upstreamBaseUrl = (provider) =>
   provider.transport?.responsesUrl ||
   provider.transport?.baseUrl ||
   "https://api.openai.com/v1/chat/completions";
-
-function convertResponsesToChatBody(body) {
-  const messages = [];
-
-  if (body.instructions) {
-    messages.push({ role: "system", content: body.instructions });
-  }
-
-  if (typeof body.input === "string") {
-    messages.push({ role: "user", content: body.input });
-  } else if (Array.isArray(body.input)) {
-    for (const item of body.input) {
-      if (!item) continue;
-      if (typeof item === "string") {
-        messages.push({ role: "user", content: item });
-      } else if (typeof item === "object") {
-        const role = item.role || (item.type === "message" ? "user" : "user");
-        let content = "";
-        if (typeof item.content === "string") {
-          content = item.content;
-        } else if (Array.isArray(item.content)) {
-          content = item.content.map((c) => c.text || JSON.stringify(c)).join("\n");
-        }
-        messages.push({ role, content });
-      }
-    }
-  }
-
-  if (messages.length === 0) {
-    messages.push({ role: "user", content: " " });
-  }
-
-  return {
-    model: body.model,
-    messages,
-    stream: Boolean(body.stream),
-    tools: body.tools,
-    tool_choice: body.tool_choice,
-    temperature: body.temperature,
-    top_p: body.top_p,
-    max_tokens: body.max_tokens ?? body.max_output_tokens,
-  };
-}
 
 export async function handleResponses(c) {
   let rawBody;
@@ -82,7 +40,7 @@ export async function handleResponses(c) {
     );
   }
 
-  const chatBody = convertResponsesToChatBody(rawBody);
+  const chatBody = responsesToOpenAIRequest(rawBody);
 
   try {
     const routed = await routeRequest({
@@ -171,18 +129,7 @@ export async function handleResponses(c) {
       object: "response",
       status: "completed",
       model: targetModel,
-      output: [
-        {
-          type: "message",
-          role: "assistant",
-          content: [
-            {
-              type: "output_text",
-              text: finalData.choices?.[0]?.message?.content || "",
-            },
-          ],
-        },
-      ],
+      output: openAIMessageToResponsesOutput(finalData.choices?.[0]?.message),
       usage: {
         input_tokens: inputTokens,
         output_tokens: outputTokens,

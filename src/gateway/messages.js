@@ -4,6 +4,27 @@ import { translateResponse, createTransformStream, FORMATS } from "../translator
 import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 
+/**
+ * Non-streaming body for an Anthropic client. A native Anthropic message from a
+ * Claude-format upstream is returned untouched: the round trip through the
+ * OpenAI pivot format drops thinking blocks and their signatures (which the
+ * next tool-use turn must send back), cache usage, and stop_sequence.
+ */
+async function upstreamResponseToClaude(upstreamRes, targetFormat, targetModel) {
+  const contentType = upstreamRes.headers.get("content-type") || "";
+  if (targetFormat === FORMATS.CLAUDE && contentType.includes("application/json")) {
+    const text = await upstreamRes.text();
+    let data = null;
+    try {
+      data = JSON.parse(text);
+    } catch {}
+    if (data?.type === "message" && Array.isArray(data.content)) return data;
+    upstreamRes = new Response(text, { status: upstreamRes.status, headers: upstreamRes.headers });
+  }
+  const openAIData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
+  return translateResponse(FORMATS.OPENAI, FORMATS.CLAUDE, openAIData, targetModel);
+}
+
 const upstreamBaseUrl = (provider, targetFormat) =>
   targetFormat === FORMATS.OPENAI
     ? provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions"
@@ -12,7 +33,9 @@ const upstreamBaseUrl = (provider, targetFormat) =>
       "https://api.anthropic.com/v1/messages";
 
 function isWarmupOrNamingRequest(body, userAgent = "") {
-  if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
+  // Warmup and topic-naming probes are always a single user message. A longer
+  // conversation is real work, even when its first message happens to match.
+  if (!body || !Array.isArray(body.messages) || body.messages.length !== 1) return false;
 
   const firstMsg = body.messages[0];
   const firstContent = typeof firstMsg.content === "string"
@@ -226,8 +249,7 @@ export async function handleMessages(c) {
       });
     }
 
-    const openAIData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
-    const finalData = translateResponse(FORMATS.OPENAI, FORMATS.CLAUDE, openAIData, targetModel);
+    const finalData = await upstreamResponseToClaude(upstreamRes, targetFormat, targetModel);
 
     const durationMs = Date.now() - startTime;
     const inputTokens = finalData.usage?.input_tokens || finalData.usage?.prompt_tokens || 0;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { initDb, addConnection, getConnectionById } from "../src/db/index.js";
+import { initDb, addConnection, getConnectionById, mergeConnectionCredentials } from "../src/db/index.js";
 import {
   syncProviderQuota,
   isConnectionExhausted,
@@ -38,6 +38,33 @@ test("quota service - syncProviderQuota updates quota cache in SQLite", async ()
   assert.deepStrictEqual(inDb.credentials.quota.remaining, 250000);
 
   setCustomQuotaFetcher(null);
+});
+
+test("quota service - sync keeps tokens rotated while the quota fetch was in flight", async () => {
+  initDb(":memory:");
+
+  const conn = addConnection({
+    provider: "claude",
+    name: "Claude OAuth",
+    credentials: { access_token: "old-access", refresh_token: "old-refresh" },
+  });
+
+  setCustomQuotaFetcher(async () => {
+    // A token refresh lands while the quota endpoint is still answering.
+    mergeConnectionCredentials(conn.id, { access_token: "new-access", refresh_token: "new-refresh" });
+    return { remaining: 10, unit: "requests", is_exhausted: false };
+  });
+
+  try {
+    await syncProviderQuota(conn);
+  } finally {
+    setCustomQuotaFetcher(null);
+  }
+
+  const inDb = getConnectionById(conn.id);
+  assert.strictEqual(inDb.credentials.refresh_token, "new-refresh");
+  assert.strictEqual(inDb.credentials.access_token, "new-access");
+  assert.strictEqual(inDb.credentials.quota.remaining, 10);
 });
 
 test("quota service - marks and skips exhausted connection", async () => {

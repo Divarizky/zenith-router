@@ -13,11 +13,20 @@ import {
   getUpgradeCapability,
   backupDatabase,
   runUpgrade,
+  setUpgradeDataDir,
 } from "../src/services/upgrade.js";
 import { setCustomVersionFetcher, resetVersionCache } from "../src/services/version.js";
 import { app } from "../src/index.js";
 
 initDb(":memory:");
+
+// Log dan backup default dari runUpgrade masuk ke sini, bukan ke data/ asli.
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "zenith-upgrade-"));
+setUpgradeDataDir(testDataDir);
+test.after(() => {
+  setUpgradeDataDir(null);
+  fs.rmSync(testDataDir, { recursive: true, force: true });
+});
 
 /** Rekaman eksekusi git: menjawab perintah sesuai skrip, mencatat urutannya. */
 function recorderExec({ inWorkTree = true, clean = true, fetchFails = false, tagMissing = false, checkoutFails = false } = {}) {

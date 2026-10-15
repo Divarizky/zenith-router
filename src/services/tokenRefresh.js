@@ -1,4 +1,4 @@
-import { getConnectionById, getConnections, updateConnection } from "../db/index.js";
+import { getConnectionById, getConnections, mergeConnectionCredentials } from "../db/index.js";
 import { logQuiet } from "./logger.js";
 import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn } from "./oauth/providers.js";
 import { requireResolvedProxy } from "./proxyPools.js";
@@ -189,18 +189,17 @@ async function executeRefresh(connection) {
     throw new Error("Invalid token payload returned from refresher");
   }
 
+  // Merge only the token fields into the stored row: anything written while the
+  // refresh was in flight (a quota sync, for one) must survive.
   const { access_token, refresh_token, expires_at, ...extra } = newTokens;
-  const updatedCreds = {
-    ...(connection.credentials || {}),
+  const patch = {
     ...extra,
     access_token,
     expires_at: expires_at || Date.now() + 3600 * 1000,
   };
-  const nextRefresh = refresh_token || connection.credentials?.refresh_token;
-  if (nextRefresh) updatedCreds.refresh_token = nextRefresh;
+  if (refresh_token) patch.refresh_token = refresh_token;
 
-  const updated = updateConnection(connection.id, { credentials: updatedCreds });
-  return updated;
+  return mergeConnectionCredentials(connection.id, patch);
 }
 
 /**

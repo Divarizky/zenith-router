@@ -43,6 +43,50 @@ test("POST /v1/messages - intercepts Claude Code Warmup request instantly (<15ms
   assert.strictEqual(json.content[0].type, "text");
 });
 
+test("POST /v1/messages - a conversation that started with Warmup still reaches the upstream", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "claude", name: "Claude test", credentials: { api_key: "sk-ant-test" } });
+  let called = false;
+  setCustomExecutor({
+    async execute() {
+      called = true;
+      return new Response(
+        JSON.stringify({
+          id: "msg_real",
+          type: "message",
+          role: "assistant",
+          model: "claude-3-7-sonnet",
+          content: [{ type: "text", text: "real answer" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 3, output_tokens: 2 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    },
+  });
+
+  try {
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude/claude-3-7-sonnet",
+        max_tokens: 50,
+        messages: [
+          { role: "user", content: "Warmup" },
+          { role: "assistant", content: "Warmup OK" },
+          { role: "user", content: "real question" },
+        ],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(called, true, "multi-turn request must not be intercepted");
+    assert.strictEqual((await res.json()).content[0].text, "real answer");
+  } finally {
+    setCustomExecutor(null);
+  }
+});
+
 test("POST /v1/messages - intercepts Claude Code Warmup in streaming mode", async () => {
   const res = await app.request("/v1/messages", {
     method: "POST",
@@ -119,4 +163,45 @@ test("POST /v1/messages - non-streaming relays upstream Anthropic response", asy
   assert.strictEqual(json.content[0].text, "Hello from Claude upstream!");
 
   setCustomExecutor(null);
+});
+
+test("POST /v1/messages - non-streaming keeps thinking blocks, signatures and cache usage", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "claude", name: "Claude test", credentials: { api_key: "sk-ant-test" } });
+  const upstream = {
+    id: "msg_think",
+    type: "message",
+    role: "assistant",
+    model: "claude-3-7-sonnet",
+    content: [
+      { type: "thinking", thinking: "Need the file first.", signature: "sig-abc" },
+      { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "a.txt" } },
+    ],
+    stop_reason: "tool_use",
+    stop_sequence: null,
+    usage: { input_tokens: 10, output_tokens: 15, cache_read_input_tokens: 800, cache_creation_input_tokens: 40 },
+  };
+  setCustomExecutor({
+    async execute() {
+      return new Response(JSON.stringify(upstream), { status: 200, headers: { "Content-Type": "application/json" } });
+    },
+  });
+
+  try {
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude/claude-3-7-sonnet",
+        messages: [{ role: "user", content: "Read a.txt" }],
+        max_tokens: 100,
+        thinking: { type: "enabled", budget_tokens: 1024 },
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(await res.json(), upstream);
+  } finally {
+    setCustomExecutor(null);
+  }
 });

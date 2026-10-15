@@ -67,6 +67,10 @@ test("security - host guard blocks non-loopback Host headers (DNS rebinding)", a
   assert.strictEqual((await app.request("http://evil.example/health")).status, 403);
   assert.strictEqual((await app.request("http://127.0.0.1/health")).status, 200);
   assert.strictEqual((await app.request("http://localhost/health")).status, 200);
+  assert.strictEqual((await app.request("http://127.0.0.2/health")).status, 200);
+  // A domain that merely starts with "127." can be rebound to loopback.
+  assert.strictEqual((await app.request("http://127.attacker.example/health")).status, 403);
+  assert.strictEqual((await app.request("http://127.0.0.1.attacker.example/health")).status, 403);
 
   await withEnv({ ZENITH_ALLOWED_HOSTS: "zenith.local" }, async () => {
     assert.strictEqual((await app.request("http://zenith.local/health")).status, 200);
@@ -125,6 +129,21 @@ test("security - /v1 POST requires a JSON content type", async () => {
     body: chatBody,
   });
   assert.strictEqual(res.status, 415);
+
+  // Still a CORS-safelisted type, so it must not pass on a parameter match.
+  const smuggled = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain; x=application/json" },
+    body: chatBody,
+  });
+  assert.strictEqual(smuggled.status, 415);
+
+  const withCharset = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: chatBody,
+  });
+  assert.notStrictEqual(withCharset.status, 415);
 });
 
 test("security - gateway keys are enforced when require_api_key is on", async () => {

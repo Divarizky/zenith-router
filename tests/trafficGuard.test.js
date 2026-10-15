@@ -41,6 +41,36 @@ test("Traffic Guard - enforces max concurrency cap per connection", async () => 
   rel3();
 });
 
+test("Traffic Guard - a released slot goes to the waiter, not to a request arriving meanwhile", async () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  setSetting("traffic_guard_enabled", "true");
+  setSetting("max_account_concurrency", "1");
+  setSetting("request_jitter_enabled", "false");
+
+  const conn = { id: 103, auth_type: "oauth" };
+  const rel1 = await acquireAccountSlot(conn);
+
+  let waiterAcquired = false;
+  let lateAcquired = false;
+  const pWaiter = acquireAccountSlot(conn).then((rel) => ((waiterAcquired = true), rel));
+  await new Promise((r) => setTimeout(r, 10));
+
+  // Release, then a new request arrives before the waiter has resumed.
+  rel1();
+  const pLate = acquireAccountSlot(conn).then((rel) => ((lateAcquired = true), rel));
+
+  const relWaiter = await pWaiter;
+  await new Promise((r) => setTimeout(r, 10));
+  assert.strictEqual(waiterAcquired, true);
+  assert.strictEqual(lateAcquired, false, "The cap of 1 must hold: the late request waits");
+
+  relWaiter();
+  const relLate = await pLate;
+  assert.strictEqual(lateAcquired, true);
+  relLate();
+});
+
 test("Traffic Guard - handles client abort while waiting in queue", async () => {
   initDb(":memory:");
   resetTrafficGuardState();

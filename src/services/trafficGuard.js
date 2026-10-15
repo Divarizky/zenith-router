@@ -70,9 +70,6 @@ export async function acquireAccountSlot(connection, signal = null) {
   if (!connection.id || !isGuardEnabled) {
     return enterProviderSlot(connection.provider);
   }
-  if (!isGuardEnabled) {
-    return () => {};
-  }
 
   // API key connections typically have higher limits; traffic guard focuses primarily on OAuth connections
   const maxConcurrency = Math.max(
@@ -83,7 +80,9 @@ export async function acquireAccountSlot(connection, signal = null) {
 
   const state = getState(connection.id);
 
-  // If already at max concurrency, queue the request
+  // At the cap, wait in the queue. A waiter is woken by releaseAccountSlot,
+  // which hands over its slot without decrementing inFlight, so a request
+  // arriving in between cannot take the slot as well and exceed the cap.
   if (state.inFlight >= maxConcurrency) {
     await new Promise((resolve, reject) => {
       if (signal?.aborted) {
@@ -125,9 +124,10 @@ export async function acquireAccountSlot(connection, signal = null) {
 
       state.queue.push(item);
     });
+  } else {
+    state.inFlight++;
   }
 
-  state.inFlight++;
   const releaseProviderSlot = enterProviderSlot(connection.provider);
 
   // Apply human-like proactive jitter pacing if previous request just finished (< 250ms ago)
@@ -157,19 +157,19 @@ export async function acquireAccountSlot(connection, signal = null) {
 }
 
 /**
- * Release an in-flight slot for the given connection ID
+ * Release an in-flight slot for the given connection ID. With a request
+ * waiting, the slot passes straight to it and inFlight stays the same.
  */
 export function releaseAccountSlot(connId) {
   if (!connId) return;
   const state = getState(connId);
-  state.inFlight = Math.max(0, state.inFlight - 1);
   state.lastDispatchedAt = Date.now();
 
-  if (state.queue.length > 0 && state.inFlight < 100) {
-    const nextItem = state.queue.shift();
-    if (nextItem) {
-      nextItem.resolve();
-    }
+  const nextItem = state.queue.shift();
+  if (nextItem) {
+    nextItem.resolve();
+  } else {
+    state.inFlight = Math.max(0, state.inFlight - 1);
   }
 }
 

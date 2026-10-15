@@ -8,8 +8,8 @@ import path from "node:path";
  * Runner upgrade yang berjalan detached, jauh dari proses server utama.
  *
  * Urutannya: tunggu port benar-benar tertutup (server lama sudah keluar),
- * jalankan npm install, nyalakan server baru, lalu pantau /api/version sampai
- * sehat. Bila npm install gagal, checkout dikembalikan ke versi sebelumnya
+ * jalankan npm ci, nyalakan server baru, lalu pantau /api/version sampai
+ * sehat. Bila npm ci gagal, checkout dikembalikan ke versi sebelumnya
  * agar setidaknya versi lama yang kembali berjalan. Semua kejadian ditulis ke
  * data/updater.log karena tidak ada yang bisa lagi melihat stdout-nya.
  *
@@ -17,6 +17,7 @@ import path from "node:path";
  */
 const [repoDir, tag, portArg, previousRef] = process.argv.slice(2);
 const port = Number(portArg);
+const NPM_CI = "npm ci --omit=dev --no-audit --no-fund";
 
 function log(message) {
   try {
@@ -96,15 +97,18 @@ async function main() {
     process.exit(1);
   }
 
+  // npm ci memasang persis isi package-lock.json dan tidak pernah menulis
+  // ulang lockfile. npm install bisa mengubahnya, lalu working tree yang kotor
+  // membuat upgrade berikutnya ditolak.
   try {
-    await run("npm install --no-audit --no-fund", { cwd: repoDir });
-    log("npm install berhasil");
+    await run(NPM_CI, { cwd: repoDir });
+    log("npm ci berhasil");
   } catch (err) {
-    log(`npm install gagal: ${err.message}`);
+    log(`npm ci gagal: ${err.message}`);
     log(`mengembalikan checkout ke ${previousRef}`);
     try {
       await run(`git checkout -f ${previousRef}`, { cwd: repoDir });
-      await run("npm install --no-audit --no-fund", { cwd: repoDir });
+      await run(NPM_CI, { cwd: repoDir });
       log(`rollback selesai, ${previousRef} siap dijalankan ulang`);
     } catch (err2) {
       log(`rollback gagal: ${err2.message} — pulihkan manual dari data/updater.log`);

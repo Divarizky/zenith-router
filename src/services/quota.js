@@ -1,4 +1,4 @@
-import { getConnections, updateConnection } from "../db/index.js";
+import { getConnections, mergeConnectionCredentials } from "../db/index.js";
 import { fetchLiveQuota } from "./quota/index.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { logQuiet } from "./logger.js";
@@ -71,16 +71,11 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
     }
   }
 
-  const updatedCreds = {
-    ...(connection.credentials || {}),
-    quota: {
-      ...quotaData,
-      updated_at: Date.now(),
-    },
-  };
-
-  updateConnection(connection.id, { credentials: updatedCreds });
-  return updatedCreds.quota;
+  // Only the quota key is written: `connection` is a snapshot from before the
+  // awaits above, and its tokens may already have been rotated by a refresh.
+  const quota = { ...quotaData, updated_at: Date.now() };
+  mergeConnectionCredentials(connection.id, { quota });
+  return quota;
 }
 
 /** Returns the connection with a valid access token; the input one if refresh is unavailable or fails. */

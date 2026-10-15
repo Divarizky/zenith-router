@@ -154,6 +154,17 @@ function buildErrorPayload(targetFormat, type, message, code) {
     : { error: { message, type, code } };
 }
 
+// The account stayed at its concurrency cap for the whole queue wait. Sending
+// anyway would break the cap, so the request moves on to the next account and
+// this is what the client sees when none is left.
+function accountBusyResponse(targetFormat, connection) {
+  const message = `Account '${connection.name || connection.id}' is at its concurrency limit; retry shortly.`;
+  return new Response(
+    JSON.stringify(buildErrorPayload(targetFormat, "rate_limit_error", message, "account_busy")),
+    { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "5" } }
+  );
+}
+
 function buildErrorResponse(res, bodyText, targetFormat) {
   let payload;
   try {
@@ -268,6 +279,9 @@ export async function executeWithFallback({
       if (signal?.aborted) {
         throw err;
       }
+      lastFailureResponse = accountBusyResponse(targetFormat, connection);
+      captureLine(`[TRAFFIC] provider=${provider.id} account="${connection.name || connection.id}" ${err.message}`);
+      continue;
     }
 
     const headers = { ...baseHeaders };
@@ -379,7 +393,11 @@ export async function executeWithFallback({
 
         try {
           releaseSlot = await acquireAccountSlot(connection, signal);
-        } catch {}
+        } catch (err) {
+          if (signal?.aborted) return { ok: false, response: lastFailureResponse };
+          lastFailureResponse = accountBusyResponse(targetFormat, connection);
+          continue;
+        }
 
         try {
           res = await executor.execute({

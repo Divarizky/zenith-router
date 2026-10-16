@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { antigravityUserAgent } from "../services/antigravityIdentity.js";
+import { flattenToolUnionsForClaude, stripToolCallIds } from "../translator/gemini.js";
 
 const ANTIGRAVITY_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
 
@@ -18,6 +19,12 @@ async function upstreamModelFor(model) {
   } catch {
     return { id: model };
   }
+}
+
+// Claude models behind Antigravity validate tool schemas as Claude's input_schema,
+// which rejects some anyOf shapes that Gemini accepts.
+function isClaudeModel(model) {
+  return typeof model === "string" && /^claude/i.test(model);
 }
 
 // Set the tier unless the client already chose its own thinking settings.
@@ -66,7 +73,10 @@ export class AntigravityExecutor extends BaseExecutor {
       userAgent: "antigravity",
       requestId: `agent-${randomUUID()}`,
       requestType: "agent",
-      request: applyThinkingLevel(sourceRequest, thinkingLevel),
+      request: applyThinkingLevel(
+        isClaudeModel(model) ? flattenToolUnionsForClaude(sourceRequest) : stripToolCallIds(sourceRequest),
+        thinkingLevel
+      ),
     };
 
     const antigravityHeaders = {

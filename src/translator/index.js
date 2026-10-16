@@ -73,7 +73,11 @@ export function translateRequest(sourceFormat, targetFormat, body, targetModel) 
   }
 
   if (tgt === FORMATS.GEMINI) {
-    return openaiToGeminiRequest(openAIBody, targetModel);
+    // The pivot body cannot carry Claude's `thinking`, so it is read from the
+    // original request here. Other targets simply never see it.
+    return openaiToGeminiRequest(openAIBody, targetModel, "", {
+      thinking: src === FORMATS.CLAUDE ? body.thinking : undefined,
+    });
   }
 
   if (tgt === FORMATS.KIRO) {

@@ -364,7 +364,8 @@ export function claudeToOpenAI(body, targetModel) {
   // deliberately not forwarded as `user`: it would leak identifiers to
   // third-party providers (F-11 review).
   // body.thinking and body.top_k have no Chat Completions analogue and are
-  // deliberately dropped rather than forwarded as-is.
+  // deliberately dropped rather than forwarded as-is. translateRequest reads
+  // body.thinking itself for the Gemini target (thinkingConfig).
   if (body.tools && Array.isArray(body.tools)) {
     result.tools = body.tools.map((t) => ({
       type: "function",

@@ -191,3 +191,42 @@ test("Gemini request - stop dan top_k masuk generationConfig, stop dibatasi 5", 
   const single = openaiToGeminiRequest({ model: "m", messages: [{ role: "user", content: "hi" }], stop: "END" }, "m");
   assert.deepStrictEqual(single.generationConfig.stopSequences, ["END"]);
 });
+
+test("Claude thinking -> Gemini thinkingConfig lewat translateRequest", async () => {
+  const { translateRequest } = await import("../src/translator/index.js");
+  const base = { model: "claude-x", max_tokens: 8000, messages: [{ role: "user", content: "hi" }] };
+
+  const on = translateRequest("claude", "gemini", { ...base, thinking: { type: "enabled", budget_tokens: 4096 } }, "m");
+  assert.deepStrictEqual(on.generationConfig.thinkingConfig, { thinkingBudget: 4096, includeThoughts: true });
+  assert.strictEqual(on.generationConfig.maxOutputTokens, 8000);
+
+  const off = translateRequest("claude", "gemini", { ...base, thinking: { type: "disabled" } }, "m");
+  assert.deepStrictEqual(off.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+
+  const none = translateRequest("claude", "gemini", base, "m");
+  assert.strictEqual(none.generationConfig.thinkingConfig, undefined);
+
+  const bad = translateRequest("claude", "gemini", { ...base, thinking: { type: "enabled" } }, "m");
+  assert.strictEqual(bad.generationConfig.thinkingConfig, undefined, "enabled tanpa budget valid diabaikan");
+
+  // Klien OpenAI tidak punya `thinking`; field asing tidak boleh jadi thinkingConfig.
+  const openai = translateRequest("openai", "gemini", { ...base, thinking: { type: "enabled", budget_tokens: 4096 } }, "m");
+  assert.strictEqual(openai.generationConfig?.thinkingConfig, undefined);
+
+  // Target lain tidak menerima field thinking.
+  const chat = translateRequest("claude", "openai", { ...base, thinking: { type: "enabled", budget_tokens: 4096 } }, "m");
+  assert.ok(!("thinking" in chat));
+});
+
+test("Antigravity executor - thinkingBudget dari klien tidak ditimpa tier model", async () => {
+  const { executor, seen } = captureExecutor();
+  const body = {
+    project: "p",
+    request: {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      generationConfig: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } },
+    },
+  };
+  await executor.execute({ body: JSON.stringify(body), targetModel: "m", connection: { credentials: { project_id: "p" } } });
+  assert.deepStrictEqual(seen.body.request.generationConfig.thinkingConfig, { thinkingBudget: 2048, includeThoughts: true });
+});

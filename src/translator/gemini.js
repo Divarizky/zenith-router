@@ -55,6 +55,13 @@ export function resetGeminiTranslatorState() {
   THOUGHT_SIGNATURES.clear();
 }
 
+// Gemini returns thoughtSignature on the Part. The functionCall-level read is
+// kept for upstreams that nest it there.
+function partThoughtSignature(part) {
+  const sig = part?.thoughtSignature ?? part?.functionCall?.thoughtSignature;
+  return typeof sig === "string" && sig ? sig : undefined;
+}
+
 // The wire must carry the sanitized declared name; clients see the original.
 function clientThoughtSignature(call) {
   const sig = call?.extra_content?.google?.thought_signature;
@@ -90,6 +97,98 @@ function cleanJsonSchema(schema) {
   if (Array.isArray(copy.anyOf)) copy.anyOf = copy.anyOf.map(cleanJsonSchema);
   if (Array.isArray(copy.enum)) copy.enum = copy.enum.map(String);
   return copy;
+}
+
+// Claude's tool input_schema rejects anyOf/oneOf in some shapes that Gemini
+// accepts. Antigravity forwards Claude requests in Claude's format, so unions
+// are flattened here for Claude models only. The description keeps a hint so
+// the model still knows the other accepted shapes.
+function branchLabel(branch) {
+  if (branch.type) return Array.isArray(branch.type) ? branch.type.join("|") : branch.type;
+  return branch.properties ? "object" : "value";
+}
+
+function flattenSchemaUnion(schema) {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+  const { anyOf, oneOf, ...rest } = schema;
+  const branches = [...(Array.isArray(anyOf) ? anyOf : []), ...(Array.isArray(oneOf) ? oneOf : [])];
+  const isNull = (b) => b && typeof b === "object" && b.type === "null";
+  const nonNull = branches.filter((b) => b && typeof b === "object" && !isNull(b));
+
+  let out = { ...rest };
+  if (branches.length > 0) {
+    if (nonNull.length === 0) {
+      out = { ...out, type: "string" };
+    } else if (nonNull.length === 1) {
+      out = { ...flattenSchemaUnion(nonNull[0]), ...rest };
+    } else {
+      const chosen = nonNull.find((b) => b.type === "object" || b.properties) || nonNull[0];
+      const hint = `Accepts ${nonNull.map(branchLabel).join(" or ")}.`;
+      const flat = flattenSchemaUnion(chosen);
+      const description = [rest.description || flat.description, hint].filter(Boolean).join(" ");
+      out = { ...flat, ...rest, description };
+    }
+  }
+
+  if (out.properties && typeof out.properties === "object") {
+    out.properties = Object.fromEntries(
+      Object.entries(out.properties).map(([k, v]) => [k, flattenSchemaUnion(v)])
+    );
+  }
+  if (out.items) out.items = flattenSchemaUnion(out.items);
+  return out;
+}
+
+/**
+ * Flatten unions in the functionDeclarations of a Gemini-format request body.
+ * Returns a new request; the input is left untouched.
+ */
+export function flattenToolUnionsForClaude(request) {
+  if (!Array.isArray(request?.tools)) return request;
+  const tools = request.tools.map((tool) => {
+    if (!Array.isArray(tool?.functionDeclarations)) return tool;
+    return {
+      ...tool,
+      functionDeclarations: tool.functionDeclarations.map((decl) =>
+        decl?.parameters ? { ...decl, parameters: flattenSchemaUnion(decl.parameters) } : decl
+      ),
+    };
+  });
+  return { ...request, tools };
+}
+
+// Claude (behind Antigravity) turns functionCall/functionResponse into
+// tool_use/tool_result and requires a matching id matching ^[a-zA-Z0-9_-]+$.
+function wireToolCallId(id) {
+  if (typeof id !== "string" || !id) return undefined;
+  return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+}
+
+/**
+ * Drop functionCall/functionResponse ids from a Gemini-format request. Only
+ * Claude models need them; Gemini models keep the payload they always got.
+ */
+export function stripToolCallIds(request) {
+  if (!Array.isArray(request?.contents)) return request;
+  let changed = false;
+  const contents = request.contents.map((content) => {
+    if (!Array.isArray(content?.parts)) return content;
+    const parts = content.parts.map((part) => {
+      if (part?.functionCall && "id" in part.functionCall) {
+        changed = true;
+        const { id, ...functionCall } = part.functionCall;
+        return { ...part, functionCall };
+      }
+      if (part?.functionResponse && "id" in part.functionResponse) {
+        changed = true;
+        const { id, ...functionResponse } = part.functionResponse;
+        return { ...part, functionResponse };
+      }
+      return part;
+    });
+    return { ...content, parts };
+  });
+  return changed ? { ...request, contents } : request;
 }
 
 function sanitizeGeminiFunctionName(name) {
@@ -142,7 +241,23 @@ function openaiUsage(usageMeta = {}) {
 /**
  * Translate OpenAI Chat Completions request to Gemini / Cloud Code request format
  */
-export function openaiToGeminiRequest(body, targetModel, projectId = "") {
+/**
+ * Claude `thinking` -> Gemini thinkingConfig. enabled carries the budget and
+ * asks for thought summaries so reasoning_content can flow back to the client;
+ * disabled maps to a zero budget. Anything else yields no config.
+ */
+export function claudeThinkingToGemini(thinking) {
+  if (!thinking || typeof thinking !== "object") return undefined;
+  if (thinking.type === "disabled") return { thinkingBudget: 0 };
+  if (thinking.type === "enabled" && Number.isFinite(thinking.budget_tokens) && thinking.budget_tokens > 0) {
+    return { thinkingBudget: Math.floor(thinking.budget_tokens), includeThoughts: true };
+  }
+  return undefined;
+}
+
+// opts.thinking: the Claude client's `thinking` field, which the OpenAI pivot
+// body has no place for.
+export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = {}) {
   if (!body) return {};
 
   const contents = [];
@@ -183,6 +298,11 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "") {
       break;
     }
   }
+
+  // Ids generated for calls the client sent without one, consumed in order by
+  // tool results that also lack a known id.
+  let generatedIdSeq = 0;
+  const unansweredGeneratedIds = [];
 
   // Pending functionResponse parts for the current model step; flushed as one
   // user content right after the step they answer.
@@ -239,7 +359,13 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "") {
           try {
             args = typeof call.function?.arguments === "string" ? JSON.parse(call.function.arguments) : call.function?.arguments || {};
           } catch {}
+          let callId = wireToolCallId(call.id);
+          if (!callId) {
+            callId = `toolu_zr_${generatedIdSeq++}`;
+            unansweredGeneratedIds.push(callId);
+          }
           const functionCall = {
+            id: callId,
             name: sanitizeGeminiFunctionName(call.function?.name),
             args,
           };
@@ -252,9 +378,10 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "") {
             signature = "skip_thought_signature_validator";
             captureLine("[GEMINI] thought_signature cache miss -> dummy skip_thought_signature_validator");
           }
-          if (signature) functionCall.thoughtSignature = signature;
           firstOfStep = false;
-          parts.push({ functionCall });
+          // thoughtSignature is a Part field next to functionCall; inside
+          // functionCall the proto rejects it as an unknown field.
+          parts.push(signature ? { functionCall, thoughtSignature: signature } : { functionCall });
         }
       }
       if (parts.length > 0) contents.push({ role: "model", parts });
@@ -269,9 +396,13 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "") {
         parsed = { content: msg.content };
       }
       const name = toolNameById.get(msg.tool_call_id) || sanitizeGeminiFunctionName(msg.name || "tool_result");
+      const responseId = (toolNameById.has(msg.tool_call_id) && wireToolCallId(msg.tool_call_id))
+        || unansweredGeneratedIds.shift()
+        || wireToolCallId(msg.tool_call_id);
       if (!pendingResponses) pendingResponses = [];
       pendingResponses.push({
         functionResponse: {
+          ...(responseId ? { id: responseId } : {}),
           name,
           response: { name, content: parsed },
         },
@@ -316,6 +447,8 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "") {
   const stop = typeof body.stop === "string" ? [body.stop] : Array.isArray(body.stop) ? body.stop : [];
   const stopSequences = stop.filter((s) => typeof s === "string" && s).slice(0, 5);
   if (stopSequences.length > 0) generationConfig.stopSequences = stopSequences;
+  const thinkingConfig = claudeThinkingToGemini(opts.thinking);
+  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
 
   const innerRequest = {
     contents,
@@ -388,10 +521,9 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
               }
 
               if (part.functionCall) {
-                const callId = `call_${randomUUID().slice(0, 8)}`;
-                if (part.functionCall.thoughtSignature) {
-                  rememberThoughtSignature(callId, part.functionCall.thoughtSignature);
-                }
+                const callId = part.functionCall.id || `call_${randomUUID().slice(0, 8)}`;
+                const signature = partThoughtSignature(part);
+                if (signature) rememberThoughtSignature(callId, signature);
                 const openAIChunk = {
                   id: responseId,
                   object: "chat.completion.chunk",
@@ -412,9 +544,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
                             },
                             // Signature rides back to the client so its next
                             // request survives a Zenith restart (cache cold).
-                            ...(part.functionCall.thoughtSignature
-                              ? { extra_content: { google: { thought_signature: part.functionCall.thoughtSignature } } }
-                              : {}),
+                            ...(signature ? { extra_content: { google: { thought_signature: signature } } } : {}),
                           },
                         ],
                       },
@@ -473,10 +603,9 @@ export async function geminiToOpenAIResponse(data, model = "gemini") {
       else text += p.text;
     }
     if (p.functionCall) {
-      const callId = `call_${randomUUID().slice(0, 8)}`;
-      if (p.functionCall.thoughtSignature) {
-        rememberThoughtSignature(callId, p.functionCall.thoughtSignature);
-      }
+      const callId = p.functionCall.id || `call_${randomUUID().slice(0, 8)}`;
+      const signature = partThoughtSignature(p);
+      if (signature) rememberThoughtSignature(callId, signature);
       toolCalls.push({
         id: callId,
         type: "function",

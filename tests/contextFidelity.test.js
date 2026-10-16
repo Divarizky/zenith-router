@@ -734,8 +734,9 @@ test("TASK-49 - gemini: extra_content signature dihormati, turn lama tanpa dummy
 
   // Tool turn ini diikuti user text "lanjut", jadi bukan giliran kini: tidak
   // ada dummy. Signature klien (extra_content) tetap dihormati kapan pun ada.
-  assert.strictEqual(fcs[0].functionCall.thoughtSignature, undefined);
-  assert.strictEqual(fcs[1].functionCall.thoughtSignature, "sigX", "extra_content klien dipakai apa adanya");
+  assert.strictEqual(fcs[0].thoughtSignature, undefined);
+  assert.strictEqual(fcs[1].thoughtSignature, "sigX", "extra_content klien dipakai apa adanya");
+  assert.ok(fcs.every((p) => !("thoughtSignature" in p.functionCall)), "signature di level Part, bukan di functionCall");
 });
 
 test("TASK-49 - gemini: current turn (berakhir di tool result) dapat dummy signature", () => {
@@ -765,7 +766,8 @@ test("TASK-49 - gemini: current turn (berakhir di tool result) dapat dummy signa
   const fcs = modelStep.parts.filter((p) => p.functionCall);
 
   // FunctionCall pertama tiap step di giliran kini wajib membawa signature.
-  assert.strictEqual(fcs[0].functionCall.thoughtSignature, "skip_thought_signature_validator");
+  assert.strictEqual(fcs[0].thoughtSignature, "skip_thought_signature_validator");
+  assert.ok(!("thoughtSignature" in fcs[0].functionCall), "proto menolak thoughtSignature di dalam functionCall");
 
   // functionResponse satu step digabung jadi satu content user, sesudah
   // seluruh functionCall (tidak diselang-seling).
@@ -794,7 +796,7 @@ test("TASK-49 - gemini: tool turn lama tidak diberi dummy signature", () => {
   const out = translateRequest(FORMATS.OPENAI, FORMATS.GEMINI, body, "gemini-3.1-pro");
   const oldStep = out.contents.find((c) => c.role === "model");
   const fc = oldStep.parts.find((p) => p.functionCall);
-  assert.strictEqual(fc.functionCall.thoughtSignature, undefined, "turn lama tidak divalidasi upstream");
+  assert.strictEqual(fc.thoughtSignature, undefined, "turn lama tidak divalidasi upstream");
 });
 
 test("TASK-49 - gemini: nama tool dikembalikan di respons stream", async () => {

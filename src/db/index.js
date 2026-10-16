@@ -427,9 +427,20 @@ export function mergeConnectionCredentials(id, patch = {}) {
  */
 export function deleteConnection(id) {
   const db = getDb();
-  const stmt = db.prepare(`DELETE FROM connections WHERE id = ?`);
-  const res = stmt.run(Number(id));
-  return res.changes > 0;
+  const key = Number(id);
+  // Baris per koneksi ikut dibersihkan. Tanpa ini, inventaris yang ditinggalkan
+  // tetap terbaca sebagai milik akun yang sudah tidak ada.
+  db.exec("BEGIN");
+  try {
+    db.prepare(`DELETE FROM antigravity_account_models WHERE connection_id = ?`).run(key);
+    db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ?`).run(key);
+    const res = db.prepare(`DELETE FROM connections WHERE id = ?`).run(key);
+    db.exec("COMMIT");
+    return res.changes > 0;
+  } catch (err) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw err;
+  }
 }
 
 /**
@@ -576,9 +587,11 @@ export function getAntigravityInventoryRows() {
 export function getAntigravityModelsByConnection() {
   const rows = getDb()
     .prepare(
-      `SELECT connection_id, model_id, display_name, recommended, current_tier,
-              quota_remaining, quota_reset_at
-       FROM antigravity_account_models`
+      `SELECT a.connection_id, a.model_id, a.display_name, a.recommended, a.current_tier,
+              a.quota_remaining, a.quota_reset_at
+       FROM antigravity_account_models a
+       JOIN connections c ON c.id = a.connection_id
+       WHERE c.provider = 'antigravity' AND c.is_active = 1`
     )
     .all();
   const byConnection = new Map();

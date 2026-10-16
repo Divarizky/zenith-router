@@ -284,7 +284,13 @@ test("GET /dashboard/usage - the recent panel attributes a request to its combo"
   assert.strictEqual(api.recent[0].combo_name, "antai-utama");
 });
 
-test("Dashboard usage - kartu kuota Antigravity menampilkan model langganan dan penanda kuota habis", async () => {
+function quotaBucket(remainingPercentage, resetAt = null, displayName) {
+  const total = 1000;
+  const remaining = Math.round(total * (remainingPercentage / 100));
+  return { used: total - remaining, total, remainingPercentage, resetAt, displayName };
+}
+
+test("Dashboard usage - kartu kuota Antigravity menampilkan satu baris per keluarga dengan nama katalog", async () => {
   const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
   const { renderUsagePage } = await import("../src/ui/pages/usage.js");
   initDb(":memory:");
@@ -297,21 +303,111 @@ test("Dashboard usage - kartu kuota Antigravity menampilkan model langganan dan 
         provider: "antigravity",
         unit: "tier",
         plan: "Google AI Pro",
-        quotas: { "gemini-4-argon-medium": { used: 0, total: 1000, remainingPercentage: 100, displayName: "Gemini 4 Argon (Medium)" } },
+        quotas: {
+          "gemini-4-argon-medium": quotaBucket(100, null, "Gemini 4 Argon (Medium)"),
+          "claude-opus-5-5-high": quotaBucket(0, new Date(Date.now() + 3600_000).toISOString(), "Claude Opus 5.5 (High)"),
+        },
         updated_at: Date.now(),
       },
     },
   });
-  replaceAntigravityAccountModels(c.id, "free-tier", [
-    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1, quotaResetAt: Date.now() + 3600_000, currentTier: "free-tier" },
-    { modelId: "claude-opus-5-5-high", displayName: "Claude Opus 5.5 (High)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000, currentTier: "free-tier" },
+  replaceAntigravityAccountModels(c.id, "Google AI Pro", [
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1, currentTier: "Google AI Pro" },
+    { modelId: "claude-opus-5-5-high", displayName: "Claude Opus 5.5 (High)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000, currentTier: "Google AI Pro" },
     { modelId: "chat_20706", displayName: "internal", recommended: false },
   ]);
   const html = renderUsagePage(20120, {});
-  assert.ok(html.includes("2 model langganan"), "jumlah model langganan (hanya recommended)");
-  assert.ok(html.includes("gemini-4-argon-medium"));
-  assert.ok(html.includes("claude-opus-5-5-high"));
-  assert.ok(html.includes("Kuota habis"), "model dengan kuota 0 dan reset di masa depan ditandai");
-  assert.ok(!html.includes("chat_20706"), "model internal tidak ditampilkan");
+  assert.ok(html.includes(">Gemini 4 Argon<"), "label memakai nama katalog keluarga");
+  assert.ok(html.includes(">Claude Opus 5.5<"), "keluarga Claude juga memakai nama katalog");
+  assert.ok(!html.includes("Gemini 4 Argon (Medium)"), "nama per tingkat tidak lagi jadi label");
+  assert.ok(html.includes("high <b"), "tingkat tampil sebagai rincian di baris keluarga");
+  assert.ok(html.includes("Kuota habis"), "tingkat dengan kuota 0 dan reset di masa depan ditandai");
+  assert.ok(!html.includes("model langganan"), "bagian terpisah sudah dihapus");
   assert.ok(html.includes("Google AI Pro"), "nama langganan tetap tampil");
+  assert.ok(!html.includes("chat_20706"), "model internal tidak ditampilkan");
+});
+
+test("Dashboard usage - satu keluarga ditampilkan sekali dengan rincian kuota tiap tingkat", async () => {
+  const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
+  const { renderUsagePage } = await import("../src/ui/pages/usage.js");
+  initDb(":memory:");
+  const c = addConnection({
+    provider: "antigravity",
+    name: "pro-akun",
+    auth_type: "oauth",
+    credentials: {
+      quota: {
+        provider: "antigravity",
+        unit: "tier",
+        plan: "Google AI Pro",
+        quotas: {
+          "gemini-4-argon-low": quotaBucket(100, null, "Gemini 4 Argon (Low)"),
+          "gemini-4-argon-medium": quotaBucket(100, null, "Gemini 4 Argon (Medium)"),
+          "gemini-4-argon-high": quotaBucket(0, new Date(Date.now() + 3600_000).toISOString(), "Gemini 4 Argon (High)"),
+        },
+        updated_at: Date.now(),
+      },
+    },
+  });
+  replaceAntigravityAccountModels(c.id, "Google AI Pro", [
+    { modelId: "gemini-4-argon-low", displayName: "Gemini 4 Argon (Low)", recommended: true, quotaRemaining: 1 },
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
+    { modelId: "gemini-4-argon-high", displayName: "Gemini 4 Argon (High)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000 },
+    { modelId: "gemini-4-argon-tiered", displayName: "Gemini 4 Argon", recommended: true, quotaRemaining: 1 },
+  ]);
+  const html = renderUsagePage(20120, {});
+  assert.strictEqual((html.match(/>Gemini 4 Argon</g) || []).length, 1, "keluarga muncul satu kali");
+  assert.ok(html.includes("low <b>100%</b>"), "kuota tingkat low");
+  assert.ok(html.includes("medium <b>100%</b>"), "kuota tingkat medium");
+  assert.ok(html.includes("high <b class=\"q-bad\">Kuota habis</b>"), "tingkat habis ditandai");
+  assert.ok(html.includes("3 tingkat · 1 habis"), "ringkasan tingkat di baris keluarga");
+});
+
+test("Dashboard usage - keluarga yang runtime-nya hanya bucket -tiered tetap tampil dengan kuotanya", async () => {
+  const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
+  const { renderUsagePage } = await import("../src/ui/pages/usage.js");
+  initDb(":memory:");
+  const c = addConnection({
+    provider: "antigravity",
+    name: "tiered-only",
+    auth_type: "oauth",
+    credentials: {
+      quota: {
+        provider: "antigravity",
+        unit: "tier",
+        plan: "Google AI Plus",
+        quotas: {
+          "gemini-3.8-flash-tiered": quotaBucket(50, null, "Gemini 3.8 Flash"),
+        },
+        updated_at: Date.now(),
+      },
+    },
+  });
+  replaceAntigravityAccountModels(c.id, "Google AI Plus", [
+    { modelId: "gemini-3.8-flash-tiered", displayName: "Gemini 3.8 Flash", recommended: true, quotaRemaining: 0.5 },
+  ]);
+  const html = renderUsagePage(20120, {});
+  assert.ok(html.includes(">Gemini 3.8 Flash<"), "label keluarga tanpa akhiran -tiered");
+  assert.ok(html.includes("<b>50%</b>"), "kuota bucket tiered tidak hilang dari kartu");
+  assert.ok(!html.includes("q-levels></div>"), "tidak ada rincian tingkat yang kosong");
+});
+
+test("Dashboard usage - tingkat habis dari inventaris tanpa bucket kuota tetap ditandai", async () => {
+  const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
+  const { renderUsagePage } = await import("../src/ui/pages/usage.js");
+  initDb(":memory:");
+  const c = addConnection({
+    provider: "antigravity",
+    name: "inventaris-saja",
+    auth_type: "oauth",
+    credentials: {
+      quota: { provider: "antigravity", unit: "tier", plan: "Google AI Pro", quotas: { "gemini-4-argon-medium": quotaBucket(100, null, "Gemini 4 Argon (Medium)") }, updated_at: Date.now() },
+    },
+  });
+  replaceAntigravityAccountModels(c.id, "Google AI Pro", [
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
+    { modelId: "gemini-4-argon-high", displayName: "Gemini 4 Argon (High)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000 },
+  ]);
+  const html = renderUsagePage(20120, {});
+  assert.ok(html.includes("high <b class=\"q-bad\">Kuota habis</b>"), "tingkat habis dari inventaris ditandai tanpa bucket kuota");
 });

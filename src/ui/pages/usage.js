@@ -5,10 +5,11 @@ import { hasQuotaFetcher } from "../../services/quota/index.js";
 import { getActiveProviders } from "../../services/trafficGuard.js";
 import { getQuotaSyncIntervalMs } from "../../services/quotaSync.js";
 import { getConnections } from "../../db/index.js";
-import { getAllProviders, getProvider } from "../../providers/index.js";
+import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getLogoDataUri, getProviderIconPath } from "../assets.js";
+import { buildAntigravityFamilies, familyFromDisplayName, LEVEL_DISPLAY_ORDER } from "../../services/antigravityCatalog.js";
 
 /**
  * Render Usage Analytics and Quota page
@@ -143,6 +144,10 @@ function renderTopologyPane(topology) {
       .q-more[open] summary::before { content: "\\2212 "; }
       .q-more summary:hover { color: var(--text); }
       .q-more .q-rows { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.5rem; }
+      .q-levels { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 0.7rem; color: var(--text-subtle); }
+      .q-levels span { white-space: nowrap; }
+      .q-levels b { font-weight: 600; color: var(--text-muted); }
+      .q-levels b.q-bad { color: var(--danger); }
       .q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
       .q-updated { font-size: 0.7rem; color: var(--text-subtle); }
       @keyframes topo-ping { 0% { opacity: .8; r: 4; } 80%,100% { opacity: 0; r: 10; } }
@@ -518,15 +523,9 @@ function quotaRows(q) {
   // Per-model buckets (Antigravity): 9router-style one bar per model.
   if (q.quotas && typeof q.quotas === "object" && Object.keys(q.quotas).length > 0) {
     for (const [modelKey, r] of Object.entries(q.quotas)) {
-      const rem =
-        r.remainingPercentage != null
-          ? Number(r.remainingPercentage)
-          : r.total > 0
-            ? (Number(r.remaining ?? 0) / Number(r.total)) * 100
-            : null;
       rows.push({
         label: r.displayName || modelKey,
-        remaining: rem,
+        remaining: bucketPct(r),
         used: r.usedLabel || `${Number(r.used || 0).toLocaleString()} / ${Number(r.total || 0).toLocaleString()}`,
         reset: r.resetAt || null,
       });
@@ -579,10 +578,151 @@ function quotaRows(q) {
   return rows;
 }
 
+/** Urutan tingkat untuk tampilan, dari paling ringan ke paling berat. */
+function levelOrderOf(level) {
+  const index = LEVEL_DISPLAY_ORDER.indexOf(level);
+  return index === -1 ? LEVEL_DISPLAY_ORDER.length : index;
+}
+
+/** Persentase sisa dari bucket kuota, skala 0..100. */
+function bucketPct(bucket) {
+  if (!bucket) return null;
+  const value =
+    bucket.remainingPercentage != null
+      ? Number(bucket.remainingPercentage)
+      : Number(bucket.total) > 0
+        ? (Number(bucket.remaining ?? 0) / Number(bucket.total)) * 100
+        : null;
+  if (value == null || Number.isNaN(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+
+/** Reset time datang sebagai ISO dari parseResetTime atau epoch ms dari kolom DB. */
+function resetMs(value) {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** Habis berarti nol sisa dan reset belum lewat, sama dengan gate routing. */
+function isExhaustedNow(pct, reset) {
+  return pct === 0 && Number(reset || 0) > Date.now();
+}
+
+/** Satu chip per tingkat: label tingkat plus persen atau penanda habis. */
+function levelChipsHtml(perLevel, resetFor) {
+  return perLevel
+    .map(({ level, modelId, pct }) => {
+      const off = isExhaustedNow(pct, resetFor(modelId));
+      const text = pct == null ? "" : off ? "Kuota habis" : `${Math.round(pct)}%`;
+      const value = text ? `<b${off ? ' class="q-bad"' : ""}>${escapeHtml(text)}</b>` : "";
+      // Keluarga satu runtime tidak perlu label tingkat, cukup nilainya.
+      if (!level) return value ? `<span>${value}</span>` : "";
+      return `<span>${escapeHtml(level)}${value ? ` ${value}` : ""}</span>`;
+    })
+    .filter(Boolean)
+    .join("");
+}
+
+/**
+ * Antigravity kuota per keluarga, bukan per id runtime. Tingkat dibaca dari nama
+ * yang sama dengan gate routing supaya chip di kartu tidak menunjuk runtime lain
+ * dari yang dipilih saat request, dan persennya diambil dari bucket kuota dengan
+ * inventaris sebagai cadangan.
+ */
+function antigravityFamilyRows(q, inventory) {
+  const buckets = q?.quotas;
+  if (!buckets || typeof buckets !== "object" || Object.keys(buckets).length === 0) return null;
+
+  const catalogNames = new Map(getProviderModels(getProvider("antigravity")).map((m) => [m.id, m.name]));
+  const inventoryRows = inventory ? [...inventory.values()] : [];
+  const recommended = new Set(inventoryRows.filter((r) => r.recommended === 1).map((r) => r.model_id));
+
+  // Nama dari inventaris dipakai lebih dulu karena itulah yang dibaca gate.
+  const models = {};
+  for (const row of inventoryRows) models[row.model_id] = { displayName: row.display_name };
+  for (const [modelId, bucket] of Object.entries(buckets)) {
+    if (!models[modelId]) models[modelId] = { displayName: bucket?.displayName };
+  }
+
+  const allFamilies = buildAntigravityFamilies(models);
+  const familyModelIds = (entry) => [...Object.values(entry.variants), entry.unsuffixed].filter(Boolean);
+  // Keluarga yang tidak punya baris Recommended maupun bucket kuota hanya menambah
+  // baris tanpa informasi baru.
+  const visible = [...allFamilies.entries()].filter(([, entry]) =>
+    familyModelIds(entry).some((modelId) => recommended.has(modelId) || buckets[modelId])
+  );
+  if (visible.length === 0) return null;
+
+  const pctFor = (modelId) => {
+    if (modelId in buckets) return bucketPct(buckets[modelId]);
+    const remaining = inventory?.get(modelId)?.quota_remaining;
+    return remaining == null ? null : Math.max(0, Math.min(100, Number(remaining) * 100));
+  };
+  const resetFor = (modelId) =>
+    resetMs(buckets[modelId]?.resetAt) ?? resetMs(inventory?.get(modelId)?.quota_reset_at);
+
+  const covered = new Set();
+  for (const [, entry] of visible) for (const modelId of familyModelIds(entry)) covered.add(modelId);
+  const visibleFamilies = new Set(visible.map(([familyId]) => familyId));
+  const usedLabels = new Set(visible.map(([familyId]) => catalogNames.get(familyId) || familyId));
+
+  // Bucket yang tidak ikut membentuk keluarga tampil (mis. model gambar yang
+  // disaring dari katalog) supaya kuotanya tidak hilang dari kartu.
+  const leftovers = Object.keys(buckets)
+    .filter((modelId) => {
+      if (covered.has(modelId)) return false;
+      // Kalah oleh benturan tingkat di keluarganya sendiri: keluarga itu sudah
+      // punya baris, jadi tidak perlu baris kedua.
+      const [family] = buildAntigravityFamilies({
+        [modelId]: { displayName: models[modelId]?.displayName },
+      }).keys();
+      return !family || !visibleFamilies.has(family);
+    })
+    .map((modelId) => {
+      const pct = pctFor(modelId);
+      const reset = resetFor(modelId);
+      const baseLabel = familyFromDisplayName(models[modelId]?.displayName) || modelId;
+      return {
+        // Label kembar menyesatkan, jadi id runtime dipakai sebagai pembeda.
+        label: usedLabels.has(baseLabel) ? modelId : baseLabel,
+        remaining: pct,
+        levelsHtml: levelChipsHtml([{ level: null, modelId, pct }], resetFor),
+        used: isExhaustedNow(pct, reset) ? "1 tingkat · Kuota habis" : "1 tingkat",
+        reset,
+      };
+    });
+
+  return visible
+    .map(([familyId, entry]) => {
+      const levels = Object.entries(entry.variants).sort((a, b) => levelOrderOf(a[0]) - levelOrderOf(b[0]));
+      if (entry.unsuffixed && entry.unsuffixed !== entry.tiered) levels.push([null, entry.unsuffixed]);
+      // Bucket -tiered yang jadi satu-satunya runtime keluarga tetap ditampilkan.
+      if (levels.length === 0 && entry.unsuffixed) levels.push([null, entry.unsuffixed]);
+
+      const perLevel = levels.map(([level, modelId]) => ({ level, modelId, pct: pctFor(modelId) }));
+      const known = perLevel.filter((x) => x.pct != null);
+      const offCount = perLevel.filter((x) => isExhaustedNow(x.pct, resetFor(x.modelId))).length;
+
+      return {
+        // Bar mengikuti tingkat dengan sisa terbanyak: yang ditanyakan kartu ini
+        // adalah "masih bisa dipakai atau tidak".
+        label: catalogNames.get(familyId) || familyId,
+        remaining: known.length ? Math.max(...known.map((x) => x.pct)) : null,
+        levelsHtml: levelChipsHtml(perLevel, resetFor),
+        used: `${perLevel.length} tingkat${offCount ? ` · ${offCount} habis` : ""}`,
+        reset: perLevel.map((x) => resetFor(x.modelId)).filter(Boolean).sort()[0] ?? null,
+      };
+    })
+    .concat(leftovers);
+}
+
 /** 9router-style quota card for one account. */
 function renderQuotaCard(s, antigravityInventory = null) {
   const q = s.quota;
-  const rows = quotaRows(q);
+  // Antigravity memakai baris per keluarga; provider lain tetap memakai bucketnya.
+  const rows = (s.provider === "antigravity" ? antigravityFamilyRows(q, antigravityInventory?.get(s.id) || null) : null) || quotaRows(q);
   if (rows.length === 0) rows.push({ label: "Quota", remaining: null, used: q?.error ? String(q.error) : "No quota data yet", reset: null });
   const statusPill = s.is_exhausted
     ? `<span class="pill pill-danger">Exhausted</span>`
@@ -595,24 +735,12 @@ function renderQuotaCard(s, antigravityInventory = null) {
     ? `<img src="${escapeHtml(iconSrc)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display=''" style="width:24px;height:24px;object-fit:contain;border-radius:4px;" /><span style="display:none;">${escapeHtml(initials)}</span>`
     : `<span>${escapeHtml(initials)}</span>`;
   const planPill = q?.plan || (q?.unit === "tier" && q?.tier ? q.tier : "");
-  // Antigravity: the account's own subscription catalog, so the list itself is
-  // the evidence for which models this plan may call.
   const inventory = antigravityInventory?.get(s.id) || null;
   const inventoryRows = inventory ? [...inventory.values()].filter((r) => r.recommended === 1) : [];
   const tier = inventoryRows.find((r) => r.current_tier)?.current_tier || null;
   const planPillHtml = planPill || tier
     ? `<span class="pill">${escapeHtml(planPill || tier)}</span>`
     : "";
-  const inventoryHtml = inventoryRows.length
-    ? `<details class="q-more"><summary>${inventoryRows.length} model langganan</summary><div class="q-rows">${inventoryRows
-        .map((r) => {
-          const isExhausted = typeof r.quota_remaining === "number" && r.quota_remaining === 0 && Number(r.quota_reset_at || 0) > Date.now();
-          const pct = r.quota_remaining === null || r.quota_remaining === undefined ? "" : `${Math.round(Number(r.quota_remaining) * 100)}%`;
-          return `<div class="q-row"><div class="q-row-top"><span class="q-label">${escapeHtml(r.model_id)}</span><span class="q-meta">${isExhausted ? "Kuota habis" : pct}</span></div></div>`;
-        })
-        .join("")}</div></details>`
-    : "";
-
   const MAX_VISIBLE_ROWS = 4;
 
   const rowHtml = (r) => {
@@ -631,6 +759,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
             <span class="q-meta" title="${escapeHtml(meta)}">${escapeHtml(meta)}</span>
           </div>
           ${unlimited ? "" : `<div class="q-bar"><i class="${tone}" style="width: ${pct}%"></i></div>`}
+          ${r.levelsHtml ? `<div class="q-levels">${r.levelsHtml}</div>` : ""}
         </div>`;
   };
 
@@ -655,7 +784,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
         </div>
         ${statusPill}
       </div>
-      <div class="q-body">${body}${inventoryHtml}</div>
+      <div class="q-body">${body}</div>
       <div class="q-foot">
         <span class="q-updated">${updated}</span>
         <form action="/dashboard/quota/sync" method="POST" style="margin: 0;">

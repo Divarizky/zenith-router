@@ -45,6 +45,9 @@ const RUNTIME_ALIASES = {
 /** agy's own default (defaultAgentModelId) is the medium variant. */
 export const DEFAULT_EFFORT = "medium";
 
+/** Urutan tingkat untuk tampilan, dari paling ringan ke paling berat. */
+export const LEVEL_DISPLAY_ORDER = ["minimal", "low", "medium", "high", "xhigh"];
+
 /** Fallback order per level, mirroring the extension's routing table. */
 const EFFORT_CHAIN = {
   minimal: ["minimal", "low", "medium", "high"],
@@ -88,7 +91,7 @@ function levelFromDisplayName(displayName) {
   return undefined;
 }
 
-function familyFromDisplayName(displayName) {
+export function familyFromDisplayName(displayName) {
   if (typeof displayName !== "string") return undefined;
   return displayName.replace(/\s*\((?:extra\s*low|extra\s*high|low|medium|high|minimal|thinking)\)\s*$/i, "").trim();
 }

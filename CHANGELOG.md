@@ -1,6 +1,29 @@
-# Changelog
+## [0.1.5] - 16-10-2026
 
-Semua perubahan penting Zenith Router dicatat di sini. Format mengikuti [Keep a Changelog](https://keepachangelog.com/id/1.1.0/), versi memakai [Semantic Versioning](https://semver.org/lang/id/).
+Adaptasi OpenCode v2, fidelitas konteks lintas provider, dan stabilisasi pengujian.
+
+### OpenCode & Upstream Protocol
+
+- Upgrade ke protokol v2 inference, rute `/inference/v1/*` dan header sesi kanonikal, dengan generator ID sesi 48-bit.
+- Dua tool fingerprint kanonikal (`read` dan `shell`) dengan aliasing otomatis tool klien yang bertabrakan.
+- Kalkulasi budget token dengan pembatasan per lane (chat 131072, responses 65536) dan preservasi saat retry.
+- Pemulihan otomatis 400 `ModelProtocolUnsupported` dengan pergantian payload lintas lane dan cache lane TTL 1 jam.
+- Impor model OpenCode dari endpoint v2 dengan filter free-model yang diperbarui.
+
+### Fidelitas Konteks & Translator
+
+- Penerusan langsung (passthrough) saat format sumber dan target sama, termasuk Body Responses mentah.
+- Preservasi `reasoning`, `include`, dan tool kustom pada `/v1/responses`.
+- Pemetaan tool call, gambar, `stop` dan `max_tokens` antar format (Claude, OpenAI, Responses, Gemini, Kiro, CommandCode).
+- Pulihkan nama tool di respons dan pertahankan thought signature Gemini lintas giliran percakapan.
+- Executor Codex men strip field tak didukung (`max_output_tokens`, `temperature`, `top_p`, `top_k`) dengan default `store=false`.
+- RTK mempertahankan baris kosong tanpa collapsing; executor CommandCode menyelesaikan nama tool result dari lookup, netral workingDir, dan mime data-URL.
+
+### Pengujian
+
+- Matriks fidelitas end-to-end (sumber -> target) melalui `tests/contextFidelity.test.js`.
+- Suite khusus Opencode (alias, retry-budget, protocol-fallback) dan budget token.
+- Total 570 test lulus (100 %) tanpa regresi dari perilaku retry/p passing cache.
 
 ## [0.1.4] - 14-10-2026
 

@@ -161,6 +161,10 @@ test("Database - migrates a pre-api_key_id usage_history table on startup", asyn
   const db = initDb(dbPath);
   const columns = db.prepare("PRAGMA table_info(usage_history)").all().map((c) => c.name);
   assert.ok(columns.includes("api_key_id"), "api_key_id column is added");
+  for (const col of ["cache_read_tokens", "cache_write_tokens", "reasoning_tokens"]) {
+    assert.ok(columns.includes(col), `${col} column is added`);
+  }
+  assert.strictEqual(db.prepare("SELECT cache_read_tokens FROM usage_history").get().cache_read_tokens, 0, "old rows default to zero cache");
   const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name);
   assert.ok(indexes.includes("idx_usage_api_key"));
   assert.strictEqual(db.prepare("SELECT total_tokens FROM usage_history").get().total_tokens, 42, "existing rows kept");

@@ -429,6 +429,16 @@ function relWhen(ts) {
 }
 
 /**
+ * Share of input tokens served from the upstream prompt cache. Rows recorded
+ * before the cache columns existed count as zero cache.
+ */
+function cacheHitLabel(summary) {
+  if (!summary.total_input_tokens) return "Belum ada token masukan";
+  const pct = (summary.total_cache_read_tokens / summary.total_input_tokens) * 100;
+  return `${pct.toFixed(1)}% dari token masukan`;
+}
+
+/**
  * Recent requests list beside the topology, mirroring the 9router panel:
  * model, in/out tokens, and when the request finished.
  */
@@ -441,7 +451,7 @@ function renderRecentPanel(recent) {
             <code class="recent-model">${r.combo_name ? `${escapeHtml(r.combo_name)} &rarr; ` : ""}${escapeHtml(r.model)}</code>
             <span class="recent-when">${relWhen(r.timestamp)}</span>
           </div>
-          <div class="recent-io">in ${fmtNum(r.input_tokens)} · out ${fmtNum(r.output_tokens)}</div>
+          <div class="recent-io">in ${fmtNum(r.input_tokens)} · out ${fmtNum(r.output_tokens)}${r.cache_read_tokens > 0 ? ` · cache ${fmtNum(r.cache_read_tokens)}` : ""}</div>
         </li>`
     )
     .join("");
@@ -686,6 +696,11 @@ function renderQuotaCard(s) {
         <div class="value">${stats.summary.total_tokens.toLocaleString()}</div>
         <div class="sub">Pemakaian gabungan</div>
       </div>
+      <div class="card stat">
+        <div class="label">Token dari Cache</div>
+        <div class="value">${stats.summary.total_cache_read_tokens.toLocaleString()}</div>
+        <div class="sub">${cacheHitLabel(stats.summary)}</div>
+      </div>
     </div>
 
     <div class="card">
@@ -779,7 +794,8 @@ function renderQuotaCard(s) {
                 '<code class="recent-model">' + esc(r.combo_name ? r.combo_name + ' \u2192 ' : '') + esc(r.model) + '</code>' +
                 '<span class="recent-when">' + esc(rel(r.timestamp)) + '</span>' +
                 '</div>' +
-                '<div class="recent-io">in ' + compact(r.input_tokens) + ' \u00b7 out ' + compact(r.output_tokens) + '</div>' +
+                '<div class="recent-io">in ' + compact(r.input_tokens) + ' \u00b7 out ' + compact(r.output_tokens) +
+                (Number(r.cache_read_tokens) > 0 ? ' \u00b7 cache ' + compact(r.cache_read_tokens) : '') + '</div>' +
                 '</li>';
             }).join("");
             body.innerHTML = '<ul class="recent-list">' + html + '</ul>';

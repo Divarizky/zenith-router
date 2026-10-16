@@ -545,6 +545,8 @@ export function createResponsesToOpenAITransformStream(model = "codex") {
               const usage = resp.usage || {};
               const inputTokens = usage.input_tokens || usage.prompt_tokens || 0;
               const outputTokens = usage.output_tokens || usage.completion_tokens || 0;
+              const cached = usage.input_tokens_details?.cached_tokens;
+              const reasoning = usage.output_tokens_details?.reasoning_tokens;
 
               const openAIChunk = {
                 id: responseId,
@@ -562,6 +564,8 @@ export function createResponsesToOpenAITransformStream(model = "codex") {
                   prompt_tokens: inputTokens,
                   completion_tokens: outputTokens,
                   total_tokens: inputTokens + outputTokens,
+                  ...(typeof cached === "number" ? { prompt_tokens_details: { cached_tokens: cached } } : {}),
+                  ...(typeof reasoning === "number" ? { completion_tokens_details: { reasoning_tokens: reasoning } } : {}),
                 },
               };
               controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));

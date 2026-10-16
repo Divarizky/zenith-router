@@ -172,10 +172,20 @@ export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
     model: data.model || defaultModel,
     content,
     stop_reason: choice.finish_reason === "stop" || choice.finish_reason === "end_turn" ? "end_turn" : (choice.finish_reason === "tool_calls" ? "tool_use" : (choice.finish_reason || "end_turn")),
-    usage: {
-      input_tokens: data.usage?.prompt_tokens || 0,
-      output_tokens: data.usage?.completion_tokens || 0,
-    },
+    usage: openAIUsageToClaude(data.usage),
+  };
+}
+
+/**
+ * OpenAI prompt_tokens includes cached tokens; Claude keeps them out of
+ * input_tokens and reports them in cache_read_input_tokens.
+ */
+function openAIUsageToClaude(usage) {
+  const cached = usage?.prompt_tokens_details?.cached_tokens || 0;
+  return {
+    input_tokens: Math.max(0, (usage?.prompt_tokens || 0) - cached),
+    output_tokens: usage?.completion_tokens || 0,
+    ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
   };
 }
 
@@ -404,7 +414,7 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
               const parsed = JSON.parse(dataStr);
               const choice = parsed.choices?.[0] || {};
               const delta = choice.delta || {};
-              if (parsed.usage) claudeUsage = { input_tokens: parsed.usage.prompt_tokens || 0, output_tokens: parsed.usage.completion_tokens || 0 };
+              if (parsed.usage) claudeUsage = openAIUsageToClaude(parsed.usage);
               ensureClaudeStart(controller);
 
               const deltaText = delta.content;

@@ -1,6 +1,42 @@
 import { getDb } from "../db/index.js";
 import { captureLine } from "./logger.js";
 
+const positive = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+
+/**
+ * Normalize a usage object from any client protocol (OpenAI chat, Claude,
+ * Responses) into one shape. inputTokens always includes cached tokens, as in
+ * OpenAI; Claude reports cache reads/writes outside input_tokens, so they are
+ * added back here, otherwise the cache-hit ratio would be skewed.
+ */
+export function normalizeUsage(usage) {
+  const out = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
+  if (!usage || typeof usage !== "object") return out;
+
+  if (typeof usage.prompt_tokens === "number" || typeof usage.completion_tokens === "number") {
+    out.inputTokens = positive(usage.prompt_tokens);
+    out.outputTokens = positive(usage.completion_tokens);
+    out.cacheReadTokens = positive(usage.prompt_tokens_details?.cached_tokens);
+    out.reasoningTokens = positive(usage.completion_tokens_details?.reasoning_tokens);
+    return out;
+  }
+
+  if (usage.input_tokens_details || usage.output_tokens_details) {
+    // Responses: input_tokens already includes the cached part.
+    out.inputTokens = positive(usage.input_tokens);
+    out.outputTokens = positive(usage.output_tokens);
+    out.cacheReadTokens = positive(usage.input_tokens_details?.cached_tokens);
+    out.reasoningTokens = positive(usage.output_tokens_details?.reasoning_tokens);
+    return out;
+  }
+
+  out.cacheReadTokens = positive(usage.cache_read_input_tokens);
+  out.cacheWriteTokens = positive(usage.cache_creation_input_tokens);
+  out.inputTokens = positive(usage.input_tokens) + out.cacheReadTokens + out.cacheWriteTokens;
+  out.outputTokens = positive(usage.output_tokens);
+  return out;
+}
+
 /**
  * Record a token usage event in SQLite
  */
@@ -12,6 +48,9 @@ export function recordUsage({
   model,
   inputTokens = 0,
   outputTokens = 0,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
+  reasoningTokens = 0,
   durationMs = 0,
   timestamp = Date.now(),
 }) {
@@ -20,14 +59,17 @@ export function recordUsage({
     const inTok = Number(inputTokens) || 0;
     const outTok = Number(outputTokens) || 0;
     const totalTok = inTok + outTok;
+    const cacheRead = Number(cacheReadTokens) || 0;
+    const cacheWrite = Number(cacheWriteTokens) || 0;
+    const reasoning = Number(reasoningTokens) || 0;
     const dur = Number(durationMs) || 0;
     const connId = connectionId ? Number(connectionId) : null;
     const keyId = apiKeyId ? Number(apiKeyId) : null;
     const providerId = provider ? String(provider) : null;
 
     const stmt = db.prepare(`
-      INSERT INTO usage_history (connection_id, api_key_id, provider, model, combo_name, input_tokens, output_tokens, total_tokens, duration_ms, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (connection_id, api_key_id, provider, model, combo_name, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const info = stmt.run(
@@ -39,12 +81,17 @@ export function recordUsage({
       inTok,
       outTok,
       totalTok,
+      cacheRead,
+      cacheWrite,
+      reasoning,
       dur,
       timestamp
     );
 
     captureLine(
-      `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok} | ${dur}ms${
+      `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok}${
+        cacheRead || cacheWrite ? ` cache_read=${cacheRead} cache_write=${cacheWrite}` : ""
+      } | ${dur}ms${
         connId ? ` | conn#${connId}` : providerId ? ` | provider=${providerId}` : ""
       }`
     );
@@ -58,6 +105,9 @@ export function recordUsage({
       input_tokens: inTok,
       output_tokens: outTok,
       total_tokens: totalTok,
+      cache_read_tokens: cacheRead,
+      cache_write_tokens: cacheWrite,
+      reasoning_tokens: reasoning,
       duration_ms: dur,
       timestamp,
     };
@@ -116,9 +166,20 @@ export function estimateResponsesInputTokens(body) {
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
 export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, comboName = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
-  let inputTokens = 0;
-  let outputTokens = 0;
+  // Last usage object seen in the client protocol. Claude splits usage over
+  // message_start and message_delta, so its fields are merged.
+  let lastUsage = null;
+  let claudeUsage = null;
   let streamedTextLength = 0;
+
+  const mergeClaudeUsage = (u) => {
+    claudeUsage = { ...(claudeUsage || {}) };
+    for (const [k, v] of Object.entries(u)) {
+      // A later zero must not wipe a count reported earlier.
+      if (typeof v === "number" && (v > 0 || !(k in claudeUsage))) claudeUsage[k] = v;
+    }
+    lastUsage = claudeUsage;
+  };
   let buffer = "";
   const textDecoder = new TextDecoder();
 
@@ -139,30 +200,23 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
             if (dataStr && dataStr !== "[DONE]") {
               try {
                 const parsed = JSON.parse(dataStr);
-                // OpenAI usage chunk
-                if (parsed.usage) {
-                  if (typeof parsed.usage.prompt_tokens === "number") inputTokens = parsed.usage.prompt_tokens;
-                  if (typeof parsed.usage.completion_tokens === "number") outputTokens = parsed.usage.completion_tokens;
-                }
-                // Claude usage chunk (message_start & message_delta)
-                if (parsed.message?.usage) {
-                  if (typeof parsed.message.usage.input_tokens === "number") {
-                    inputTokens = parsed.message.usage.input_tokens;
+                if (parsed.usage && typeof parsed.usage === "object") {
+                  if (typeof parsed.usage.prompt_tokens === "number" || typeof parsed.usage.completion_tokens === "number") {
+                    // OpenAI usage chunk
+                    lastUsage = parsed.usage;
+                  } else {
+                    // Claude message_delta
+                    mergeClaudeUsage(parsed.usage);
                   }
                 }
-                if (parsed.usage?.output_tokens) {
-                  outputTokens = parsed.usage.output_tokens;
+                // Claude message_start
+                if (parsed.message?.usage && typeof parsed.message.usage === "object") {
+                  mergeClaudeUsage(parsed.message.usage);
                 }
-
                 // Responses usage (response.completed); response.created carries
                 // a response object without usage, so the guard stays on .usage.
-                if (parsed.response?.usage) {
-                  if (typeof parsed.response.usage.input_tokens === "number") {
-                    inputTokens = parsed.response.usage.input_tokens;
-                  }
-                  if (typeof parsed.response.usage.output_tokens === "number") {
-                    outputTokens = parsed.response.usage.output_tokens;
-                  }
+                if (parsed.response?.usage && typeof parsed.response.usage === "object") {
+                  lastUsage = parsed.response.usage;
                 }
                 // Heuristic text accumulator in case provider omits usage
                 const deltaContent = parsed.choices?.[0]?.delta?.content;
@@ -185,6 +239,8 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
 
     flush() {
       const durationMs = Date.now() - startTime;
+      const { cacheReadTokens, cacheWriteTokens, reasoningTokens, ...counts } = normalizeUsage(lastUsage);
+      let { inputTokens, outputTokens } = counts;
       if (inputTokens === 0 && estimatedInputTokens > 0) {
         inputTokens = estimatedInputTokens;
       }
@@ -202,6 +258,9 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
           model,
           inputTokens,
           outputTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
+          reasoningTokens,
           durationMs,
         });
       });
@@ -224,6 +283,9 @@ export function getUsageStats(options = {}) {
       COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
       COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+      COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
+      COALESCE(SUM(cache_write_tokens), 0) AS total_cache_write_tokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS total_reasoning_tokens,
       ROUND(COALESCE(AVG(duration_ms), 0)) AS avg_duration_ms
     FROM usage_history
     WHERE timestamp >= ?
@@ -233,6 +295,9 @@ export function getUsageStats(options = {}) {
     total_input_tokens: 0,
     total_output_tokens: 0,
     total_tokens: 0,
+    total_cache_read_tokens: 0,
+    total_cache_write_tokens: 0,
+    total_reasoning_tokens: 0,
     avg_duration_ms: 0,
   };
 
@@ -284,6 +349,9 @@ export function getUsageStats(options = {}) {
       total_input_tokens: Number(summary.total_input_tokens),
       total_output_tokens: Number(summary.total_output_tokens),
       total_tokens: Number(summary.total_tokens),
+      total_cache_read_tokens: Number(summary.total_cache_read_tokens),
+      total_cache_write_tokens: Number(summary.total_cache_write_tokens),
+      total_reasoning_tokens: Number(summary.total_reasoning_tokens),
       avg_duration_ms: Number(summary.avg_duration_ms),
     },
     by_model: byModel.map((row) => ({
@@ -314,7 +382,7 @@ export function getRecentUsage(limit = 10) {
     return (
       db
         .prepare(
-          `SELECT model, combo_name, input_tokens, output_tokens, duration_ms, timestamp
+          `SELECT model, combo_name, input_tokens, output_tokens, cache_read_tokens, duration_ms, timestamp
            FROM usage_history
            ORDER BY timestamp DESC, id DESC
            LIMIT ?`

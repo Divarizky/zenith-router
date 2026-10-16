@@ -1,7 +1,7 @@
 import { routeRequest } from "./route.js";
 import { clientSessionKey } from "./session.js";
 import { translateResponse, createTransformStream, FORMATS } from "../translator/index.js";
-import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
+import { recordUsage, createUsageTapStream, estimateTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 
 /**
@@ -239,8 +239,7 @@ export async function handleMessages(c) {
     const finalData = await upstreamResponseToClaude(upstreamRes, targetFormat, targetModel);
 
     const durationMs = Date.now() - startTime;
-    const inputTokens = finalData.usage?.input_tokens || finalData.usage?.prompt_tokens || 0;
-    const outputTokens = finalData.usage?.output_tokens || finalData.usage?.completion_tokens || 0;
+    const usage = normalizeUsage(finalData.usage);
     queueMicrotask(() => {
       recordUsage({
         connectionId: connection?.id,
@@ -248,8 +247,7 @@ export async function handleMessages(c) {
         provider: provider?.id,
         comboName,
         model: targetModel,
-        inputTokens,
-        outputTokens,
+        ...usage,
         durationMs,
       });
     });

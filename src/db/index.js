@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS usage_history (
   input_tokens INTEGER DEFAULT 0,
   output_tokens INTEGER DEFAULT 0,
   total_tokens INTEGER DEFAULT 0,
+  cache_read_tokens INTEGER DEFAULT 0,
+  cache_write_tokens INTEGER DEFAULT 0,
+  reasoning_tokens INTEGER DEFAULT 0,
   duration_ms INTEGER DEFAULT 0,
   timestamp INTEGER NOT NULL
 );
@@ -209,6 +212,11 @@ function migrateSchema(db) {
   }
   if (!usageColumns.some((col) => col.name === "combo_name")) {
     db.exec("ALTER TABLE usage_history ADD COLUMN combo_name TEXT");
+  }
+  for (const col of ["cache_read_tokens", "cache_write_tokens", "reasoning_tokens"]) {
+    if (!usageColumns.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE usage_history ADD COLUMN ${col} INTEGER DEFAULT 0`);
+    }
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_api_key ON usage_history (api_key_id, timestamp)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage_history (provider, timestamp)");

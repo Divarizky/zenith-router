@@ -1,7 +1,7 @@
 import { routeRequest } from "./route.js";
 import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
-import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
+import { recordUsage, createUsageTapStream, estimateTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 
 const upstreamBaseUrl = (provider) =>
@@ -111,8 +111,7 @@ export async function handleChat(c) {
     const finalData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
 
     const durationMs = Date.now() - startTime;
-    const inputTokens = finalData.usage?.prompt_tokens || finalData.usage?.input_tokens || 0;
-    const outputTokens = finalData.usage?.completion_tokens || finalData.usage?.output_tokens || 0;
+    const usage = normalizeUsage(finalData.usage);
     queueMicrotask(() => {
       recordUsage({
         connectionId: connection?.id,
@@ -120,8 +119,7 @@ export async function handleChat(c) {
         provider: provider?.id,
         comboName,
         model: targetModel,
-        inputTokens,
-        outputTokens,
+        ...usage,
         durationMs,
       });
     });

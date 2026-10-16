@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { decodeEventStreamBuffer } from "../utils/eventstream.js";
 
+// Concatenate every system message (usually just one preamble) so the Kiro
+// first user turn keeps the full agent instructions.
+function collectSystemText(messages) {
+  const parts = [];
+  for (const msg of messages) {
+    if (msg?.role === "system" && typeof msg.content === "string" && msg.content) parts.push(msg.content);
+  }
+  return parts.join("\n\n");
+}
+
 /**
  * Translate OpenAI Chat Completions request to AWS CodeWhisperer (Kiro) format
  */
@@ -10,8 +20,56 @@ export function openaiToKiroRequest(body, targetModel, profileArn = "") {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const history = [];
   let currentUserText = "";
+  let currentUserContext = null;
   const tools = [];
-  const toolResults = [];
+
+  // Tool results belong to the user turn that answers the assistant which
+  // issued the calls, so they ride the next user entry (or the current
+  // message when nothing follows). Entries strictly alternate user and
+  // assistant; consecutive assistant turns are merged.
+  let pendingToolResults = [];
+  let sawFirstUserTurn = false;
+
+  const attachResults = (userInputMessage) => {
+    if (pendingToolResults.length === 0) return;
+    userInputMessage.userInputMessageContext = { toolResults: pendingToolResults };
+    pendingToolResults = [];
+  };
+
+  const pushAssistantTurn = (text, toolCalls) => {
+    const toolUses = [];
+    if (Array.isArray(toolCalls)) {
+      for (const tc of toolCalls) {
+        let args = {};
+        try {
+          args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function?.arguments || {};
+        } catch {
+          args = {};
+        }
+        toolUses.push({
+          toolUseId: tc.id || "",
+          name: tc.function?.name || "",
+          input: args,
+        });
+      }
+    }
+    const last = history[history.length - 1];
+    if (last?.assistantResponseMessage && !toolUses.length && !text) return;
+    if (last?.assistantResponseMessage) {
+      // Merge back-to-back assistant turns so history keeps alternating.
+      if (text) last.assistantResponseMessage.content = [last.assistantResponseMessage.content, text].filter(Boolean).join("\n");
+      if (toolUses.length > 0) {
+        last.assistantResponseMessage.toolUses = [...(last.assistantResponseMessage.toolUses || []), ...toolUses];
+      }
+      return;
+    }
+    history.push({
+      assistantResponseMessage: {
+        content: text,
+        ...(toolUses.length > 0 ? { toolUses } : {}),
+      },
+    });
+  };
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
@@ -20,10 +78,8 @@ export function openaiToKiroRequest(body, targetModel, profileArn = "") {
     const isLast = i === messages.length - 1;
 
     if (msg.role === "system") {
-      const text = typeof msg.content === "string" ? msg.content : "";
-      if (text) {
-        currentUserText = currentUserText ? `${text}\n\n${currentUserText}` : text;
-      }
+      // System prompt joins the first user turn, mirroring how Kiro CLI folds
+      // the agent preamble into the opening message rather than a separate role.
       continue;
     }
 
@@ -34,7 +90,7 @@ export function openaiToKiroRequest(body, targetModel, profileArn = "") {
       } catch {
         content = String(msg.content);
       }
-      toolResults.push({
+      pendingToolResults.push({
         toolUseId: msg.tool_call_id || "",
         content: [{ text: content }],
         status: "success",
@@ -43,28 +99,38 @@ export function openaiToKiroRequest(body, targetModel, profileArn = "") {
     }
 
     if (msg.role === "user") {
-      const text = typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.map((c) => c.text || "").join("\n") : "";
+      const text = typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.map((c) => c?.text || "").join("\n") : "";
+      // Prepend the system preamble to the very first user turn only.
+      let content = text;
+      if (!sawFirstUserTurn) {
+        sawFirstUserTurn = true;
+        const sysText = collectSystemText(messages);
+        if (sysText) content = `${sysText}\n\n${text}`;
+      }
+      // Images have no verified Kiro field; their text survives, the bytes do
+      // not (documented limitation, not silent corruption).
+      const userInputMessage = { content };
+      attachResults(userInputMessage);
       if (isLast) {
-        currentUserText = currentUserText ? `${currentUserText}\n\n${text}` : text;
+        currentUserText = content;
+        if (userInputMessage.userInputMessageContext) {
+          currentUserContext = userInputMessage.userInputMessageContext;
+        }
       } else {
-        history.push({
-          userInputMessage: {
-            content: text,
-          },
-        });
+        history.push({ userInputMessage });
       }
       continue;
     }
 
     if (msg.role === "assistant") {
       const text = typeof msg.content === "string" ? msg.content : "";
-      history.push({
-        assistantResponseMessage: {
-          content: text,
-        },
-      });
+      pushAssistantTurn(text, msg.tool_calls);
     }
   }
+
+  // Trailing tool results (no user text after them) sit on the current turn.
+  const currentToolResults = pendingToolResults;
+  pendingToolResults = [];
 
   if (Array.isArray(body.tools)) {
     for (const t of body.tools) {
@@ -84,13 +150,17 @@ export function openaiToKiroRequest(body, targetModel, profileArn = "") {
 
   const currentMessageContext = {};
   if (tools.length > 0) currentMessageContext.tools = tools;
-  if (toolResults.length > 0) currentMessageContext.toolResults = toolResults;
+  if (currentUserContext?.toolResults) currentMessageContext.toolResults = currentUserContext.toolResults;
+  if (currentToolResults.length > 0) currentMessageContext.toolResults = currentToolResults;
 
   const conversationState = {
     conversationId: randomUUID(),
     currentMessage: {
       userInputMessage: {
-        content: currentUserText || "Hello",
+        // No fabricated greeting: a pure tool-result turn carries empty text
+        // with the results in context. "Hello" would reach the model as a
+        // fake user message and corrupt its context.
+        content: currentUserText,
         modelId: targetModel || body.model || "claude-3-7-sonnet",
         origin: "KIRO_CLI",
         ...(Object.keys(currentMessageContext).length > 0 ? { userInputMessageContext: currentMessageContext } : {}),
@@ -121,6 +191,7 @@ export function createKiroToOpenAITransformStream(model = "kiro") {
   const created = Math.floor(Date.now() / 1000);
 
   let currentToolIndex = 0;
+  const toolCallById = new Map();
 
   return new TransformStream({
     transform(chunk, controller) {
@@ -162,36 +233,62 @@ export function createKiroToOpenAITransformStream(model = "kiro") {
           controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
         }
 
-        // toolUseEvent
+        // toolUseEvent: Kiro streams one tool call across several fragments that
+        // share a toolUseId. Fragments are merged by id into a single OpenAI
+        // tool call: the first fragment opens it, later ones append arguments.
         if (payload.toolUseEvent) {
           const t = payload.toolUseEvent;
           const toolCallId = t.toolUseId || `call_${randomUUID().slice(0, 8)}`;
-          const openAIChunk = {
-            id: responseId,
-            object: "chat.completion.chunk",
-            created,
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: {
-                  tool_calls: [
-                    {
-                      index: currentToolIndex++,
-                      id: toolCallId,
-                      type: "function",
-                      function: {
-                        name: t.name || "",
-                        arguments: typeof t.input === "string" ? t.input : JSON.stringify(t.input || {}),
+          // Stop/intermediate fragments can omit `input`; only fragments that
+          // carry one append to the argument buffer.
+          const fragment = t.input === undefined ? "" : typeof t.input === "string" ? t.input : JSON.stringify(t.input);
+          let entry = toolCallById.get(toolCallId);
+          if (!entry) {
+            entry = { index: currentToolIndex++, args: "" };
+            toolCallById.set(toolCallId, entry);
+            const openAIChunk = {
+              id: responseId,
+              object: "chat.completion.chunk",
+              created,
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: entry.index,
+                        id: toolCallId,
+                        type: "function",
+                        function: { name: t.name || "", arguments: "" },
                       },
-                    },
-                  ],
+                    ],
+                  },
+                  finish_reason: null,
                 },
-                finish_reason: null,
-              },
-            ],
-          };
-          controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+              ],
+            };
+            controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+          }
+          if (fragment) {
+            entry.args += fragment;
+            const deltaChunk = {
+              id: responseId,
+              object: "chat.completion.chunk",
+              created,
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [{ index: entry.index, function: { arguments: fragment } }],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            };
+            controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(deltaChunk)}\n\n`));
+          }
         }
       }
     },

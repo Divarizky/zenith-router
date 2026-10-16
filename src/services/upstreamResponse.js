@@ -23,6 +23,7 @@ function aggregateOpenAISSE(text, model) {
   let created = Math.floor(Date.now() / 1000);
   let role = "assistant";
   let content = "";
+  let reasoning = "";
   const toolMap = new Map();
   let finishReason = null;
   let usage = null;
@@ -35,7 +36,13 @@ function aggregateOpenAISSE(text, model) {
     const message = choice.message || {};
     if (delta.role) role = delta.role;
     if (typeof delta.content === "string") content += delta.content;
+    // Thinking models stream their chain-of-thought as reasoning_content (the
+    // executor normalizes delta.reasoning into it); keep it for non-streaming
+    // clients instead of dropping it during aggregation.
+    if (typeof delta.reasoning_content === "string") reasoning += delta.reasoning_content;
+    else if (typeof delta.reasoning === "string") reasoning += delta.reasoning;
     if (typeof message.content === "string" && !content) content = message.content;
+    if (!reasoning && typeof message.reasoning_content === "string") reasoning = message.reasoning_content;
     if (message.role) role = message.role;
     if (Array.isArray(message.tool_calls)) {
       for (const tc of message.tool_calls) toolMap.set(tc.id || tc.index || toolMap.size, tc);
@@ -75,6 +82,7 @@ function aggregateOpenAISSE(text, model) {
         message: {
           role,
           content: content || null,
+          ...(reasoning ? { reasoning_content: reasoning } : {}),
           ...(tool_calls.length > 0 ? { tool_calls } : {}),
         },
         finish_reason: finishReason || (tool_calls.length > 0 ? "tool_calls" : "stop"),

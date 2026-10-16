@@ -1,9 +1,9 @@
 import { routeRequest } from "./route.js";
 import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
-import { recordUsage, createUsageTapStream, estimateTokens } from "../services/usage.js";
+import { recordUsage, createUsageTapStream, estimateResponsesInputTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
-import { responsesToOpenAIRequest, openAIMessageToResponsesOutput } from "../translator/responses.js";
+import { openAIMessageToResponsesOutput, aggregateResponsesStream, customToolNamesFromBody } from "../translator/responses.js";
 
 const upstreamBaseUrl = (provider) =>
   provider.transport?.responsesUrl ||
@@ -40,14 +40,15 @@ export async function handleResponses(c) {
     );
   }
 
-  const chatBody = responsesToOpenAIRequest(rawBody);
-
+  // The raw Responses body is routed as-is: a Responses upstream receives it
+  // verbatim (F-11), and a chat/Claude/Gemini/Kiro upstream gets the pivot
+  // inside translateRequest per member — including after a combo failover.
   try {
     const routed = await routeRequest({
-      model: chatBody.model,
-      body: chatBody,
+      model: rawBody.model,
+      body: rawBody,
       signal: c.req.raw.signal,
-      sourceFormat: FORMATS.OPENAI,
+      sourceFormat: FORMATS.OPENAI_RESPONSES,
       defaultFormat: FORMATS.OPENAI,
       tokenSaverHeader: c.req.header("x-zenith-token-saver"),
       withUsageChunk: true,
@@ -60,7 +61,7 @@ export async function handleResponses(c) {
       return c.json(
         {
           error: {
-            message: `Model '${chatBody.model}' not found in registry`,
+            message: `Model '${rawBody.model}' not found in registry`,
             type: "invalid_request_error",
             code: "model_not_found",
           },
@@ -76,11 +77,13 @@ export async function handleResponses(c) {
     const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName } = routed;
     const apiKeyId = c.get("apiKeyId") || null;
 
-    if (chatBody.stream) {
+    if (rawBody.stream) {
       let responseStream = upstreamRes.body;
       if (targetFormat !== FORMATS.OPENAI_RESPONSES) {
         responseStream = responseStream.pipeThrough(
-          createTransformStream(targetFormat, FORMATS.OPENAI_RESPONSES, targetModel)
+          createTransformStream(targetFormat, FORMATS.OPENAI_RESPONSES, targetModel, {
+            customToolNames: customToolNamesFromBody(rawBody),
+          })
         );
       }
 
@@ -92,7 +95,7 @@ export async function handleResponses(c) {
           comboName,
           model: targetModel,
           startTime,
-          estimatedInputTokens: estimateTokens(chatBody.messages),
+          estimatedInputTokens: estimateResponsesInputTokens(rawBody),
         })
       );
 
@@ -104,6 +107,32 @@ export async function handleResponses(c) {
           "Connection": "keep-alive",
         },
       });
+    }
+
+    // Responses upstream answering a Responses client: the JSON body is the
+    // client's own protocol, so it is returned untouched. Responses backends
+    // always stream, so a non-streaming client gets the events aggregated.
+    if (targetFormat === FORMATS.OPENAI_RESPONSES) {
+      const contentType = upstreamRes.headers.get("content-type") || "";
+      const rawText = await upstreamRes.text();
+      const data = contentType.includes("event-stream") || /^\s*(data|event):/m.test(rawText)
+        ? aggregateResponsesStream(rawText, targetModel)
+        : JSON.parse(rawText);
+      const inputTokens = data.usage?.input_tokens || 0;
+      const outputTokens = data.usage?.output_tokens || 0;
+      queueMicrotask(() => {
+        recordUsage({
+          connectionId: connection?.id,
+          apiKeyId,
+          provider: provider?.id,
+          comboName,
+          model: targetModel,
+          inputTokens,
+          outputTokens,
+          durationMs: Date.now() - startTime,
+        });
+      });
+      return c.json(data, 200);
     }
 
     const finalData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
@@ -129,7 +158,9 @@ export async function handleResponses(c) {
       object: "response",
       status: "completed",
       model: targetModel,
-      output: openAIMessageToResponsesOutput(finalData.choices?.[0]?.message),
+      output: openAIMessageToResponsesOutput(finalData.choices?.[0]?.message, {
+        customToolNames: customToolNamesFromBody(rawBody),
+      }),
       usage: {
         input_tokens: inputTokens,
         output_tokens: outputTokens,

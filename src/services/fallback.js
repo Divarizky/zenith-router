@@ -221,9 +221,38 @@ export async function executeWithFallback({
   let reasoningRetried = false;
   // Accounts that refused the model itself (tier), as opposed to other failures.
   let tierDenials = 0;
+  // Connection of the first attempt. Encrypted reasoning items are bound to
+  // the account that produced them, so a retry that lands on another
+  // connection cannot verify them upstream — they are stripped instead of
+  // risking a 400 that failover would not retry.
+  let primaryConnectionId;
+
+  function stripEncryptedReasoning(text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || !Array.isArray(parsed.input)) return text;
+      const input = parsed.input.filter(
+        (item) => !(item?.type === "reasoning" && typeof item.encrypted_content === "string" && item.encrypted_content)
+      );
+      if (input.length === parsed.input.length) return text;
+      parsed.input = input;
+      return JSON.stringify(parsed);
+    } catch {
+      return text;
+    }
+  }
 
   function bodyForConnection(connection) {
     const format = String(targetFormat || "").toLowerCase();
+    if (format === "openai-responses" || format === "responses") {
+      if (connection?.id) {
+        if (primaryConnectionId === undefined) primaryConnectionId = connection.id;
+        else if (connection.id !== primaryConnectionId) {
+          bodyText = stripEncryptedReasoning(bodyText);
+        }
+      }
+      return bodyText;
+    }
     if (format !== "kiro" && format !== "codewhisperer") return bodyText;
     const profileArn = connection?.credentials?.profile_arn || connection?.credentials?.profileArn;
     if (!profileArn) return bodyText;

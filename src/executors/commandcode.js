@@ -47,7 +47,12 @@ function toContentBlocks(content) {
         } else if (part.type === "image_url" || part.type === "image") {
           const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url || part.image;
           if (url) {
-            blocks.push({ type: "image", image: url, mimeType: "image/png" });
+            // data: URLs carry their real media type; a bare URL defaults to
+            // png rather than lying about jpeg.
+            let mimeType = "image/png";
+            const m = /^data:([^;,]+)[;,]/.exec(url);
+            if (m) mimeType = m[1];
+            blocks.push({ type: "image", image: url, mimeType });
           }
         }
       }
@@ -71,6 +76,9 @@ export function translateOpenAIToCommandCode(body, model) {
   const incomingMessages = Array.isArray(body?.messages) ? body.messages : [];
   const outMessages = [];
   const systemTexts = [];
+  // tool_call id -> function name, so tool results carry the real tool name
+  // (OpenAI tool messages omit it).
+  const toolNameById = new Map();
 
   for (const m of incomingMessages) {
     if (!m) continue;
@@ -90,7 +98,7 @@ export function translateOpenAIToCommandCode(body, model) {
           {
             type: "tool-result",
             toolCallId: m.tool_call_id || "",
-            toolName: m.name || "",
+            toolName: m.name || toolNameById.get(m.tool_call_id) || "",
             output: { type: "text", value },
           },
         ],
@@ -109,6 +117,7 @@ export function translateOpenAIToCommandCode(body, model) {
       if (Array.isArray(m.tool_calls)) {
         for (const tc of m.tool_calls) {
           const fn = tc.function || {};
+          if (tc.id && fn.name) toolNameById.set(tc.id, fn.name);
           blocks.push({
             type: "tool-call",
             toolCallId: tc.id || "",
@@ -131,9 +140,12 @@ export function translateOpenAIToCommandCode(body, model) {
     model: model || body?.model,
     messages: outMessages,
     stream: true,
-    max_tokens: body?.max_tokens ?? body?.max_output_tokens ?? 8192,
-    temperature: body?.temperature ?? 0.3,
   };
+  // Only forward limits the client actually set; forcing a temperature or a
+  // max_tokens default would silently override the caller's intent (F-11).
+  const maxTokens = body?.max_tokens ?? body?.max_output_tokens;
+  if (typeof maxTokens === "number") params.max_tokens = maxTokens;
+  if (typeof body?.temperature === "number") params.temperature = body.temperature;
 
   if (systemTexts.length) {
     params.system = systemTexts.join("\n\n");
@@ -155,12 +167,13 @@ export function translateOpenAIToCommandCode(body, model) {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Isolate workspace context to prevent environment leakage
+  // workingDir is deliberately a neutral root: the real value is the local
+  // machine running Zenith, which must not leak to the upstream (F-11 / AC-09).
   return {
     threadId: randomUUID(),
     memory: "",
     config: {
-      workingDir: process.cwd(),
+      workingDir: "/",
       date: today,
       environment: process.platform,
       structure: [],

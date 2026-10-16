@@ -10,8 +10,17 @@ function deduplicateLines(text) {
   let repeatCount = 0;
 
   function flushRepeat() {
-    if (repeatCount > 2) {
-      // Keep first 2 lines, suppress the rest
+    // Blank lines (empty or whitespace only) are never suppressed (F-11)
+    if (currentLine !== null && currentLine.trim() === "") {
+      for (let i = 0; i < repeatCount; i++) {
+        result.push(currentLine);
+      }
+      repeatCount = 0;
+      return;
+    }
+
+    if (repeatCount >= 3) {
+      // Keep first line, suppress the rest
       result.push(currentLine);
       result.push(`[... ${repeatCount - 1} duplicate lines suppressed ...]`);
     } else {
@@ -66,11 +75,10 @@ export function condenseContent(text) {
       // Segment is a code block - preserve intact
       processedSegments.push(seg);
     } else {
-      // Non-code segment (prose, terminal logs, diff output)
+      // Non-code segment (prose, terminal logs, diff output).
+      // Blank lines are preserved intact without collapsing (F-11 / Option C).
       const deduped = deduplicateLines(seg);
-      // Collapse excessive blank lines (> 2 newlines into 2)
-      const collapsed = deduped.replace(/\n{3,}/g, "\n\n");
-      processedSegments.push(collapsed);
+      processedSegments.push(deduped);
     }
   }
 

@@ -85,6 +85,34 @@ export function estimateTokens(textOrMessages) {
 }
 
 /**
+ * Rough input-token estimate for a Responses API body (instructions + input
+ * items + text summaries). Only used when the upstream omits usage.
+ */
+export function estimateResponsesInputTokens(body) {
+  if (!body || typeof body !== "object") return 0;
+  let chars = typeof body.instructions === "string" ? body.instructions.length : 0;
+  const items = typeof body.input === "string" ? [body.input] : Array.isArray(body.input) ? body.input : [];
+  for (const item of items) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      chars += item.length;
+      continue;
+    }
+    if (typeof item.content === "string") chars += item.content.length;
+    else if (Array.isArray(item.content)) {
+      for (const c of item.content) {
+        chars += typeof c === "string" ? c.length : (c.text?.length || c.input_text?.length || 0);
+      }
+    }
+    if (typeof item.summary === "string") chars += item.summary.length;
+    else if (Array.isArray(item.summary)) {
+      for (const s of item.summary) chars += (s.text?.length || 0);
+    }
+  }
+  return Math.max(1, Math.ceil(chars / 4));
+}
+
+/**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
 export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, comboName = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
@@ -126,6 +154,16 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
                   outputTokens = parsed.usage.output_tokens;
                 }
 
+                // Responses usage (response.completed); response.created carries
+                // a response object without usage, so the guard stays on .usage.
+                if (parsed.response?.usage) {
+                  if (typeof parsed.response.usage.input_tokens === "number") {
+                    inputTokens = parsed.response.usage.input_tokens;
+                  }
+                  if (typeof parsed.response.usage.output_tokens === "number") {
+                    outputTokens = parsed.response.usage.output_tokens;
+                  }
+                }
                 // Heuristic text accumulator in case provider omits usage
                 const deltaContent = parsed.choices?.[0]?.delta?.content;
                 if (typeof deltaContent === "string") {
@@ -134,6 +172,9 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
                 const claudeDeltaText = parsed.delta?.text;
                 if (typeof claudeDeltaText === "string") {
                   streamedTextLength += claudeDeltaText.length;
+                }
+                if (parsed.type === "response.output_text.delta" && typeof parsed.delta === "string") {
+                  streamedTextLength += parsed.delta.length;
                 }
               } catch {}
             }

@@ -74,8 +74,15 @@ export async function handleChat(c) {
     if (body.stream) {
       let responseStream = upstreamRes.body;
       if (targetFormat !== FORMATS.OPENAI) {
+        // Chat clients cannot declare Responses custom tools, so their set is
+        // empty: upstream function_call items must never reach them as
+        // custom_tool_call even when another client registered the same name.
         responseStream = responseStream.pipeThrough(
-          createTransformStream(targetFormat, FORMATS.OPENAI, targetModel)
+          createTransformStream(targetFormat, FORMATS.OPENAI, targetModel, {
+            customToolNames: new Set(),
+            // OpenAI spec: the final usage chunk is sent only when requested.
+            includeUsage: Boolean(body.stream_options?.include_usage),
+          })
         );
       }
 

@@ -44,6 +44,22 @@ Hope this helps!`;
   assert.strictEqual(result.condensedText, codeContent);
 });
 
+test("rtk service - preserves consecutive blank lines without collapsing (Option C)", () => {
+  const textWithBlankLines = "first line\n\n\n\nsecond line";
+  const result = condenseContent(textWithBlankLines);
+  assert.strictEqual(result.condensedText, textWithBlankLines);
+});
+
+test("rtk service - suppresses only when repeatCount >= 3", () => {
+  const twoRepeats = "item 1\nitem 1\nitem 2";
+  const res2 = condenseContent(twoRepeats);
+  assert.strictEqual(res2.condensedText, twoRepeats, "2 identical lines are not suppressed");
+
+  const threeRepeats = "item 1\nitem 1\nitem 1\nitem 2";
+  const res3 = condenseContent(threeRepeats);
+  assert.ok(res3.condensedText.includes("duplicate lines suppressed"));
+});
+
 test("rtk service - condenseMessages processes messages array and tracks metrics", () => {
   const messages = [
     { role: "system", content: "You are a coding agent." },

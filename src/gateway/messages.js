@@ -32,9 +32,10 @@ const upstreamBaseUrl = (provider, targetFormat) =>
       provider.transport?.baseUrl ||
       "https://api.anthropic.com/v1/messages";
 
-function isWarmupOrNamingRequest(body, userAgent = "") {
-  // Warmup and topic-naming probes are always a single user message. A longer
-  // conversation is real work, even when its first message happens to match.
+function isWarmupRequest(body) {
+  // Only intercept explicit warmup probes ("Warmup"). A longer conversation
+  // is real work. Topic-naming requests (isNewTopic) are deliberately NOT
+  // intercepted so the client receives a real generated topic from upstream (F-11).
   if (!body || !Array.isArray(body.messages) || body.messages.length !== 1) return false;
 
   const firstMsg = body.messages[0];
@@ -42,20 +43,7 @@ function isWarmupOrNamingRequest(body, userAgent = "") {
     ? firstMsg.content
     : (Array.isArray(firstMsg.content) ? firstMsg.content.map((c) => c.text || "").join(" ") : "");
 
-  if (firstContent.trim() === "Warmup" || firstContent.trim().toLowerCase() === "warmup") {
-    return true;
-  }
-
-  // Claude Code naming requests
-  if (typeof body.system === "string" && body.system.includes("isNewTopic")) {
-    return true;
-  }
-  if (Array.isArray(body.system)) {
-    const sysText = body.system.map((s) => s.text || "").join(" ");
-    if (sysText.includes("isNewTopic")) return true;
-  }
-
-  return false;
+  return firstContent.trim().toLowerCase() === "warmup";
 }
 
 function createSyntheticWarmupStream(model) {
@@ -157,10 +145,8 @@ export async function handleMessages(c) {
 
   body.messages = sanitizeClaudeMessages(body.messages);
 
-  const userAgent = c.req.header("user-agent") || "";
-
-  // Intercept Claude Code warmup or naming request
-  if (isWarmupOrNamingRequest(body, userAgent)) {
+  // Intercept explicit Claude Code warmup request ("Warmup")
+  if (isWarmupRequest(body)) {
     if (body.stream) {
       return new Response(createSyntheticWarmupStream(body.model), {
         status: 200,
@@ -222,8 +208,9 @@ export async function handleMessages(c) {
     if (body.stream) {
       let responseStream = upstreamRes.body;
       if (targetFormat !== FORMATS.CLAUDE) {
+        // Claude clients cannot declare Responses custom tools either.
         responseStream = responseStream.pipeThrough(
-          createTransformStream(targetFormat, FORMATS.CLAUDE, targetModel)
+          createTransformStream(targetFormat, FORMATS.CLAUDE, targetModel, { customToolNames: new Set() })
         );
       }
 

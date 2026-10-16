@@ -119,6 +119,48 @@ test("POST /v1/messages - intercepts Claude Code Warmup in streaming mode", asyn
   assert.ok(received.includes("message_stop"));
 });
 
+test("POST /v1/messages - does NOT intercept isNewTopic topic naming requests (Option C)", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "claude", name: "Claude test", credentials: { api_key: "sk-ant-test" } });
+  let reachedUpstream = false;
+  setCustomExecutor({
+    async execute() {
+      reachedUpstream = true;
+      return new Response(
+        JSON.stringify({
+          id: "msg_topic",
+          type: "message",
+          role: "assistant",
+          model: "claude-3-7-sonnet",
+          content: [{ type: "text", text: "Refactor Router" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 15, output_tokens: 3 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    },
+  });
+
+  try {
+    const res = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude/claude-3-7-sonnet",
+        max_tokens: 50,
+        system: "Given this conversation, return a title. isNewTopic: true",
+        messages: [{ role: "user", content: "Name this session" }],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(reachedUpstream, true, "isNewTopic naming request must reach upstream");
+    const json = await res.json();
+    assert.strictEqual(json.content[0].text, "Refactor Router");
+  } finally {
+    setCustomExecutor(null);
+  }
+});
+
 test("POST /v1/messages - non-streaming relays upstream Anthropic response", async () => {
   initDb(":memory:");
   addConnection({ provider: "claude", name: "Claude test", credentials: { api_key: "sk-ant-test" } });

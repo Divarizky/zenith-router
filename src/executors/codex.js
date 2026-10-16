@@ -22,14 +22,23 @@ function extractAccountId(credentials) {
 }
 
 // The ChatGPT Codex backend rejects an output budget (9router codex executor
-// drops it for the same reason), so the translator's max_output_tokens never
-// reaches it.
-function stripUnsupportedFields(body) {
+// drops it for the same reason) and sampling params (codex_cli_rs never sends
+// them). Since the /v1/responses passthrough (F-11) forwards the raw body, a
+// generic Responses client could introduce fields the backend refuses; these
+// are stripped to keep the effective request identical to what the Codex CLI
+// itself sends. store must be false on this backend; clients that omit it get
+// the backend's required default rather than the OpenAI API default (true).
+export function stripUnsupportedFields(body) {
   if (typeof body !== "string") return body;
   try {
     const parsed = JSON.parse(body);
-    if (!parsed || typeof parsed !== "object" || !("max_output_tokens" in parsed)) return body;
-    delete parsed.max_output_tokens;
+    if (!parsed || typeof parsed !== "object") return body;
+    for (const key of ["max_output_tokens", "temperature", "top_p", "top_k"]) {
+      if (key in parsed) delete parsed[key];
+    }
+    if (parsed.store === undefined && Array.isArray(parsed.input)) {
+      parsed.store = false;
+    }
     return JSON.stringify(parsed);
   } catch {
     return body;

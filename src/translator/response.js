@@ -1,10 +1,12 @@
 function claudeContentToOpenAIFinish(content, stopReason) {
   let text = "";
+  let reasoning = "";
   const toolCalls = [];
   if (Array.isArray(content)) {
     for (const c of content) {
       if (!c) continue;
       if (c.type === "text") text += c.text || "";
+      if (c.type === "thinking" && typeof c.thinking === "string") reasoning += c.thinking;
       if (c.type === "tool_use") {
         toolCalls.push({
           id: c.id,
@@ -21,6 +23,7 @@ function claudeContentToOpenAIFinish(content, stopReason) {
   }
 
   const message = { role: "assistant", content: text || null };
+  if (reasoning) message.reasoning_content = reasoning;
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
 
   return {
@@ -36,6 +39,14 @@ function claudeContentToOpenAIFinish(content, stopReason) {
 export function claudeToOpenAIResponse(data, defaultModel = "claude") {
   const { message, finish_reason } = claudeContentToOpenAIFinish(data.content, data.stop_reason);
 
+  // Anthropic splits input into fresh + cache buckets; OpenAI folds them into
+  // one prompt_tokens with a cached detail counter.
+  const inputTokens = data.usage?.input_tokens || 0;
+  const cacheRead = data.usage?.cache_read_input_tokens || 0;
+  const cacheCreation = data.usage?.cache_creation_input_tokens || 0;
+  const promptTokens = inputTokens + cacheRead + cacheCreation;
+  const completionTokens = data.usage?.output_tokens || 0;
+
   return {
     id: data.id || `chatcmpl-${Date.now()}`,
     object: "chat.completion",
@@ -49,9 +60,10 @@ export function claudeToOpenAIResponse(data, defaultModel = "claude") {
       },
     ],
     usage: {
-      prompt_tokens: data.usage?.input_tokens || 0,
-      completion_tokens: data.usage?.output_tokens || 0,
-      total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+      ...(cacheRead > 0 ? { prompt_tokens_details: { cached_tokens: cacheRead } } : {}),
     },
   };
 }
@@ -170,22 +182,33 @@ export function openAIToClaudeResponse(data, defaultModel = "gpt-4o") {
 /**
  * Create TransformStream to translate SSE lines in real-time
  */
-export function createResponseTransformStream(sourceFormat, targetFormat, model) {
+export function createResponseTransformStream(sourceFormat, targetFormat, model, opts = {}) {
   if (sourceFormat === targetFormat) {
     return new TransformStream();
   }
 
+  // OpenAI protocol: the final usage chunk (choices: []) is only sent when the
+  // client asked for it via stream_options.include_usage.
+  const includeUsage = opts.includeUsage === true;
   let buffer = "";
   let currentEvent = null;
   let doneSent = false;
+  // finish_reason already emitted by the message_delta handler (real
+  // stop_reason); message_stop only sends the [DONE] sentinel.
+  let finishSent = false;
   const chunkId = `chatcmpl-${Date.now()}`;
   const textDecoder = new TextDecoder();
   const textEncoder = new TextEncoder();
   let claudeStarted = false;
   let claudeUsage = null;
+  let claudeInputTokens = 0;
+  let cachedInputTokens = 0;
+  let cacheCreationTokens = 0;
   let nextContentIndex = 0;
   let textBlockOpen = false;
   let textBlockIndex = null;
+  let thinkingBlockOpen = false;
+  let thinkingBlockIndex = null;
   const toolBlockIndexByOpenAI = new Map();
   const toolNamesByIndex = new Map();
   const toolArgBuffers = new Map();
@@ -207,6 +230,13 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
     if (!textBlockOpen) return;
     controller.enqueue(claudeEvent("content_block_stop", { type: "content_block_stop", index: textBlockIndex }));
     textBlockOpen = false;
+  }
+
+  function closeThinkingBlock(controller) {
+    if (!thinkingBlockOpen) return;
+    controller.enqueue(claudeEvent("content_block_stop", { type: "content_block_stop", index: thinkingBlockIndex }));
+    thinkingBlockOpen = false;
+    thinkingBlockIndex = null;
   }
 
   function closeToolBlocks(controller) {
@@ -264,9 +294,22 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
 
             try {
               const parsed = JSON.parse(dataStr);
-              if (currentEvent === "content_block_delta") {
+              if (currentEvent === "message_start") {
+                const u = parsed.message?.usage;
+                if (typeof u?.input_tokens === "number") claudeInputTokens = u.input_tokens;
+                if (typeof u?.cache_read_input_tokens === "number") cachedInputTokens = u.cache_read_input_tokens;
+              } else if (currentEvent === "content_block_delta") {
                 const delta = parsed.delta || {};
-                if (delta.text) {
+                if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+                  const openAIChunk = {
+                    id: chunkId,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: model || "claude",
+                    choices: [{ index: 0, delta: { reasoning_content: delta.thinking }, finish_reason: null }],
+                  };
+                  controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+                } else if (delta.text) {
                   const openAIChunk = {
                     id: chunkId,
                     object: "chat.completion.chunk",
@@ -278,20 +321,32 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
                 }
               } else if (currentEvent === "message_stop" || currentEvent === "content_block_stop") {
                 if (currentEvent === "message_stop" && !doneSent) {
-                  const finishChunk = {
-                    id: chunkId,
-                    object: "chat.completion.chunk",
-                    created: Math.floor(Date.now() / 1000),
-                    model: model || "claude",
-                    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-                  };
-                  controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(finishChunk)}\n\n`));
+                  if (!finishSent) {
+                    // Fallback for upstreams that end without a stop_reason:
+                    // close the choice as a plain stop.
+                    const finishChunk = {
+                      id: chunkId,
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: model || "claude",
+                      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                    };
+                    controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(finishChunk)}\n\n`));
+                    finishSent = true;
+                  }
                   controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
                   doneSent = true;
                 }
               } else if (currentEvent === "message_delta") {
                 const stopReason = parsed.delta?.stop_reason;
+                if (typeof parsed.usage?.output_tokens === "number") claudeUsage = parsed.usage;
+                if (typeof parsed.usage?.cache_creation_input_tokens === "number") {
+                  cacheCreationTokens = parsed.usage.cache_creation_input_tokens;
+                }
                 if (stopReason) {
+                  // OpenAI ordering: finish_reason chunk first (with the real
+                  // stop reason), then the final usage chunk (choices: [])
+                  // right before [DONE]; message_stop only sends [DONE].
                   const finishChunk = {
                     id: chunkId,
                     object: "chat.completion.chunk",
@@ -300,6 +355,26 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
                     choices: [{ index: 0, delta: {}, finish_reason: stopReason === "tool_use" ? "tool_calls" : "stop" }],
                   };
                   controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(finishChunk)}\n\n`));
+                  finishSent = true;
+                  if (includeUsage) {
+                    const inputTokens = (claudeUsage?.input_tokens || 0) || claudeInputTokens;
+                    const promptTokens = inputTokens + cachedInputTokens + cacheCreationTokens;
+                    const completionTokens = claudeUsage?.output_tokens || 0;
+                    const usageChunk = {
+                      id: chunkId,
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: model || "claude",
+                      choices: [],
+                      usage: {
+                        prompt_tokens: promptTokens,
+                        completion_tokens: completionTokens,
+                        total_tokens: promptTokens + completionTokens,
+                        ...(cachedInputTokens > 0 ? { prompt_tokens_details: { cached_tokens: cachedInputTokens } } : {}),
+                      },
+                    };
+                    controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(usageChunk)}\n\n`));
+                  }
                 }
               }
             } catch {}
@@ -334,6 +409,7 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
 
               const deltaText = delta.content;
               if (deltaText) {
+                if (thinkingBlockOpen) closeThinkingBlock(controller);
                 if (!textBlockOpen) {
                   textBlockOpen = true;
                   textBlockIndex = nextContentIndex++;
@@ -342,8 +418,30 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
                 controller.enqueue(claudeEvent("content_block_delta", { type: "content_block_delta", index: textBlockIndex, delta: { type: "text_delta", text: deltaText } }));
               }
 
+              // reasoning_content from a reasoning-aware chat upstream becomes
+              // ONE Claude thinking block per response: deltas accumulate into
+              // the open block, and a text block is closed before thinking
+              // starts (Anthropic forbids interleaved open blocks). The block
+              // carries no signature; Zenith drops thinking blocks from
+              // history on the next pivot, so unsigned blocks never reach a
+              // real Anthropic endpoint.
+              if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+                if (!thinkingBlockOpen) {
+                  if (textBlockOpen) {
+                    controller.enqueue(claudeEvent("content_block_stop", { type: "content_block_stop", index: textBlockIndex }));
+                    textBlockOpen = false;
+                    textBlockIndex = null;
+                  }
+                  thinkingBlockOpen = true;
+                  thinkingBlockIndex = nextContentIndex++;
+                  controller.enqueue(claudeEvent("content_block_start", { type: "content_block_start", index: thinkingBlockIndex, content_block: { type: "thinking", thinking: "" } }));
+                }
+                controller.enqueue(claudeEvent("content_block_delta", { type: "content_block_delta", index: thinkingBlockIndex, delta: { type: "thinking_delta", thinking: delta.reasoning_content } }));
+              }
+
               if (Array.isArray(delta.tool_calls)) {
                 closeTextBlock(controller);
+                closeThinkingBlock(controller);
                 for (const tc of delta.tool_calls) {
                   const key = tc.index ?? 0;
                   let idx = toolBlockIndexByOpenAI.get(key);
@@ -370,6 +468,7 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
 
               if (choice.finish_reason) {
                 closeTextBlock(controller);
+                closeThinkingBlock(controller);
                 closeToolBlocks(controller);
                 const stop = choice.finish_reason === "tool_calls" ? "tool_use" : (choice.finish_reason === "stop" ? "end_turn" : (choice.finish_reason === "length" ? "max_tokens" : "end_turn"));
                 controller.enqueue(claudeEvent("message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, ...(claudeUsage ? { usage: claudeUsage } : {}) }));
@@ -392,6 +491,7 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model)
       if (sourceFormat === "openai" && targetFormat === "claude" && !doneSent) {
         ensureClaudeStart(controller);
         closeTextBlock(controller);
+        closeThinkingBlock(controller);
         closeToolBlocks(controller);
         controller.enqueue(claudeEvent("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, ...(claudeUsage ? { usage: claudeUsage } : {}) }));
         controller.enqueue(claudeEvent("message_stop", { type: "message_stop" }));

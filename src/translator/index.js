@@ -7,6 +7,7 @@ import {
 } from "./response.js";
 import {
   openaiToResponsesRequest,
+  responsesToOpenAIRequest,
   responsesToOpenAIResponse,
   createResponsesToOpenAITransformStream,
   createOpenAIToResponsesTransformStream,
@@ -53,10 +54,14 @@ export function translateRequest(sourceFormat, targetFormat, body, targetModel) 
     return { ...body, model: targetModel || body.model };
   }
 
-  // Normalize source to OpenAI first if incoming from Claude
+  // Normalize the source to OpenAI first: Claude bodies and Responses bodies
+  // both pivot through the chat format. Same-format pairs short-circuit above,
+  // so a Responses client talking to a Responses upstream never pivots.
   let openAIBody = body;
   if (src === FORMATS.CLAUDE) {
     openAIBody = claudeToOpenAI(body, targetModel);
+  } else if (src === FORMATS.OPENAI_RESPONSES) {
+    openAIBody = responsesToOpenAIRequest(body);
   }
 
   if (tgt === FORMATS.CLAUDE) {
@@ -107,11 +112,14 @@ export function translateResponse(sourceFormat, targetFormat, data, model) {
 }
 
 /**
- * Create TransformStream to translate SSE stream chunks from sourceFormat to targetFormat
+ * Create TransformStream to translate SSE stream chunks from sourceFormat to targetFormat.
+ * opts.customToolNames: explicit set of Responses custom tool names declared by the client
+ * (authoritative; an empty set means the client cannot receive custom_tool_call items).
  */
-export function createTransformStream(sourceFormat, targetFormat, model) {
+export function createTransformStream(sourceFormat, targetFormat, model, opts = {}) {
   const src = normalizeFormat(sourceFormat);
   const tgt = normalizeFormat(targetFormat);
+  const responsesOpts = { customToolNames: opts.customToolNames, declaredTools: opts.declaredTools };
 
   if (src === FORMATS.OPENAI_RESPONSES && tgt === FORMATS.OPENAI) {
     return createResponsesToOpenAITransformStream(model);
@@ -127,22 +135,22 @@ export function createTransformStream(sourceFormat, targetFormat, model) {
 
   if (tgt === FORMATS.OPENAI_RESPONSES && src !== FORMATS.OPENAI_RESPONSES) {
     if (src === FORMATS.OPENAI) {
-      return createOpenAIToResponsesTransformStream(model);
+      return createOpenAIToResponsesTransformStream(model, responsesOpts);
     }
     return composeTransformStreams(
       createTransformStream(src, FORMATS.OPENAI, model),
-      createOpenAIToResponsesTransformStream(model),
+      createOpenAIToResponsesTransformStream(model, responsesOpts),
     );
   }
 
   if (tgt === FORMATS.CLAUDE && src !== FORMATS.CLAUDE) {
     return composeTransformStreams(
       createTransformStream(src, FORMATS.OPENAI, model),
-      createResponseTransformStream(FORMATS.OPENAI, FORMATS.CLAUDE, model),
+      createResponseTransformStream(FORMATS.OPENAI, FORMATS.CLAUDE, model, opts),
     );
   }
 
-  return createResponseTransformStream(src, tgt, model);
+  return createResponseTransformStream(src, tgt, model, opts);
 }
 
 function composeTransformStreams(...streams) {

@@ -5,11 +5,10 @@ import { applyConnectionAuth } from "./auth.js";
 import { MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { requireResolvedProxy } from "./proxyPools.js";
 import { capabilitiesFromApi } from "../providers/capabilities.js";
+import { isFreeOpencodeModel } from "./opencodeDiscovery.js";
 
 const IMPORT_TIMEOUT_MS = 20000;
 
-// OpenCode free models that don't use the "-free" suffix (9router suggested-models/filters.js).
-const KNOWN_FREE_OPENCODE = new Set(["big-pickle"]);
 // GLM free-tier models from OmniRoute's free model catalog.
 const FREE_GLM = new Set(["glm-4.7-flash", "glm-4.5-flash"]);
 
@@ -96,16 +95,16 @@ const IMPORTERS = {
     },
   },
   opencode: {
-    url: "https://opencode.ai/zen/v1/models",
+    url: "https://opencode.ai/inference/v1/models",
     public: true,
     // Paid Zen models in the same list need an API key; only free ones work without an account.
     modes: ["free"],
-    headers: { "x-opencode-client": "desktop" },
+    headers: { "x-opencode-client": "cli" },
     parse: (json) =>
       listOf(json).map((m) => ({
         id: m.id,
         name: m.name || m.id,
-        isFree: m.id?.endsWith("-free") || KNOWN_FREE_OPENCODE.has(m.id),
+        isFree: isFreeOpencodeModel(m.id),
       })),
   },
   kilocode: {

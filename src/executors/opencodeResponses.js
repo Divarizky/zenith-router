@@ -97,11 +97,32 @@ function restoreNames(node, nameMap) {
     return;
   }
   if (!node || typeof node !== "object") return;
-  if (node.type === "function_call" && typeof node.name === "string" && nameMap.has(node.name)) {
+  if (typeof node.name === "string" && nameMap.has(node.name)) {
     node.name = nameMap.get(node.name);
   }
   for (const value of Object.values(node)) {
     if (value && typeof value === "object") restoreNames(value, nameMap);
+  }
+}
+
+function normalizeReasoning(node) {
+  if (Array.isArray(node)) {
+    for (const item of node) normalizeReasoning(item);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  if (node.delta && typeof node.delta === "object") {
+    if (node.delta.reasoning && !node.delta.reasoning_content) {
+      node.delta.reasoning_content = node.delta.reasoning;
+    }
+  }
+  if (node.message && typeof node.message === "object") {
+    if (node.message.reasoning && !node.message.reasoning_content) {
+      node.message.reasoning_content = node.message.reasoning;
+    }
+  }
+  for (const value of Object.values(node)) {
+    if (value && typeof value === "object") normalizeReasoning(value);
   }
 }
 
@@ -112,7 +133,8 @@ function restoreLine(line, nameMap) {
   if (!payload || payload === "[DONE]") return line;
   try {
     const parsed = JSON.parse(payload);
-    restoreNames(parsed, nameMap);
+    if (nameMap && nameMap.size > 0) restoreNames(parsed, nameMap);
+    normalizeReasoning(parsed);
     return `${match[1]}${JSON.stringify(parsed)}${line.endsWith("\r") ? "\r" : ""}`;
   } catch {
     return line;
@@ -124,16 +146,22 @@ function restoreLine(line, nameMap) {
  * original tool name again. A response with nothing renamed passes through.
  */
 export async function restoreResponsesToolNames(res, nameMap) {
-  if (!nameMap || nameMap.size === 0 || !res || !res.body) return res;
+  if (!res || !res.body) return res;
+  const hasAliases = Boolean(nameMap && nameMap.size > 0);
   const headers = new Headers(res.headers);
-  headers.delete("content-length");
   const contentType = headers.get("content-type") || "";
+
+  if (!hasAliases && !contentType.includes("text/event-stream") && !contentType.includes("application/json")) {
+    return res;
+  }
+  headers.delete("content-length");
 
   if (contentType.includes("application/json")) {
     const text = await res.text();
     try {
       const parsed = JSON.parse(text);
-      restoreNames(parsed, nameMap);
+      if (hasAliases) restoreNames(parsed, nameMap);
+      normalizeReasoning(parsed);
       return new Response(JSON.stringify(parsed), { status: res.status, statusText: res.statusText, headers });
     } catch {
       return new Response(text, { status: res.status, statusText: res.statusText, headers });

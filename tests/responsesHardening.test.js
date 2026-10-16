@@ -167,7 +167,9 @@ test("Gateway - an OpenCode Responses model gets sanitized names upstream and re
   );
 
   assert.ok(captured.body.tools.some((t) => t.name === "mcp_fs_read"), "upstream menerima nama tersanitasi");
-  assert.strictEqual(captured.body.max_output_tokens, 16, "budget dari klien sampai dan di-clamp");
+  // Token budgeting reasoning: max_tokens 5 dari klien dinaikkan menjadi
+  // max(5, 1024) + 4096 = 5120 sebelum clamp [16, 65536] /responses.
+  assert.strictEqual(captured.body.max_output_tokens, 5120, "budget dari klien sampai dan di-clamp");
   const res = captured.result;
   assert.strictEqual(res.status, 200);
   const json = await res.json();

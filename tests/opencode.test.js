@@ -5,19 +5,20 @@ import {
   opencodePathForModel,
   opencodeSessionId,
   opencodeRequestId,
+  FINGERPRINT_TOOL_DEFINITIONS,
 } from "../src/executors/opencode.js";
 import opencode from "../src/providers/registry/opencode.js";
 
-test("opencode registry - chat baseUrl points at zen API, not marketing site", () => {
-  assert.strictEqual(opencode.transport.baseUrl, "https://opencode.ai/zen/v1/chat/completions");
-  assert.strictEqual(opencode.transport.messagesUrl, "https://opencode.ai/zen/v1/messages");
-  assert.strictEqual(opencode.transport.responsesUrl, "https://opencode.ai/zen/v1/responses");
+test("opencode registry - chat baseUrl points at inference API", () => {
+  assert.strictEqual(opencode.transport.baseUrl, "https://opencode.ai/inference/v1/chat/completions");
+  assert.strictEqual(opencode.transport.messagesUrl, "https://opencode.ai/inference/v1/messages");
+  assert.strictEqual(opencode.transport.responsesUrl, "https://opencode.ai/inference/v1/responses");
 });
 
 test("opencodePathForModel - routes muse-spark/union-alpha to their own endpoints", () => {
-  assert.strictEqual(opencodePathForModel("muse-spark-1.2-contributor-free"), "/zen/v1/responses");
-  assert.strictEqual(opencodePathForModel("union-alpha"), "/zen/v1/messages");
-  assert.strictEqual(opencodePathForModel("jev-1.13-free"), "/zen/v1/chat/completions");
+  assert.strictEqual(opencodePathForModel("muse-spark-1.2-contributor-free"), "/inference/v1/responses");
+  assert.strictEqual(opencodePathForModel("union-alpha"), "/inference/v1/messages");
+  assert.strictEqual(opencodePathForModel("jev-1.13-free"), "/inference/v1/chat/completions");
 });
 
 test("opencode ids - session/request match upstream fingerprint shape", async () => {
@@ -49,14 +50,17 @@ test("OpencodeExecutor - rewrites legacy url, sets free-tier headers, keeps clie
   });
 
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(seen.url, "https://opencode.ai/zen/v1/chat/completions");
+  assert.strictEqual(seen.url, "https://opencode.ai/inference/v1/chat/completions");
   assert.strictEqual(seen.headers.get("Authorization"), "Bearer public");
-  assert.strictEqual(seen.headers.get("x-opencode-client"), "desktop");
+  assert.strictEqual(seen.headers.get("x-opencode-client"), "cli");
   assert.match(seen.headers.get("x-opencode-session"), /^ses_/);
-  assert.match(seen.headers.get("x-opencode-request"), /^msg_/);
+  assert.strictEqual(seen.headers.get("x-opencode-session-id"), seen.headers.get("x-opencode-session"));
+  assert.strictEqual(seen.headers.get("x-session-affinity"), seen.headers.get("x-opencode-session"));
+  assert.strictEqual(seen.headers.get("x-session-id"), seen.headers.get("x-opencode-session"));
+  assert.strictEqual(seen.headers.get("x-opencode-request"), null);
   const toolNames = seen.body.tools.map((t) => t.function.name);
   assert.ok(toolNames.includes("custom_tool"));
-  for (const name of ["bash", "read", "grep", "glob"]) {
+  for (const name of ["read", "shell"]) {
     assert.ok(toolNames.includes(name), `missing fingerprint tool ${name}`);
   }
 });
@@ -85,13 +89,13 @@ test("OpencodeExecutor - fingerprint tools match the upstream tool schema per pa
     targetModel: "muse-spark-1.3-contributor-free",
     targetFormat: "openai-responses",
   });
-  assert.strictEqual(seen.url, "https://opencode.ai/zen/v1/responses");
-  assert.strictEqual(seen.body.tools.length, 21);
+  assert.strictEqual(seen.url, "https://opencode.ai/inference/v1/responses");
+  assert.strictEqual(seen.body.tools.length, 19);
   for (const tool of seen.body.tools) {
     assert.strictEqual(typeof tool.name, "string", `tool tanpa name: ${JSON.stringify(tool)}`);
     assert.strictEqual(tool.function, undefined);
   }
-  assert.deepStrictEqual(seen.body.tools[17].parameters.properties, { command: { type: "string" } });
+  assert.deepStrictEqual(seen.body.tools[17].parameters.properties.path, { type: "string", description: "File or directory to read" });
 
   // Claude Messages path: name + input_schema.
   await executor.execute({
@@ -105,23 +109,27 @@ test("OpencodeExecutor - fingerprint tools match the upstream tool schema per pa
     targetModel: "union-alpha",
     targetFormat: "claude",
   });
-  assert.strictEqual(seen.url, "https://opencode.ai/zen/v1/messages");
+  assert.strictEqual(seen.url, "https://opencode.ai/inference/v1/messages");
   for (const tool of seen.body.tools) {
     assert.strictEqual(typeof tool.name, "string");
     assert.ok(tool.input_schema, `tool tanpa input_schema: ${JSON.stringify(tool)}`);
   }
 
-  // Client already declares bash in Responses shape: no duplicate is added.
+  // Client already declares the exact canonical `read` tool: no duplicate is
+  // added, and the placeholder note is not injected.
   await executor.execute({
     url: "x",
     headers: {},
     body: JSON.stringify({
       model: "muse-spark-1.2-contributor-free",
       input: "hi",
-      tools: [{ type: "function", name: "bash", parameters: { type: "object" } }],
+      tools: [{ type: "function", name: "read", description: FINGERPRINT_TOOL_DEFINITIONS.read.description, parameters: FINGERPRINT_TOOL_DEFINITIONS.read.parameters }],
     }),
     targetModel: "muse-spark-1.2-contributor-free",
     targetFormat: "openai-responses",
   });
-  assert.strictEqual(seen.body.tools.filter((t) => t.name === "bash").length, 1);
+  assert.strictEqual(seen.body.tools.filter((t) => t.name === "read").length, 1);
+  assert.strictEqual(seen.body.tools.filter((t) => t.name === "shell").length, 1);
+  const injected = seen.body.tools.filter((t) => t.name === "read" || t.name === "shell").length;
+  assert.strictEqual(injected, 2, "canonical read + shell hadir tepat satu kali");
 });

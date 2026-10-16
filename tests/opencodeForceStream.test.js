@@ -106,3 +106,44 @@ test("Gateway integration - non-streaming client request to opencode receives ag
     setCustomExecutor(null);
   }
 });
+
+test("Gateway integration - reasoning_content tidak hilang pada agregasi non-streaming", async () => {
+  initDb(":memory:");
+
+  setCustomExecutor({
+    async execute({ body }) {
+      const sseBody =
+        'data: {"id":"chatcmpl-2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Berpikir dulu"}}]}\n\n' +
+        'data: {"id":"chatcmpl-2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"... sekarang jawab"}}]}\n\n' +
+        'data: {"id":"chatcmpl-2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Jawaban"},"finish_reason":"stop"}]}\n\n' +
+        "data: [DONE]\n\n";
+      return new Response(sseBody, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  });
+
+  try {
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "opencode/big-pickle",
+        messages: [{ role: "user", content: "halo" }],
+        stream: false,
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.choices[0].message.content, "Jawaban");
+    assert.strictEqual(
+      json.choices[0].message.reasoning_content,
+      "Berpikir dulu... sekarang jawab",
+      "reasoning thinking model harus sampai ke klien non-streaming"
+    );
+  } finally {
+    setCustomExecutor(null);
+  }
+});

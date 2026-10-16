@@ -1,7 +1,7 @@
 import "../../executors/antigravity.js";
+import { antigravityUserAgent } from "../../services/antigravityIdentity.js";
 
 const ANTIGRAVITY_IDE_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
-const ANTIGRAVITY_IDE_USER_AGENT = "antigravity/ide/0.0.1 darwin/arm64";
 
 export default {
   id: "antigravity",
@@ -13,7 +13,7 @@ export default {
     baseUrls: [ANTIGRAVITY_IDE_BASE_URL],
     format: "antigravity",
     headers: {
-      "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
+      "User-Agent": antigravityUserAgent(),
     },
     retry: {
       429: 3,

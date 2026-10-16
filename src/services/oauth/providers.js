@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { platform, arch } from "node:os";
 import { proxyFetch } from "../../executors/proxy.js";
+import { antigravityUserAgent } from "../antigravityIdentity.js";
 
 // Login flows for OAuth providers, ported from 9router src/lib/oauth/providers/*.
 // Client ids are the public ones shipped in each vendor's own CLI/IDE.
@@ -48,8 +49,6 @@ function emailFromJwt(jwt) {
   const payload = decodeJwtPayload(jwt);
   return payload?.email || payload?.preferred_username || undefined;
 }
-
-const ANTIGRAVITY_USER_AGENT = "antigravity/ide/0.0.1 darwin/arm64";
 
 /** Antigravity ClientMetadata.Platform enum, matching the IDE binary. */
 function antigravityPlatform() {
@@ -304,7 +303,7 @@ const antigravity = {
     const headers = {
       Authorization: `Bearer ${t.access_token}`,
       "Content-Type": "application/json",
-      "User-Agent": ANTIGRAVITY_USER_AGENT,
+      "User-Agent": antigravityUserAgent(),
     };
     const metadata = { ideType: 9, platform: antigravityPlatform(), pluginType: 2 };
     let projectId = "";

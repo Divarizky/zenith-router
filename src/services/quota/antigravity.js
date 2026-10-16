@@ -1,6 +1,7 @@
 import { oauthFetch } from "../oauth/providers.js";
 import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
+import { antigravityUserAgent } from "../antigravityIdentity.js";
 
 const ANTIGRAVITY_QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 const ANTIGRAVITY_LEGACY_QUOTA_URL = "https://cloudaicompanion.googleapis.com/v1internal:fetchAvailableModels";
@@ -69,7 +70,7 @@ async function postQuota(url, connection, projectId) {
     Accept: "application/json",
     "X-Client-Name": "antigravity",
     "X-Client-Version": CLIENT_VERSION,
-    "User-Agent": "antigravity/ide/0.0.1 darwin/arm64",
+    "User-Agent": antigravityUserAgent(),
   };
   const body = projectId ? JSON.stringify({ project: projectId }) : "{}";
   return oauthFetch(url, { method: "POST", headers, body }, { proxyUrl: requireResolvedProxy(connection) });
@@ -85,7 +86,7 @@ async function fetchPlanName(connection) {
         headers: {
           Authorization: `Bearer ${connection.credentials?.access_token}`,
           "Content-Type": "application/json",
-          "User-Agent": "antigravity/ide/0.0.1 darwin/arm64",
+          "User-Agent": antigravityUserAgent(),
         },
         body: JSON.stringify({ metadata: { ideType: 9, pluginType: 2 } }),
       },

@@ -99,6 +99,46 @@ function sanitizeGeminiFunctionName(name) {
   return s.slice(0, 64);
 }
 
+// OpenAI tool_choice -> Gemini functionCallingConfig. Shapes not listed here keep
+// Gemini's default (AUTO).
+function toolConfigFrom(toolChoice, hasTools) {
+  if (!hasTools || toolChoice === undefined || toolChoice === null) return undefined;
+  if (toolChoice === "auto") return { functionCallingConfig: { mode: "AUTO" } };
+  if (toolChoice === "none") return { functionCallingConfig: { mode: "NONE" } };
+  if (toolChoice === "required") return { functionCallingConfig: { mode: "ANY" } };
+  const name = toolChoice?.function?.name;
+  if (toolChoice?.type === "function" && name) {
+    return { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [sanitizeGeminiFunctionName(name)] } };
+  }
+  return undefined;
+}
+
+// MAX_TOKENS means the output budget ran out. Map it to finish_reason `length`
+// so a truncated answer is not reported as complete.
+function geminiFinishReason(reason, hasToolCalls) {
+  if (reason === "MAX_TOKENS") return "length";
+  if (reason && reason !== "STOP") return "stop";
+  return hasToolCalls ? "tool_calls" : "stop";
+}
+
+// Gemini's candidatesTokenCount excludes thoughts. Reasoning tokens are added to
+// completion_tokens to match OpenAI accounting, and cached input is exposed in
+// prompt_tokens_details.
+function openaiUsage(usageMeta = {}) {
+  const prompt = usageMeta.promptTokenCount || 0;
+  const reasoning = usageMeta.thoughtsTokenCount || 0;
+  const completion = (usageMeta.candidatesTokenCount || 0) + reasoning;
+  const cached = usageMeta.cachedContentTokenCount || 0;
+  const usage = {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: usageMeta.totalTokenCount || prompt + completion,
+  };
+  if (cached > 0) usage.prompt_tokens_details = { cached_tokens: cached };
+  if (reasoning > 0) usage.completion_tokens_details = { reasoning_tokens: reasoning };
+  return usage;
+}
+
 /**
  * Translate OpenAI Chat Completions request to Gemini / Cloud Code request format
  */
@@ -268,14 +308,20 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "") {
   const generationConfig = {};
   if (typeof body.temperature === "number") generationConfig.temperature = body.temperature;
   if (typeof body.top_p === "number") generationConfig.topP = body.top_p;
+  if (typeof body.top_k === "number") generationConfig.topK = body.top_k;
   if (typeof body.max_tokens === "number" || typeof body.max_completion_tokens === "number") {
     generationConfig.maxOutputTokens = body.max_tokens || body.max_completion_tokens;
   }
+  // Gemini accepts at most 5 stop sequences.
+  const stop = typeof body.stop === "string" ? [body.stop] : Array.isArray(body.stop) ? body.stop : [];
+  const stopSequences = stop.filter((s) => typeof s === "string" && s).slice(0, 5);
+  if (stopSequences.length > 0) generationConfig.stopSequences = stopSequences;
 
   const innerRequest = {
     contents,
     systemInstruction,
     tools,
+    toolConfig: toolConfigFrom(body.tool_choice, Boolean(tools)),
     generationConfig: Object.keys(generationConfig).length > 0 ? generationConfig : undefined,
   };
 
@@ -323,6 +369,8 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
           if (candidate?.content?.parts) {
             for (const part of candidate.content.parts) {
               if (part.text) {
+                // Thought parts (thought: true) are reasoning, not answer text.
+                const field = part.thought ? "reasoning_content" : "content";
                 const openAIChunk = {
                   id: responseId,
                   object: "chat.completion.chunk",
@@ -331,7 +379,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
                   choices: [
                     {
                       index: 0,
-                      delta: { content: part.text },
+                      delta: { [field]: part.text },
                       finish_reason: null,
                     },
                   ],
@@ -380,7 +428,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
           }
 
           if (candidate?.finishReason) {
-            const finishReason = candidate.finishReason === "STOP" ? (currentToolCallIndex > 0 ? "tool_calls" : "stop") : "stop";
+            const finishReason = geminiFinishReason(candidate.finishReason, currentToolCallIndex > 0);
             const usage = payload.usageMetadata;
             const openAIChunk = {
               id: responseId,
@@ -394,15 +442,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
                   finish_reason: finishReason,
                 },
               ],
-              ...(usage
-                ? {
-                    usage: {
-                      prompt_tokens: usage.promptTokenCount || 0,
-                      completion_tokens: usage.candidatesTokenCount || 0,
-                      total_tokens: usage.totalTokenCount || (usage.promptTokenCount || 0) + (usage.candidatesTokenCount || 0),
-                    },
-                  }
-                : {}),
+              ...(usage ? { usage: openaiUsage(usage) } : {}),
             };
             controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
           }
@@ -424,10 +464,14 @@ export async function geminiToOpenAIResponse(data, model = "gemini") {
   const parts = candidate?.content?.parts || [];
 
   let text = "";
+  let reasoning = "";
   const toolCalls = [];
 
   for (const p of parts) {
-    if (p.text) text += p.text;
+    if (p.text) {
+      if (p.thought) reasoning += p.text;
+      else text += p.text;
+    }
     if (p.functionCall) {
       const callId = `call_${randomUUID().slice(0, 8)}`;
       if (p.functionCall.thoughtSignature) {
@@ -448,9 +492,8 @@ export async function geminiToOpenAIResponse(data, model = "gemini") {
     role: "assistant",
     content: text || (toolCalls.length > 0 ? null : ""),
   };
+  if (reasoning) message.reasoning_content = reasoning;
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
-
-  const usageMeta = payload.usageMetadata || {};
 
   return {
     id: `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
@@ -461,13 +504,9 @@ export async function geminiToOpenAIResponse(data, model = "gemini") {
       {
         index: 0,
         message,
-        finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
+        finish_reason: geminiFinishReason(candidate?.finishReason, toolCalls.length > 0),
       },
     ],
-    usage: {
-      prompt_tokens: usageMeta.promptTokenCount || 0,
-      completion_tokens: usageMeta.candidatesTokenCount || 0,
-      total_tokens: usageMeta.totalTokenCount || (usageMeta.promptTokenCount || 0) + (usageMeta.candidatesTokenCount || 0),
-    },
+    usage: openaiUsage(payload.usageMetadata),
   };
 }

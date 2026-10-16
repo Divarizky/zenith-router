@@ -1,3 +1,29 @@
+## [0.1.6] - 17-10-2026
+
+Model Antigravity dikelompokkan per keluarga, effort mengikuti permintaan klien, dan kuota ditampilkan per langganan akun.
+
+### Model & Effort Antigravity
+
+- Model Antigravity disusun per keluarga, misalnya Gemini 4 Argon, Gemini 3.8 Flash, dan Claude Opus 5.5, sehingga daftar model tidak lagi dipecah per tingkat.
+- Tingkat effort dibaca dari `reasoning_effort` (OpenAI), `reasoning.effort` (Responses), atau `thinking.budget_tokens` (Claude). Tanpa penanda apa pun, tingkat default adalah medium.
+- Bila akun tidak memiliki varian untuk tingkat yang diminta, tingkat diturunkan ke varian yang tersedia pada akun tersebut.
+- Id model lama yang berada di luar katalog tetap diteruskan apa adanya, sehingga klien yang sudah mengunci id lama tidak langsung rusak.
+
+### Kuota & Routing Akun
+
+- Model yang tersedia untuk tiap akun ikut disinkronkan saat kuota diperbarui, dan `/v1/models` menggabungkan katalog dengan model milik akun aktif.
+- Akun dilewati bila tidak memiliki model yang diminta, atau bila kuotanya habis dan waktu reset belum tiba.
+- Menghapus koneksi juga menghapus data model dan lock model milik koneksi tersebut.
+- Dashboard menampilkan satu baris kuota per keluarga model dengan penanda kuota habis.
+
+### Identitas Klien
+
+- Identitas klien Antigravity diperbarui sehingga model terbaru ikut tersedia pada akun berlangganan.
+
+### Pengujian
+
+- Seluruh test lulus (630 test), mencakup pengelompokan model, pemetaan effort, routing kuota, kartu kuota, dan pembersihan data saat koneksi dihapus.
+
 ## [0.1.5] - 16-10-2026
 
 Adaptasi OpenCode v2, fidelitas konteks lintas provider, dan stabilisasi pengujian.

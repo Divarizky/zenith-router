@@ -3,6 +3,7 @@ import { opencodePathForModel } from "../executors/opencode.js";
 import { translateRequest, FORMATS } from "../translator/index.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
 import { getAllSettings } from "../services/settings.js";
+import { effortFromRequest } from "../services/antigravityCatalog.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -69,6 +70,9 @@ export function prepareUpstreamRequest({
     targetFormat,
     upstreamStream,
     upstreamPayload,
+    // The pivot body drops the client's thinking fields, so the level is read
+    // from the original body and carried to the executor out of band.
+    effort: effortFromRequest(sourceFormat, body),
     baseHeaders,
     executor: getExecutor(provider),
     startTime,

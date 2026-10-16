@@ -372,7 +372,7 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = 
           // Gemini 3+ rejects a current-turn step whose first functionCall has
           // no signature. The client's or cached value is used when present;
           // otherwise the documented validator-skip sentinel keeps the request
-          // legal at the cost of a weaker step (see F-11 / ADR-3).
+          // legal at the cost of a weaker step.
           let signature = signatureById.get(call.id);
           if (!signature && isCurrentTurn && firstOfStep) {
             signature = "skip_thought_signature_validator";

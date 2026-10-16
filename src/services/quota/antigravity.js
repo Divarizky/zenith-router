@@ -3,11 +3,14 @@ import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
 import { antigravityUserAgent } from "../antigravityIdentity.js";
 
-const ANTIGRAVITY_QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
-const ANTIGRAVITY_LEGACY_QUOTA_URL = "https://cloudaicompanion.googleapis.com/v1internal:fetchAvailableModels";
+// agy 1.4.0 queries the daily host with the consumer project + CLI User-Agent:
+// cloudcode-pa + personal project never lists gemini-4-argon. Verified against a live Pro account.
+const ANTIGRAVITY_QUOTA_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+const ANTIGRAVITY_LEGACY_QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+const ANTIGRAVITY_CONSUMER_PROJECT = "aicode-consumers";
 
-const LOAD_CODE_ASSIST_URL = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
-const CLIENT_VERSION = "2.1.1";
+const LOAD_CODE_ASSIST_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
+
 
 // Models worth a bar. fetchAvailableModels also returns tab-completion helpers,
 // legacy aliases (gemini-2.5-*) and flash-lite variants that all share one bucket.
@@ -68,11 +71,9 @@ async function postQuota(url, connection, projectId) {
     Authorization: `Bearer ${connection.credentials?.access_token}`,
     "Content-Type": "application/json",
     Accept: "application/json",
-    "X-Client-Name": "antigravity",
-    "X-Client-Version": CLIENT_VERSION,
     "User-Agent": antigravityUserAgent(),
   };
-  const body = projectId ? JSON.stringify({ project: projectId }) : "{}";
+  const body = JSON.stringify({ project: projectId || ANTIGRAVITY_CONSUMER_PROJECT });
   return oauthFetch(url, { method: "POST", headers, body }, { proxyUrl: requireResolvedProxy(connection) });
 }
 
@@ -88,7 +89,7 @@ async function fetchPlanName(connection) {
           "Content-Type": "application/json",
           "User-Agent": antigravityUserAgent(),
         },
-        body: JSON.stringify({ metadata: { ideType: 9, pluginType: 2 } }),
+        body: JSON.stringify({ metadata: { ideType: "ANTIGRAVITY" } }),
       },
       { proxyUrl: requireResolvedProxy(connection) }
     );
@@ -137,6 +138,7 @@ export async function fetchAntigravityQuota(connection) {
   const plan = await fetchPlanName(connection);
   const quotas = parseModelQuotas(models);
   const modelCount = Array.isArray(models) ? models.length : Object.keys(models).length;
+  const modelInventory = parseModelInventory(data);
   const isExhausted = Object.values(quotas).every((q) => q.remainingPercentage <= 0);
 
   return {
@@ -148,5 +150,33 @@ export async function fetchAntigravityQuota(connection) {
     is_exhausted: Object.keys(quotas).length > 0 && isExhausted,
     unit: "tier",
     quotas,
+    // Persisted into antigravity_account_models by the quota sync layer, then
+    // stripped: the stored quota must not carry the whole catalog.
+    modelInventory,
   };
+}
+
+/**
+ * Every model the account can see, flagged by whether Antigravity's Recommended
+ * agent list carries it. This is what makes the catalog subscription-aware:
+ * a Pro account lists Claude 5.5 and gemini-4-argon, a free one does not.
+ */
+export function parseModelInventory(data) {
+  const models = data?.models || {};
+  const recommendedIds = new Set(
+    (data?.agentModelSorts || []).flatMap((s) => (s.groups || []).flatMap((g) => g.modelIds || []))
+  );
+  // disabled entries are placeholders shown as "Unavailable" in agy (e.g.
+  // gemini-4-argon-disabled on plans without Argon); they are never callable.
+  return Object.entries(models).filter(([, info]) => info?.disabled !== true).map(([modelId, info]) => ({
+    modelId,
+    displayName: info?.displayName || null,
+    recommended: recommendedIds.has(modelId),
+    quotaRemaining: typeof info?.quotaInfo?.remainingFraction === "number" ? info.quotaInfo.remainingFraction : undefined,
+    quotaResetAt: parseResetTime(info?.quotaInfo?.resetTime),
+    maxTokens: info?.maxTokens,
+    maxOutputTokens: info?.maxOutputTokens,
+    supportsImages: info?.supportsImages,
+    supportsThinking: info?.supportsThinking,
+  }));
 }

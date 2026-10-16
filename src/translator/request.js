@@ -90,7 +90,7 @@ function claudeImageToOpenAI(part) {
 // tool_result content may be a string, an array of text/image blocks, or an
 // object. Text is joined into one string. Images are deliberately dropped:
 // OpenAI tool messages accept text-only content and reject image parts with a
-// 400 (see F-11 review).
+// 400.
 function claudeToolResultToOpenAI(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return typeof content === "object" ? JSON.stringify(content) : String(content);
@@ -362,7 +362,7 @@ export function claudeToOpenAI(body, targetModel) {
   }
   // metadata.user_id (contains the local account/session identifier) is
   // deliberately not forwarded as `user`: it would leak identifiers to
-  // third-party providers (F-11 review).
+  // third-party providers.
   // body.thinking and body.top_k have no Chat Completions analogue and are
   // deliberately dropped rather than forwarded as-is. translateRequest reads
   // body.thinking itself for the Gemini target (thinkingConfig).

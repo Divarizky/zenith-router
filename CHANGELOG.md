@@ -62,7 +62,7 @@ Pemeriksaan kuota live Command Code, failover combo pada error stream SSE, dukun
 
 Manajemen Proxy Pool mandiri, rotasi proxy provider tanpa akun, pembaruan protokol OpenCode 1.19.0, dan normalisasi tool Claude Code.
 
-### Proxy Pool & Rotasi (F-08)
+### Proxy Pool & Rotasi
 
 - Halaman mandiri **Proxy Pools** di sidebar (`/dashboard/proxies`) dengan antarmuka divide-y serupa 9router: tombol header Batch Import dan Add Proxy Pool dialog modal, status ringkasan (Total dan Active), daftar baris dengan badge dot status tes (`ok`/`error`/`unknown`), status aktif, dan jumlah akun terikat (`X bound`), serta aksi cepat (toggle aktif/nonaktif, tes kesehatan 8 detik, modal ubah aman, dan hapus terlindungi).
 - Pengikatan proxy akun provider: akun dapat dihubungkan ke proxy dari daftar pool, alamat manual, atau koneksi langsung; seluruh lalu lintas akun (chat, kuota, token refresh, import model) mengikuti binding tersebut dan gagal tertutup (fail-closed) tanpa membocorkan request ke koneksi langsung saat proxy bermasalah.
@@ -70,7 +70,7 @@ Manajemen Proxy Pool mandiri, rotasi proxy provider tanpa akun, pembaruan protok
 - Rotasi proxy untuk provider tanpa akun (noAuth): pilihan strategi tidak aktif, bergiliran (round-robin), atau acak, dengan retry otomatis hingga 3 percobaan per request.
 - Transport proxy kustom `proxyFetch` dengan dukungan `Proxy-Authorization` untuk tunnel CONNECT HTTPS dan forward HTTP, pembatalan request terikat waktu, dan penyaringan password dari pesan error.
 
-### Protokol OpenCode & Kompatibilitas Tool (F-09)
+### Protokol OpenCode & Kompatibilitas Tool
 
 - Mengatasi penolakan 403 FreeTierError dari OpenCode Zen dengan menerapkan pembentukan ID sesi (`ses_`) ber-prefix 48-bit inversi bitwise timestamp dan ID request (`msg_`) dengan timestamp menaik, serta User-Agent resmi `opencode/1.19.0`.
 - Cache sesi stabil berbasis percakapan klien di memori proses (TTL 30 menit, kapasitas 1000 entri LRU) agar giliran percakapan multi-turn tidak memicu sesi baru atau kebocoran kuota.

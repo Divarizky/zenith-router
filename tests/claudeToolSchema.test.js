@@ -90,7 +90,7 @@ test("Antigravity executor - model Claude mendapat schema rata, model Gemini tid
   assert.ok(!JSON.stringify(claudeSeen.body.request.tools).includes("anyOf"));
 
   const { executor: geminiExec, seen: geminiSeen } = captureExecutor();
-  await geminiExec.execute({ body, targetModel: "gemini-3.6-flash-high", connection: conn });
+  await geminiExec.execute({ body, targetModel: "gemini-3.8-flash-high", connection: conn });
   assert.ok(JSON.stringify(geminiSeen.body.request.tools).includes("anyOf"), "Gemini tetap menerima anyOf");
 });
 
@@ -149,7 +149,7 @@ test("Antigravity executor - id tool dikirim ke Claude dan dibuang untuk Gemini"
   assert.strictEqual(claudeParts.resp.id, "toolu_01ABC");
 
   const { executor: geminiExec, seen: geminiSeen } = captureExecutor();
-  await geminiExec.execute({ body, targetModel: "gemini-3.6-flash-high", connection: conn });
+  await geminiExec.execute({ body, targetModel: "gemini-3.8-flash-high", connection: conn });
   const geminiParts = callAndResponse(geminiSeen.body.request);
   assert.ok(!("id" in geminiParts.call));
   assert.ok(!("id" in geminiParts.resp));

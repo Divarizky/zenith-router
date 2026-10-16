@@ -905,7 +905,7 @@ test("combo chain - the usage row names the member that served", async () => {
   setCustomExecutor(null);
 });
 
-// --- TASK-27: strategi giliran ---
+// --- strategi giliran ---
 
 function seedRotation(models) {
   initDb(":memory:");
@@ -1049,7 +1049,7 @@ test("combo chain - rotation advances one step even when the starting member fai
   assert.deepStrictEqual(served, ["glm-4-flash", "mistral-large-latest"]);
 });
 
-// --- TASK-28: auto-switch vision ---
+// --- auto-switch vision ---
 
 test("combo chain - an image request starts at a member that can read images", async () => {
   initDb(":memory:");

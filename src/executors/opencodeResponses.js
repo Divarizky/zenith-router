@@ -1,4 +1,4 @@
-// OpenCode Zen /responses hardening (F-09 AC-06..AC-08). The upstream rejects
+// OpenCode Zen /responses hardening. The upstream rejects
 // tool names outside [a-zA-Z0-9_-], function calls without a matching output,
 // and out-of-range output budgets. Names are rewritten for the upstream and
 // restored on the way back, so the client still sees the tools it declared.

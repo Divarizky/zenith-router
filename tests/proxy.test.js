@@ -123,7 +123,7 @@ test("oauthFetch - throws error if proxyUrl fails and does not leak directly", a
 });
 
 // ---------------------------------------------------------------------------
-// TASK-30: Proxy auth, abort during CONNECT, and password sanitization
+// Proxy auth, abort during CONNECT, and password sanitization
 // ---------------------------------------------------------------------------
 
 function startTcpServer(onConnection) {

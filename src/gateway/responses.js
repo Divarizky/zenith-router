@@ -41,7 +41,7 @@ export async function handleResponses(c) {
   }
 
   // The raw Responses body is routed as-is: a Responses upstream receives it
-  // verbatim (F-11), and a chat/Claude/Gemini/Kiro upstream gets the pivot
+  // verbatim, and a chat/Claude/Gemini/Kiro upstream gets the pivot
   // inside translateRequest per member — including after a combo failover.
   try {
     const routed = await routeRequest({

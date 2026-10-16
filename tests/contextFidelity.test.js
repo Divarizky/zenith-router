@@ -7,7 +7,7 @@ import { app } from "../src/index.js";
 import { initDb, addConnection } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 
-// Matriks fidelitas konteks (F-11, TASK-44). Tiap jalur sumber -> target
+// Matriks fidelitas konteks. Tiap jalur sumber -> target
 // memakai fixture payload nyata (Claude Code, Codex CLI, klien OpenAI) dan
 // mengunci perilaku yang benar. Jalur yang bocor konteks akan merah sampai
 // task perbaikannya dikerjakan.
@@ -179,15 +179,15 @@ test("baseline - openai ke openai hanya ganti model", () => {
   assert.deepStrictEqual(out, { ...body, model: body.model });
 });
 
-// ── TASK-45: Responses -> Responses passthrough ───────────────────────────
+// ── Responses -> Responses passthrough ───────────────────────────
 
-test("TASK-45 - translateRequest responses->responses mempertahankan seluruh body", () => {
+test("translateRequest responses->responses mempertahankan seluruh body", () => {
   const body = codexPayload();
   const out = translateRequest(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI_RESPONSES, body, body.model);
   assert.deepStrictEqual(out, body);
 });
 
-test("TASK-45 - stream responses->responses identik byte per byte", async () => {
+test("stream responses->responses identik byte per byte", async () => {
   const stream = createTransformStream(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI_RESPONSES, "gpt-5-codex");
   const raw = 'data: {"type":"response.output_text.delta","delta":"halo"}\n\ndata: [DONE]\n\n';
   const source = new ReadableStream({
@@ -240,7 +240,7 @@ test("REGRESI - gateway /responses non-stream mengagregasi SSE upstream", async 
   }
 });
 
-test("TASK-45 - gateway /responses meneruskan body Responses mentah ke upstream Responses", async () => {
+test("gateway /responses meneruskan body Responses mentah ke upstream Responses", async () => {
   initDb(":memory:");
   addConnection({
     provider: "codex",
@@ -289,9 +289,9 @@ test("TASK-45 - gateway /responses meneruskan body Responses mentah ke upstream 
   }
 });
 
-// ── TASK-45/50: Responses -> OpenAI pivot tetap memegang tool ─────────────
+// ── Responses -> OpenAI pivot tetap memegang tool ─────────────
 
-test("TASK-45 - responses->openai: pairing tool call dan custom tool tetap utuh", () => {
+test("responses->openai: pairing tool call dan custom tool tetap utuh", () => {
   const out = translateRequest(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, codexPayload(), "glm-4.6");
   const messages = out.messages;
 
@@ -318,7 +318,7 @@ test("TASK-45 - responses->openai: pairing tool call dan custom tool tetap utuh"
   assert.strictEqual(patchDecl.function.parameters.properties.input.type, "string");
 });
 
-test("TASK-50 - respons chat ke klien Responses: custom tool kembali via set gateway", async () => {
+test("respons chat ke klien Responses: custom tool kembali via set gateway", async () => {
   // Daftarkan nama custom lewat pivot agar state deterministik.
   translateRequest(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, codexPayload(), "glm-4.6");
 
@@ -438,9 +438,9 @@ test("REGRESI - reasoning terenkripsi dibuang saat failover pindah akun", async 
   }
 });
 
-// ── TASK-46: Claude -> OpenAI ─────────────────────────────────────────────
+// ── Claude -> OpenAI ─────────────────────────────────────────────
 
-test("TASK-46 - claude->openai: tool_use, gambar, urutan, dan parameter", () => {
+test("claude->openai: tool_use, gambar, urutan, dan parameter", () => {
   const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, claudeCodePayload(), "glm-4.6");
   const messages = out.messages;
 
@@ -475,9 +475,9 @@ test("TASK-46 - claude->openai: tool_use, gambar, urutan, dan parameter", () => 
   assert.deepStrictEqual(messages[lastUserIdx], { role: "user", content: "lanjut" });
 });
 
-// ── TASK-51: OpenAI -> Claude ─────────────────────────────────────────────
+// ── OpenAI -> Claude ─────────────────────────────────────────────
 
-test("TASK-51 - openai->claude: max_tokens, gambar, stop, thinking, suhu", () => {
+test("openai->claude: max_tokens, gambar, stop, thinking, suhu", () => {
   const out = translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, openaiClientPayload(), "claude-opus-5");
   assert.strictEqual(out.max_tokens, 20000, "max_completion_tokens dipakai");
   assert.deepStrictEqual(out.stop_sequences, ["END"], "stop -> stop_sequences");
@@ -505,7 +505,7 @@ test("TASK-51 - openai->claude: max_tokens, gambar, stop, thinking, suhu", () =>
   assert.strictEqual(tr.content[0].tool_use_id, "c9");
 });
 
-test("TASK-51 - openai->claude: budget thinking di-clamp ke max_tokens kecil", () => {
+test("openai->claude: budget thinking di-clamp ke max_tokens kecil", () => {
   const body = { model: "m", max_tokens: 4000, reasoning_effort: "high", messages: [{ role: "user", content: "x" }] };
   const out = translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, body, "claude-opus-5");
   assert.ok(out.thinking.budget_tokens < 4000, "budget tidak boleh >= max_tokens");
@@ -558,7 +558,7 @@ test("REGRESI - assistant OpenAI ber-array content tetap role assistant", () => 
   assert.strictEqual(asst.content, "sudah dicek");
 });
 
-test("TASK-51 - openai->claude: gambar URL http dan tool_choice required", () => {
+test("openai->claude: gambar URL http dan tool_choice required", () => {
   const body = {
     model: "m",
     tool_choice: "required",
@@ -571,7 +571,7 @@ test("TASK-51 - openai->claude: gambar URL http dan tool_choice required", () =>
   assert.deepStrictEqual(img.source, { type: "url", url: "https://e.com/a.png" });
 });
 
-test("TASK-51 - openai->claude: default max_tokens dari capabilities model", () => {
+test("openai->claude: default max_tokens dari capabilities model", () => {
   const body = { model: "claude-opus-5", messages: [{ role: "user", content: "hi" }] };
   const out = translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, body, "claude-opus-5");
   assert.strictEqual(out.max_tokens, 128000, "bukan dipaksa 4096");
@@ -580,7 +580,7 @@ test("TASK-51 - openai->claude: default max_tokens dari capabilities model", () 
   assert.strictEqual(unknown.max_tokens, 4096, "fallback terakhir tetap 4096");
 });
 
-test("TASK-51 - openai->claude: argumen tool JSON rusak tidak melempar", () => {
+test("openai->claude: argumen tool JSON rusak tidak melempar", () => {
   const body = {
     model: "m",
     messages: [
@@ -593,9 +593,9 @@ test("TASK-51 - openai->claude: argumen tool JSON rusak tidak melempar", () => {
   assert.deepStrictEqual(tu.input, {}, "argumen rusak -> objek kosong");
 });
 
-// ── TASK-48: Kiro ─────────────────────────────────────────────────────────
+// ── Kiro ─────────────────────────────────────────────────────────
 
-test("TASK-48 - kiro: riwayat tool dan system prompt di giliran yang benar", () => {
+test("kiro: riwayat tool dan system prompt di giliran yang benar", () => {
   const body = {
     model: "claude-3-7-sonnet",
     messages: [
@@ -631,7 +631,7 @@ test("TASK-48 - kiro: riwayat tool dan system prompt di giliran yang benar", () 
   assert.strictEqual(curCtx.toolResults[0].toolUseId, "tk1");
 });
 
-test("TASK-48 - kiro stream: fragmen toolUseEvent satu id digabung", async () => {
+test("kiro stream: fragmen toolUseEvent satu id digabung", async () => {
   const { createKiroToOpenAITransformStream } = await import("../src/translator/kiro.js");
   const { crc32 } = await import("../src/utils/eventstream.js");
   const enc = new TextEncoder();
@@ -686,7 +686,7 @@ test("TASK-48 - kiro stream: fragmen toolUseEvent satu id digabung", async () =>
   assert.ok(text.includes('"finish_reason":"tool_calls"'));
 });
 
-test("TASK-48 - kiro: history selang-seling user/assistant", () => {
+test("kiro: history selang-seling user/assistant", () => {
   const body = {
     model: "m",
     messages: [
@@ -707,9 +707,9 @@ test("TASK-48 - kiro: history selang-seling user/assistant", () => {
   assert.ok(asst.assistantResponseMessage.content.includes("t1"), "assistant berurutan digabung");
 });
 
-// ── TASK-49: Gemini / Antigravity ─────────────────────────────────────────
+// ── Gemini / Antigravity ─────────────────────────────────────────
 
-test("TASK-49 - gemini: nama tool, system gabung, dan functionResponse", () => {
+test("gemini: nama tool, system gabung, dan functionResponse", () => {
   resetGeminiState?.();
   const out = translateRequest(FORMATS.OPENAI, FORMATS.GEMINI, chatForGemini(), "gemini-3.1-pro");
 
@@ -726,7 +726,7 @@ test("TASK-49 - gemini: nama tool, system gabung, dan functionResponse", () => {
   assert.deepStrictEqual(frNames, ["mcp__custom_tools__bash", "Read"], "nama dari lookup tool_call_id");
 });
 
-test("TASK-49 - gemini: extra_content signature dihormati, turn lama tanpa dummy", () => {
+test("gemini: extra_content signature dihormati, turn lama tanpa dummy", () => {
   resetGeminiState?.();
   const out = translateRequest(FORMATS.OPENAI, FORMATS.GEMINI, chatForGemini(), "gemini-3.1-pro");
   const modelStep = out.contents.find((c) => c.role === "model");
@@ -739,7 +739,7 @@ test("TASK-49 - gemini: extra_content signature dihormati, turn lama tanpa dummy
   assert.ok(fcs.every((p) => !("thoughtSignature" in p.functionCall)), "signature di level Part, bukan di functionCall");
 });
 
-test("TASK-49 - gemini: current turn (berakhir di tool result) dapat dummy signature", () => {
+test("gemini: current turn (berakhir di tool result) dapat dummy signature", () => {
   resetGeminiState?.();
   const body = {
     model: "gemini-3.1-pro",
@@ -781,7 +781,7 @@ test("TASK-49 - gemini: current turn (berakhir di tool result) dapat dummy signa
   assert.ok(modelIdx < frIdx, "model step sebelum functionResponse");
 });
 
-test("TASK-49 - gemini: tool turn lama tidak diberi dummy signature", () => {
+test("gemini: tool turn lama tidak diberi dummy signature", () => {
   resetGeminiState?.();
   const body = {
     model: "gemini-3.1-pro",
@@ -799,7 +799,7 @@ test("TASK-49 - gemini: tool turn lama tidak diberi dummy signature", () => {
   assert.strictEqual(fc.thoughtSignature, undefined, "turn lama tidak divalidasi upstream");
 });
 
-test("TASK-49 - gemini: nama tool dikembalikan di respons stream", async () => {
+test("gemini: nama tool dikembalikan di respons stream", async () => {
   resetGeminiState?.();
   // Deklarasikan dulu agar peta nama terisi.
   translateRequest(FORMATS.OPENAI, FORMATS.GEMINI, chatForGemini(), "gemini-3.1-pro");
@@ -835,7 +835,7 @@ test("TASK-49 - gemini: nama tool dikembalikan di respons stream", async () => {
   resetGeminiState?.();
 });
 
-// ── TASK-47/50: stream Responses -> OpenAI ────────────────────────────────
+// ── stream Responses -> OpenAI ────────────────────────────────
 
 async function collectChatChunks(stream, events) {
   const source = new ReadableStream({
@@ -851,7 +851,7 @@ async function collectChatChunks(stream, events) {
     .map((l) => JSON.parse(l.slice(5)));
 }
 
-test("TASK-47 - stream responses: hanya output_text yang menjadi content", async () => {
+test("stream responses: hanya output_text yang menjadi content", async () => {
   const stream = createTransformStream(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "muse");
   const chunks = await collectChatChunks(stream, [
     { type: "response.output_text.delta", delta: "jawaban" },
@@ -878,9 +878,9 @@ test("TASK-47 - stream responses: hanya output_text yang menjadi content", async
   assert.ok(names.includes("apply_patch"), "custom tool call memakai nama tool");
 });
 
-// ── TASK-53: CommandCode ─────────────────────────────────────────
+// ── CommandCode ─────────────────────────────────────────
 
-test("TASK-53 - commandcode: tanpa default paksa, toolName dari lookup, workingDir netral", async () => {
+test("commandcode: tanpa default paksa, toolName dari lookup, workingDir netral", async () => {
   const { translateOpenAIToCommandCode } = await import("../src/executors/commandcode.js");
 
   // Klien tidak mengirim temperature/max_tokens -> tidak boleh dipaksa.
@@ -909,9 +909,9 @@ test("TASK-53 - commandcode: tanpa default paksa, toolName dari lookup, workingD
   assert.strictEqual(toolMsg.content[0].toolName, "Bash", "toolName diisi dari tool_call");
 });
 
-// ── TASK-52: reasoning dan usage cache di respons ─────────────────────────
+// ── reasoning dan usage cache di respons ─────────────────────────
 
-test("TASK-52 - openai->claude stream: satu thinking block dengan urutan benar", async () => {
+test("openai->claude stream: satu thinking block dengan urutan benar", async () => {
   const stream = createTransformStream(FORMATS.OPENAI, FORMATS.CLAUDE, "glm");
   const ev = (o) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: o }] })}\n\n`;
   const source = new ReadableStream({
@@ -949,7 +949,7 @@ test("TASK-52 - openai->claude stream: satu thinking block dengan urutan benar",
   assert.strictEqual(deltas[0].index, deltas[1].index, "delta berurutan satu blok");
 });
 
-test("TASK-52 - claude->openai stream: thinking dan cache usage", async () => {
+test("claude->openai stream: thinking dan cache usage", async () => {
   const events = [
     { type: "message_start", message: { model: "claude-opus-5", usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 500 } } },
     { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "hmm" } },
@@ -991,7 +991,7 @@ test("TASK-52 - claude->openai stream: thinking dan cache usage", async () => {
   assert.ok(usageIdx > finishIdx2, "usage chunk setelah finish_reason");
 });
 
-test("TASK-52 - responses->openai non-stream: cached_tokens", async () => {
+test("responses->openai non-stream: cached_tokens", async () => {
   const out = await responsesToOpenAIResponse(
     {
       id: "resp_1",
@@ -1004,7 +1004,7 @@ test("TASK-52 - responses->openai non-stream: cached_tokens", async () => {
   assert.strictEqual(out.usage.prompt_tokens_details?.cached_tokens, 80, "input_tokens_details -> prompt_tokens_details");
 });
 
-test("TASK-52 - claude->openai non-stream: cache_read -> cached_tokens", () => {
+test("claude->openai non-stream: cache_read -> cached_tokens", () => {
   const out = claudeToOpenAIResponse(
     { id: "msg_1", model: "claude-opus-5", content: [{ type: "text", text: "halo" }], stop_reason: "end_turn", usage: { input_tokens: 30, output_tokens: 2, cache_read_input_tokens: 200 } },
     "claude-opus-5"

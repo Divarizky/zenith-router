@@ -24,26 +24,46 @@ export default {
       quotaApiUrl: `${ANTIGRAVITY_IDE_BASE_URL}/v1internal:fetchAvailableModels`,
     },
   },
-  // Tier variants of *-flash-tiered: the tier travels as generationConfig.thinkingConfig.thinkingLevel.
-  // Appending "(high)" to the model name makes Google answer 404 (verified against a live account).
+  // One entry per family; the thinking level selects the runtime id upstream.
+  // Suffixed runtime ids (-low/-medium/-high) are not catalog entries any more:
+  // the level comes from the request (reasoning_effort / reasoning.effort /
+  // thinking.budget_tokens), defaulting to medium like agy's own
+  // defaultAgentModelId. A `-tiered` family takes the level as thinkingLevel.
   models: [
-    { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", upstreamModelId: "gemini-3.8-flash-tiered", thinkingLevel: "high" },
-    { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", upstreamModelId: "gemini-3.8-flash-tiered", thinkingLevel: "medium" },
-    { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", upstreamModelId: "gemini-3.8-flash-tiered", thinkingLevel: "low" },
-    { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", upstreamModelId: "gemini-3.8-flash-tiered", thinkingLevel: "medium" },
-    { id: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)", upstreamModelId: "gemini-3.7-flash-tiered", thinkingLevel: "high" },
-    { id: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)", upstreamModelId: "gemini-3.7-flash-tiered", thinkingLevel: "medium" },
-    { id: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)", upstreamModelId: "gemini-3.7-flash-tiered", thinkingLevel: "low" },
-    { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", upstreamModelId: "gemini-3.6-flash-tiered", thinkingLevel: "high" },
-    { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", upstreamModelId: "gemini-3.6-flash-tiered", thinkingLevel: "medium" },
-    { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", upstreamModelId: "gemini-3.6-flash-tiered", thinkingLevel: "low" },
-    { id: "gemini-3.5-flash-high", name: "Gemini 3.5 Flash (High)", upstreamModelId: "gemini-3-flash-agent" },
-    { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Low)" },
-    { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)" },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
-    { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
-    { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
-    { id: "gemini-3-flash", name: "Gemini 3 Flash" },
+    {
+      id: "gemini-4-argon",
+      name: "Gemini 4 Argon",
+      variants: { low: "gemini-4-argon-low", medium: "gemini-4-argon-medium", high: "gemini-4-argon-high" },
+    },
+    {
+      id: "gemini-3.8-flash",
+      name: "Gemini 3.8 Flash",
+      // Medium maps to the -tiered bucket, which carries the level itself as
+      // thinkingLevel. An account that lists its own -low/-high overrides these
+      // entries, and one with no bucket at all falls back within the variants it
+      // has (see resolveProviderRuntime).
+      variants: { low: "gemini-3.8-flash-tiered", medium: "gemini-3.8-flash-tiered", high: "gemini-3.8-flash-tiered" },
+      tiered: "gemini-3.8-flash-tiered",
+    },
+    {
+      id: "gemini-3.5-flash",
+      name: "Gemini 3.5 Flash",
+      variants: { low: "gemini-3.5-flash-extra-low", medium: "gemini-3.5-flash-low", high: "gemini-3-flash-agent" },
+    },
+    { id: "gemini-3-flash", name: "Gemini 3 Flash", unsuffixed: "gemini-3-flash" },
+    {
+      id: "claude-opus-5-5",
+      name: "Claude Opus 5.5",
+      variants: { low: "claude-opus-5-5-low", medium: "claude-opus-5-5-medium", high: "claude-opus-5-5-high" },
+    },
+    {
+      id: "claude-sonnet-5-5",
+      name: "Claude Sonnet 5.5",
+      variants: { low: "claude-sonnet-5-5-low", medium: "claude-sonnet-5-5-medium", high: "claude-sonnet-5-5-high" },
+    },
+    { id: "claude-opus-4-6", name: "Claude Opus 4.6", variants: { high: "claude-opus-4-6-thinking" } },
+    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", unsuffixed: "claude-sonnet-4-6" },
+    { id: "gpt-oss-120b", name: "GPT-OSS 120B", variants: { medium: "gpt-oss-120b-medium" } },
   ],
   oauth: {
     clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",

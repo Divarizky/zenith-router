@@ -11,11 +11,15 @@ function actionFor(stream) {
 
 // Registry ids are client-facing; upstream wants the real model name, and tier
 // variants (thinkingLevel) share one *-tiered model.
-async function upstreamModelFor(model) {
+async function upstreamModelFor(model, effort, connection) {
   try {
-    const { getProvider } = await import("../providers/index.js");
-    const entry = getProvider("antigravity")?.models?.find((m) => m.id === model);
-    return { id: entry?.upstreamModelId || model, thinkingLevel: entry?.thinkingLevel };
+    const { getProvider, resolveProviderRuntime } = await import("../providers/index.js");
+    const { getAntigravityAccountModels } = await import("../db/index.js");
+    const accountRows = connection?.id ? getAntigravityAccountModels(connection.id) : null;
+    const picked = resolveProviderRuntime(getProvider("antigravity"), model, effort, accountRows?.size ? accountRows : null);
+    if (picked) return { id: picked.id, thinkingLevel: picked.thinkingLevel };
+    // A raw runtime id (suffixed or internal) is still accepted verbatim.
+    return { id: model };
   } catch {
     return { id: model };
   }
@@ -55,14 +59,18 @@ function missingProjectResponse() {
 }
 
 export class AntigravityExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, effort }) {
     let parsed = null;
     try {
       parsed = body ? JSON.parse(body) : null;
     } catch {}
 
     const sourceRequest = parsed?.request || parsed || {};
-    const { id: model, thinkingLevel } = await upstreamModelFor(targetModel || parsed?.model || sourceRequest?.model || "");
+    const { id: model, thinkingLevel } = await upstreamModelFor(
+      targetModel || parsed?.model || sourceRequest?.model || "",
+      effort,
+      connection
+    );
     const projectId = connection?.credentials?.project_id || connection?.credentials?.projectId || parsed?.project;
     if (!projectId) return missingProjectResponse();
 

@@ -10,7 +10,7 @@ import {
 } from "../../services/combos.js";
 import { escapeHtml } from "../html.js";
 
-// The chain is ordered under fallback and rotates under round-robin (TASK-27).
+// The chain is ordered under fallback and rotates under round-robin.
 const STRATEGY_OPTIONS = [
   { value: "fallback", label: "Urutan (fallback)" },
   { value: "round-robin", label: "Giliran (round-robin)" },

@@ -532,7 +532,7 @@ function renderAddAccountModal(p) {
 }
 
 /**
- * Account row proxy cell (F-08): shows the effective binding plus an inline
+ * Account row proxy cell: shows the effective binding plus an inline
  * form to rebind it at any time. The manual address itself is never echoed.
  */
 function accountProxyCell(c, id, pools) {

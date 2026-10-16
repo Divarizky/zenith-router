@@ -1,5 +1,6 @@
 import { getUsageStats, getLastProvider, getRecentUsage } from "../../services/usage.js";
 import { getAllQuotaStatus } from "../../services/quota.js";
+import { getAntigravityModelsByConnection } from "../../db/index.js";
 import { hasQuotaFetcher } from "../../services/quota/index.js";
 import { getActiveProviders } from "../../services/trafficGuard.js";
 import { getQuotaSyncIntervalMs } from "../../services/quotaSync.js";
@@ -16,6 +17,12 @@ export function renderUsagePage(port = 20120, query = {}) {
   const stats = getUsageStats({ days: 30 });
   // Hide accounts whose provider exposes no quota data. Fetcher-backed accounts stay
   // until they have been synced (so Sync is reachable) or when they report an error.
+  // Read once per render: the Antigravity subscription catalog per account.
+  let antigravityInventory = null;
+  try {
+    antigravityInventory = getAntigravityModelsByConnection();
+  } catch {}
+
   const quotas = getAllQuotaStatus().filter((s) => {
     const q = s.quota;
     if (q && (q.error || quotaRows(q).length > 0)) return true;
@@ -573,7 +580,7 @@ function quotaRows(q) {
 }
 
 /** 9router-style quota card for one account. */
-function renderQuotaCard(s) {
+function renderQuotaCard(s, antigravityInventory = null) {
   const q = s.quota;
   const rows = quotaRows(q);
   if (rows.length === 0) rows.push({ label: "Quota", remaining: null, used: q?.error ? String(q.error) : "No quota data yet", reset: null });
@@ -588,7 +595,23 @@ function renderQuotaCard(s) {
     ? `<img src="${escapeHtml(iconSrc)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display=''" style="width:24px;height:24px;object-fit:contain;border-radius:4px;" /><span style="display:none;">${escapeHtml(initials)}</span>`
     : `<span>${escapeHtml(initials)}</span>`;
   const planPill = q?.plan || (q?.unit === "tier" && q?.tier ? q.tier : "");
-  const planPillHtml = planPill ? `<span class="pill">${escapeHtml(planPill)}</span>` : "";
+  // Antigravity: the account's own subscription catalog, so the list itself is
+  // the evidence for which models this plan may call.
+  const inventory = antigravityInventory?.get(s.id) || null;
+  const inventoryRows = inventory ? [...inventory.values()].filter((r) => r.recommended === 1) : [];
+  const tier = inventoryRows.find((r) => r.current_tier)?.current_tier || null;
+  const planPillHtml = planPill || tier
+    ? `<span class="pill">${escapeHtml(planPill || tier)}</span>`
+    : "";
+  const inventoryHtml = inventoryRows.length
+    ? `<details class="q-more"><summary>${inventoryRows.length} model langganan</summary><div class="q-rows">${inventoryRows
+        .map((r) => {
+          const isExhausted = typeof r.quota_remaining === "number" && r.quota_remaining === 0 && Number(r.quota_reset_at || 0) > Date.now();
+          const pct = r.quota_remaining === null || r.quota_remaining === undefined ? "" : `${Math.round(Number(r.quota_remaining) * 100)}%`;
+          return `<div class="q-row"><div class="q-row-top"><span class="q-label">${escapeHtml(r.model_id)}</span><span class="q-meta">${isExhausted ? "Kuota habis" : pct}</span></div></div>`;
+        })
+        .join("")}</div></details>`
+    : "";
 
   const MAX_VISIBLE_ROWS = 4;
 
@@ -632,7 +655,7 @@ function renderQuotaCard(s) {
         </div>
         ${statusPill}
       </div>
-      <div class="q-body">${body}</div>
+      <div class="q-body">${body}${inventoryHtml}</div>
       <div class="q-foot">
         <span class="q-updated">${updated}</span>
         <form action="/dashboard/quota/sync" method="POST" style="margin: 0;">
@@ -708,7 +731,7 @@ function renderQuotaCard(s) {
       ${
         quotas.length === 0
           ? `<div class="empty"><p class="big">Belum ada data kuota</p><p>Hanya akun dengan data kuota dari provider yang ditampilkan di sini.</p></div>`
-          : `<div class="quota-grid">${quotas.map((q) => renderQuotaCard(q)).join("")}</div>`
+          : `<div class="quota-grid">${quotas.map((q) => renderQuotaCard(q, antigravityInventory)).join("")}</div>`
       }
     </div>
 

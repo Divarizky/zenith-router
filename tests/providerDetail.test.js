@@ -26,8 +26,8 @@ test("GET /dashboard/providers/:id - model rows show thinking and vision icons f
     return row || "";
   };
 
-  // gemini-3.8-flash-high: vision + reasoning.
-  const gemini = icons("gemini-3.8-flash-high");
+  // gemini-3.8-flash: vision + reasoning.
+  const gemini = icons("gemini-3.8-flash");
   assert.ok(gemini.includes("cap-icons"), "icons are rendered");
   assert.ok(gemini.includes("mendukung thinking"), "brain icon has a thinking tooltip");
   assert.ok(gemini.includes("baca gambar"), "eye icon has a vision tooltip");

@@ -1,4 +1,4 @@
-import { getConnections, mergeConnectionCredentials } from "../db/index.js";
+import { getConnections, mergeConnectionCredentials, replaceAntigravityAccountModels } from "../db/index.js";
 import { fetchLiveQuota } from "./quota/index.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { logQuiet } from "./logger.js";
@@ -73,7 +73,17 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
 
   // Only the quota key is written: `connection` is a snapshot from before the
   // awaits above, and its tokens may already have been rotated by a refresh.
-  const quota = { ...quotaData, updated_at: Date.now() };
+  const { modelInventory, ...quotaDataOnly } = quotaData || {};
+  if (connection.provider === "antigravity" && Array.isArray(modelInventory)) {
+    try {
+      replaceAntigravityAccountModels(connection.id, quotaDataOnly.tier, modelInventory);
+    } catch (err) {
+      const msg = `[zenith] Failed to store Antigravity model inventory for #${connection.id}: ${err.message}`;
+      if (quiet) logQuiet(msg, "warn");
+      else console.warn(msg);
+    }
+  }
+  const quota = { ...quotaDataOnly, updated_at: Date.now() };
   mergeConnectionCredentials(connection.id, { quota });
   return quota;
 }

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import { AntigravityExecutor } from "../src/executors/antigravity.js";
 import { openaiToGeminiRequest, createGeminiToOpenAITransformStream, geminiToOpenAIResponse } from "../src/translator/gemini.js";
-import { antigravityUserAgent, ANTIGRAVITY_VERSION } from "../src/services/antigravityIdentity.js";
+import { antigravityUserAgent } from "../src/services/antigravityIdentity.js";
 
 function captureExecutor() {
   const seen = {};
@@ -82,7 +82,7 @@ test("Antigravity wrapper - User-Agent memakai versi identitas terpusat", async 
     targetModel: "gemini-3.8-flash",
   });
   assert.strictEqual(seen.headers["user-agent"], antigravityUserAgent());
-  assert.ok(seen.headers["user-agent"].startsWith(`antigravity/ide/${ANTIGRAVITY_VERSION} `));
+  assert.ok(seen.headers["user-agent"].startsWith("antigravity/cli/"));
   assert.ok(!seen.headers["user-agent"].includes("0.0.1"));
 });
 

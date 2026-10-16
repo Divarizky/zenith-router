@@ -10,7 +10,7 @@ function deduplicateLines(text) {
   let repeatCount = 0;
 
   function flushRepeat() {
-    // Blank lines (empty or whitespace only) are never suppressed (F-11)
+    // Blank lines (empty or whitespace only) are never suppressed
     if (currentLine !== null && currentLine.trim() === "") {
       for (let i = 0; i < repeatCount; i++) {
         result.push(currentLine);
@@ -76,7 +76,7 @@ export function condenseContent(text) {
       processedSegments.push(seg);
     } else {
       // Non-code segment (prose, terminal logs, diff output).
-      // Blank lines are preserved intact without collapsing (F-11 / Option C).
+      // Blank lines are preserved intact without collapsing.
       const deduped = deduplicateLines(seg);
       processedSegments.push(deduped);
     }

@@ -1,5 +1,5 @@
 // Client conversation identity for upstreams that keep per-session state
-// (OpenCode Zen, F-09 AC-03). Client headers are never forwarded upstream; this
+// (OpenCode Zen). Client headers are never forwarded upstream; this
 // value only keys a local cache. Auth headers are deliberately not used.
 
 const MAX_SESSION_KEY_LENGTH = 256;

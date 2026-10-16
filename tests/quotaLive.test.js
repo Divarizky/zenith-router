@@ -547,3 +547,55 @@ test("Live Quota - Command Code with an empty balance stays usable for free mode
 
   setOAuthFetch(null);
 });
+
+test("Live Quota - Antigravity menyimpan inventaris model per akun saat sinkron", async () => {
+  const { initDb, getAntigravityModelInventory, getConnections } = await import("../src/db/index.js");
+  const { syncProviderQuota } = await import("../src/services/quota.js");
+  const { setCustomQuotaFetcher } = await import("../src/services/quota.js");
+  const { fetchAntigravityQuota } = await import("../src/services/quota/antigravity.js");
+
+  initDb(":memory:");
+  const conn = addConnection({ provider: "antigravity", name: "pro", auth_type: "oauth", credentials: { access_token: "t" } });
+  setCustomQuotaFetcher(async (c) => {
+    setOAuthFetch(async () =>
+      new Response(
+        JSON.stringify({
+          models: {
+            "gemini-4-argon-medium": { displayName: "Gemini 4 Argon (Medium)", quotaInfo: { remainingFraction: 1, resetTime: "2026-10-23T13:20:01Z" }, maxTokens: 1048576, supportsImages: true, supportsThinking: true },
+            "legacy-model": { displayName: "Legacy", quotaInfo: { remainingFraction: 0.5 } },
+          },
+          agentModelSorts: [{ groups: [{ modelIds: ["gemini-4-argon-medium"] }] }],
+          allowedTiers: [{ id: "free-tier", isDefault: true }],
+        }),
+        { status: 200 }
+      )
+    );
+    return fetchAntigravityQuota(c);
+  });
+  const quota = await syncProviderQuota(conn);
+  setCustomQuotaFetcher(null);
+
+  assert.ok(!("modelInventory" in quota), "inventaris tidak ikut tersimpan di credentials");
+  const inv = getAntigravityModelInventory();
+  assert.ok(inv.has("gemini-4-argon-medium"), "model rekomendasi masuk inventaris");
+  assert.ok(!inv.has("legacy-model"), "model non-rekomendasi tidak masuk");
+  const entry = inv.get("gemini-4-argon-medium").accounts[0];
+  assert.strictEqual(entry.display_name, "Gemini 4 Argon (Medium)");
+  assert.strictEqual(entry.supports_thinking, 1);
+  assert.strictEqual(entry.max_tokens, 1048576);
+  assert.strictEqual(entry.quota_remaining, 1);
+  assert.strictEqual(entry.current_tier, "free-tier");
+  assert.strictEqual(getConnections("antigravity")[0].credentials.quota.quotas["gemini-4-argon-medium"].remainingPercentage, 100);
+});
+
+test("Live Quota - Antigravity tidak memasukkan model disabled ke inventaris", async () => {
+  const { parseModelInventory } = await import("../src/services/quota/antigravity.js");
+  const inv = parseModelInventory({
+    models: {
+      "gemini-4-argon-disabled": { displayName: "Gemini 4 Argon", disabled: true, tagTitle: "Unavailable" },
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", quotaInfo: { remainingFraction: 1 } },
+    },
+    agentModelSorts: [{ groups: [{ modelIds: ["gemini-4-argon-disabled", "gemini-3.8-flash-high"] }] }],
+  });
+  assert.deepStrictEqual(inv.map((m) => m.modelId), ["gemini-3.8-flash-high"]);
+});

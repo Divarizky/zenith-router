@@ -192,7 +192,7 @@ app.post("/dashboard/combos/rename", (c) => handleRenameCombo(c));
 app.post("/dashboard/combos/toggle", (c) => handleToggleCombo(c));
 app.post("/dashboard/combos/delete", (c) => handleDeleteCombo(c));
 
-// Dashboard Proxy Tab UI & Actions (F-08)
+// Dashboard Proxy Tab UI & Actions
 // Dashboard Proxy Pools UI & Actions
 app.get("/dashboard/proxies", (c) => c.html(renderProxiesPage(PORT, c.req.query())));
 app.get("/dashboard/proxy-pools", (c) => c.redirect("/dashboard/proxies"));

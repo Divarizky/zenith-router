@@ -992,7 +992,7 @@ export function aggregateResponsesStream(sseText, model = "codex") {
 
 export async function responsesToOpenAIResponse(streamOrData, model = "codex") {
   // Non-streaming Responses JSON: aggregate the output array into one chat
-  // message and map the usage field names (TASK-52).
+  // message and map the usage field names.
   if (typeof streamOrData === "object" && !streamOrData.getReader && !streamOrData[Symbol.asyncIterator]) {
     const data = streamOrData || {};
     let fullContent = "";

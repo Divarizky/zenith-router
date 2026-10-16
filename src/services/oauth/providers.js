@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { platform, arch } from "node:os";
 import { proxyFetch } from "../../executors/proxy.js";
 import { antigravityUserAgent } from "../antigravityIdentity.js";
 
@@ -50,16 +49,6 @@ function emailFromJwt(jwt) {
   return payload?.email || payload?.preferred_username || undefined;
 }
 
-/** Antigravity ClientMetadata.Platform enum, matching the IDE binary. */
-function antigravityPlatform() {
-  const os = platform();
-  const a = arch();
-  if (os === "darwin") return a === "arm64" ? 2 : 1;
-  if (os === "linux") return a === "arm64" ? 4 : 3;
-  if (os === "win32") return 5;
-  return 0;
-}
-
 export const OAUTH_CONFIG = {
   claude: {
     clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
@@ -94,8 +83,8 @@ export const OAUTH_CONFIG = {
       "https://www.googleapis.com/auth/cclog",
       "https://www.googleapis.com/auth/experimentsandconfigs",
     ],
-    loadCodeAssistUrl: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-    onboardUserUrl: "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
+    loadCodeAssistUrl: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+    onboardUserUrl: "https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser",
   },
   cline: {
     authorizeUrl: "https://api.cline.bot/api/v1/auth/authorize",
@@ -305,7 +294,9 @@ const antigravity = {
       "Content-Type": "application/json",
       "User-Agent": antigravityUserAgent(),
     };
-    const metadata = { ideType: 9, platform: antigravityPlatform(), pluginType: 2 };
+    // agy 1.4.0 sends ideType as the string "ANTIGRAVITY". The numeric form only
+    // works without platform and returns the legacy catalog. Verified against a live account.
+    const metadata = { ideType: "ANTIGRAVITY" };
     let projectId = "";
     let tierId = "legacy-tier";
     try {

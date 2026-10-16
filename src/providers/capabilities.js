@@ -42,6 +42,7 @@ export const PATTERN_CAPABILITIES = [
 
   // ── Gemini / Gemma ────────────────────────────────────────────────
   { pattern: "*gemini*image*", caps: { vision: true, imageOutput: true, contextWindow: 1048576 } },
+  { pattern: "*gemini-4*", caps: { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 } },
   { pattern: "*gemini-3.8*", caps: { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 } },
   { pattern: "*gemini-3.7*", caps: { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 } },
   { pattern: "*gemini-3.5*", caps: { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 } },

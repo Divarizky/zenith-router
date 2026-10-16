@@ -3,8 +3,9 @@ import {
   getModelLockUntil,
   setConnectionCooldown,
   updateConnectionLastUsed,
+  getAntigravityModelsByConnection,
 } from "../db/index.js";
-import { getProvider } from "../providers/index.js";
+import { getProvider, resolveProviderRuntime } from "../providers/index.js";
 import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { disableModel } from "./modelOverrides.js";
 import { isConnectionExhausted } from "./quota.js";
@@ -16,20 +17,28 @@ import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
 
-export function listAvailableConnections(providerId, { rotation = null, model = null } = {}) {
+export function listAvailableConnections(providerId, { rotation = null, model = null, effort = undefined } = {}) {
   if (!providerId) return [];
   const providerDef = getProvider(providerId);
   const connections = getConnections(providerId);
 
-  const available = connections.filter(
+  // Antigravity publishes a per-subscription model list, so an account that
+  // does not carry the model is skipped instead of costing a wasted 403. The
+  // gate fails open: an account that has never synced has no rows and stays
+  // eligible, and the quota cache only expires with a new sync.
+  const antigravityInventory = providerDef?.id === "antigravity" && model ? getAntigravityModelsByConnection() : null;
+  const request = { providerDef, model, effort };
+
+  const candidates = connections.filter(
     (c) =>
       c.is_active === 1 &&
       !isConnectionInCooldown(c, model) &&
       !isConnectionExhausted(c) &&
-      // F-08 AC-06: an account whose list proxy is inactive or gone is skipped
+      // an account whose list proxy is inactive or gone is skipped
       // here and never falls back to a direct connection.
       !resolveConnectionProxy(c).blocked
   );
+  const available = candidates.filter((c) => servesModel(c, request, antigravityInventory));
 
   const strategy = rotation || getSetting("account_rotation", "lru");
   if (strategy === "sticky") {
@@ -54,8 +63,27 @@ export function listAvailableConnections(providerId, { rotation = null, model = 
   return available;
 }
 
-export function getNextConnection(providerId, triedIds = [], model = null) {
-  const available = listAvailableConnections(providerId, { model });
+/**
+ * True when the model may be sent to this account. Only Antigravity is gated
+ * today: its catalog is per subscription. Everything else always passes, as
+ * does every account with no synced rows. The effort resolves against this
+ * account's own variants, the same way the executor resolves it.
+ */
+function servesModel(connection, { providerDef, model, effort }, inventory) {
+  if (!inventory || !connection.id) return true;
+  const rows = inventory.get(connection.id);
+  if (!rows || rows.size === 0) return true;
+
+  const runtimeId = resolveProviderRuntime(providerDef, model, effort, rows)?.id ?? model;
+  const row = rows.get(runtimeId);
+  if (!row) return false;
+  const isExhausted = typeof row.quota_remaining === "number" && row.quota_remaining === 0;
+  const hasFutureReset = Number(row.quota_reset_at || 0) > Date.now();
+  return !(isExhausted && hasFutureReset);
+}
+
+export function getNextConnection(providerId, triedIds = [], model = null, effort = undefined) {
+  const available = listAvailableConnections(providerId, { model, effort });
   for (const c of available) {
     if (!triedIds.includes(c.id)) {
       if (c.id) updateConnectionLastUsed(c.id);
@@ -206,6 +234,7 @@ export async function executeWithFallback({
   stream = false,
   targetModel = "",
   sessionKey = null,
+  effort = undefined,
 }) {
   const modelId = targetModel || upstreamPayload?.model || "";
   const reasoningKey = `${provider.id}/${modelId}`;
@@ -266,8 +295,8 @@ export async function executeWithFallback({
   }
 
   const triedIds = [];
-  const available = listAvailableConnections(provider.id, { model: modelId });
-  // F-08 AC-15/AC-16: provider tanpa akun dilayani koneksi virtual. Saat
+  const available = listAvailableConnections(provider.id, { model: modelId, effort });
+  // provider tanpa akun dilayani koneksi virtual. Saat
   // strategi rotasi aktif dan ada proxy aktif, satu request mencoba sampai
   // tiga proxy berbeda; proxy yang gagal dilewati ke berikutnya dalam request
   // yang sama. Tanpa proxy aktif, koneksi virtual tetap memakai koneksi
@@ -286,7 +315,7 @@ export async function executeWithFallback({
       // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
       connection = available[0];
     } else {
-      connection = getNextConnection(provider.id, triedIds, modelId);
+      connection = getNextConnection(provider.id, triedIds, modelId, effort);
       if (!connection) break;
       triedIds.push(connection.id);
     }
@@ -333,6 +362,7 @@ export async function executeWithFallback({
         targetModel,
         targetFormat,
         sessionKey,
+        effort,
       });
       // An HTTP 200 stream whose first event is an error (rate limit, quota)
       // must fail here, or the error reaches the client as a success.
@@ -441,6 +471,7 @@ export async function executeWithFallback({
             targetModel,
             targetFormat,
             sessionKey,
+            effort,
           });
           res = await probeStreamError(res, signal);
         } catch (err) {

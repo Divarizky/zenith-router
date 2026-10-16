@@ -142,7 +142,7 @@ export function translateOpenAIToCommandCode(body, model) {
     stream: true,
   };
   // Only forward limits the client actually set; forcing a temperature or a
-  // max_tokens default would silently override the caller's intent (F-11).
+  // max_tokens default would silently override the caller's intent.
   const maxTokens = body?.max_tokens ?? body?.max_output_tokens;
   if (typeof maxTokens === "number") params.max_tokens = maxTokens;
   if (typeof body?.temperature === "number") params.temperature = body.temperature;
@@ -168,7 +168,7 @@ export function translateOpenAIToCommandCode(body, model) {
   const today = new Date().toISOString().slice(0, 10);
 
   // workingDir is deliberately a neutral root: the real value is the local
-  // machine running Zenith, which must not leak to the upstream (F-11 / AC-09).
+  // machine running Zenith, which must not leak to the upstream.
   return {
     threadId: randomUUID(),
     memory: "",

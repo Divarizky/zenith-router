@@ -35,7 +35,7 @@ const upstreamBaseUrl = (provider, targetFormat) =>
 function isWarmupRequest(body) {
   // Only intercept explicit warmup probes ("Warmup"). A longer conversation
   // is real work. Topic-naming requests (isNewTopic) are deliberately NOT
-  // intercepted so the client receives a real generated topic from upstream (F-11).
+  // intercepted so the client receives a real generated topic from upstream.
   if (!body || !Array.isArray(body.messages) || body.messages.length !== 1) return false;
 
   const firstMsg = body.messages[0];

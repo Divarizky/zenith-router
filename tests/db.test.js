@@ -267,3 +267,50 @@ test("Cooldown locks - neither kind of lock is ever shortened or widened", () =>
   assert.strictEqual(getModelLockUntil(conn.id, "mistral-code-latest"), null);
   assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "lock aktif tetap utuh");
 });
+
+test("Antigravity inventory - replace per account, union across active accounts", async () => {
+  const { replaceAntigravityAccountModels, getAntigravityModelInventory } = await import("../src/db/index.js");
+  initDb(":memory:");
+  const a = addConnection({ provider: "antigravity", name: "a", auth_type: "oauth", credentials: {} });
+  const b = addConnection({ provider: "antigravity", name: "b", auth_type: "oauth", credentials: {} });
+  replaceAntigravityAccountModels(a.id, "free-tier", [
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
+    { modelId: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", recommended: true, quotaRemaining: 0.9 },
+    { modelId: "old-model", displayName: "Old", recommended: false, quotaRemaining: 1 },
+  ]);
+  replaceAntigravityAccountModels(b.id, "free-tier", [
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 0 },
+    { modelId: "claude-opus-5-5-low", displayName: "Claude Opus 5.5 (Low)", recommended: true, quotaRemaining: 1 },
+  ]);
+  // Sync ulang mengganti penuh: model yang hilang tidak tertinggal.
+  replaceAntigravityAccountModels(a.id, "free-tier", [
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
+  ]);
+  let inv = getAntigravityModelInventory();
+  assert.ok(!inv.has("claude-sonnet-4-6"), "model yang hilang dari sync ikut hilang");
+  assert.ok(!inv.has("old-model"), "non-recommended tidak masuk inventaris");
+  assert.strictEqual(inv.get("gemini-4-argon-medium").accounts.length, 2);
+  assert.strictEqual(inv.get("claude-opus-5-5-low").accounts[0].connection_id, b.id);
+  // Akun nonaktif tidak ikut.
+  updateConnection(b.id, { is_active: 0 });
+  inv = getAntigravityModelInventory();
+  assert.strictEqual(inv.get("gemini-4-argon-medium").accounts.length, 1);
+});
+
+test("replaceAntigravityAccountModels - quota_reset_at menerima ISO dan epoch ms, menolak nilai tak valid", async () => {
+  const { initDb, addConnection } = await import("../src/db/index.js");
+  const { replaceAntigravityAccountModels, getAntigravityAccountModels } = await import("../src/db/index.js");
+  initDb(":memory:");
+  const c = addConnection({ provider: "antigravity", name: "iso", auth_type: "oauth", credentials: {} });
+  const ms = Date.now() + 3600_000;
+  replaceAntigravityAccountModels(c.id, "free-tier", [
+    { modelId: "iso", recommended: true, quotaRemaining: 0, quotaResetAt: new Date(ms).toISOString() },
+    { modelId: "ms", recommended: true, quotaRemaining: 0, quotaResetAt: ms },
+    { modelId: "junk", recommended: true, quotaRemaining: 0, quotaResetAt: "bukan-tanggal" },
+    { modelId: "kosong", recommended: true, quotaRemaining: 0 },
+  ]);
+  const rows = getAntigravityAccountModels(c.id);
+  assert.strictEqual(rows.get("iso").quota_reset_at, rows.get("ms").quota_reset_at);
+  assert.strictEqual(rows.get("junk").quota_reset_at, null);
+  assert.strictEqual(rows.get("kosong").quota_reset_at, null);
+});

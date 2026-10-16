@@ -283,3 +283,35 @@ test("GET /dashboard/usage - the recent panel attributes a request to its combo"
   const api = JSON.parse(await (await app.request("/api/usage/recent")).text());
   assert.strictEqual(api.recent[0].combo_name, "antai-utama");
 });
+
+test("Dashboard usage - kartu kuota Antigravity menampilkan model langganan dan penanda kuota habis", async () => {
+  const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
+  const { renderUsagePage } = await import("../src/ui/pages/usage.js");
+  initDb(":memory:");
+  const c = addConnection({
+    provider: "antigravity",
+    name: "pro-akun",
+    auth_type: "oauth",
+    credentials: {
+      quota: {
+        provider: "antigravity",
+        unit: "tier",
+        plan: "Google AI Pro",
+        quotas: { "gemini-4-argon-medium": { used: 0, total: 1000, remainingPercentage: 100, displayName: "Gemini 4 Argon (Medium)" } },
+        updated_at: Date.now(),
+      },
+    },
+  });
+  replaceAntigravityAccountModels(c.id, "free-tier", [
+    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1, quotaResetAt: Date.now() + 3600_000, currentTier: "free-tier" },
+    { modelId: "claude-opus-5-5-high", displayName: "Claude Opus 5.5 (High)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000, currentTier: "free-tier" },
+    { modelId: "chat_20706", displayName: "internal", recommended: false },
+  ]);
+  const html = renderUsagePage(20120, {});
+  assert.ok(html.includes("2 model langganan"), "jumlah model langganan (hanya recommended)");
+  assert.ok(html.includes("gemini-4-argon-medium"));
+  assert.ok(html.includes("claude-opus-5-5-high"));
+  assert.ok(html.includes("Kuota habis"), "model dengan kuota 0 dan reset di masa depan ditandai");
+  assert.ok(!html.includes("chat_20706"), "model internal tidak ditampilkan");
+  assert.ok(html.includes("Google AI Pro"), "nama langganan tetap tampil");
+});

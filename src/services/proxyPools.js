@@ -10,7 +10,7 @@ import { proxyFetch } from "../executors/proxy.js";
 import { getSetting, setSetting } from "./settings.js";
 
 /**
- * Mask the password inside a proxy address for display (F-08 AC-14).
+ * Mask the password inside a proxy address for display.
  * `http://user:pass@host:port` -> `http://user:****@host:port`.
  * Addresses without a password are returned untouched, and the rest of the
  * string (scheme, user, host, port, path) is preserved exactly.
@@ -30,7 +30,7 @@ export function maskProxyUrl(raw) {
 }
 
 /**
- * Why an address cannot be stored, or null when it can (F-08 AC-02).
+ * Why an address cannot be stored, or null when it can.
  * Rejection reasons are user-facing Indonesian sentences.
  */
 export function validateProxyAddress(raw) {
@@ -76,7 +76,7 @@ export function createProxyPool({ name, url }) {
 }
 
 /**
- * Parse one pasted line into a full proxy address (F-08 AC-03).
+ * Parse one pasted line into a full proxy address.
  * Accepted: a full `http://…` URL, `host:port`, or `host:port:user:pass`
  * (credentials become the URL userinfo). Anything else returns a reason.
  */
@@ -121,7 +121,7 @@ function proxyNameFromUrl(url) {
 }
 
 /**
- * Import pasted lines, one address per line (F-08 AC-03). Invalid lines are
+ * Import pasted lines, one address per line. Invalid lines are
  * counted as failed without affecting the others; addresses already in the
  * list are skipped; blank lines are ignored. Returns {created, skipped, failed}.
  */
@@ -156,7 +156,7 @@ export function importProxyLines(rawText) {
 }
 
 /**
- * Health test (F-08 AC-10): one request through the proxy, capped at 8 s.
+ * Health test: one request through the proxy, capped at 8 s.
  * Any HTTP response received counts as healthy — only transport failures
  * (refused, reset, timeout) are recorded as failed. The active flag is never
  * touched: a test only records status, latency, test time, and last error.
@@ -193,7 +193,7 @@ export async function testProxyPool(id) {
 }
 
 /**
- * Change a proxy's name and/or address (F-08 AC-13). Validation matches
+ * Change a proxy's name and/or address. Validation matches
  * createProxyPool. An address still carrying the display mask (`****`)
  * keeps the stored password instead of saving the mask.
  */
@@ -233,7 +233,7 @@ export function toggleProxyPool(id, is_active) {
 }
 
 /**
- * Delete a proxy (F-08 AC-12): rejected while at least one account still
+ * Delete a proxy: rejected while at least one account still
  * routes through it; the message names the number of accounts.
  */
 export function deleteProxyPool(id) {
@@ -247,7 +247,7 @@ export function deleteProxyPool(id) {
 }
 
 /**
- * Effective proxy for an account (F-08 AC-05): list first, then the manual
+ * Effective proxy for an account: list first, then the manual
  * address, then direct. An account bound to a missing or inactive pool is
  * BLOCKED — every traffic path must skip it rather than fall back to direct.
  */
@@ -292,7 +292,7 @@ export function listProxyPools() {
 }
 
 /**
- * Maksimal percobaan proxy dalam satu request (F-08 AC-15). Tiga cukup untuk
+ * Maksimal percobaan proxy dalam satu request. Tiga cukup untuk
  * menutupi satu proxy mati tanpa membuat request menggantung.
  */
 export const PROXY_ROTATION_MAX_ATTEMPTS = 3;
@@ -329,7 +329,7 @@ export function setProxyRotationStrategy(providerId, strategy) {
  * berbeda. Bergiliran dimulai dari kursor dan kursor maju satu langkah per
  * request walau percobaan sebelumnya gagal; acak mengacak urutan daftar
  * aktif. Mengembalikan daftar kosong saat strategi tidak aktif atau tidak ada
- * proxy aktif, sehingga pemanggil memakai koneksi langsung (AC-16).
+ * proxy aktif, sehingga pemanggil memakai koneksi langsung.
  */
 export function planProxyRotation(providerId, strategy) {
   if (strategy !== "round_robin" && strategy !== "random") return [];

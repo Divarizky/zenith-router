@@ -36,7 +36,44 @@ function modelCapabilityFields(modelId, storedCaps = null) {
   if (caps.maxOutput) fields.max_completion_tokens = caps.maxOutput;
   return fields;
 }
-import { getConnections } from "../db/index.js";
+import { getConnections, getAntigravityInventoryRows } from "../db/index.js";
+import { buildAntigravityFamilies, resolveFamilyRuntime } from "../services/antigravityCatalog.js";
+
+/**
+ * Every synced runtime id across active accounts, keyed by runtime id. Families
+ * are derived from this so a model only one subscription carries still resolves.
+ */
+function antigravityModelRows() {
+  const rows = {};
+  for (const row of getAntigravityInventoryRows()) {
+    if (rows[row.model_id]) continue;
+    rows[row.model_id] = {
+      displayName: row.display_name,
+      supportsImages: row.supports_images === 1 ? true : row.supports_images === 0 ? false : undefined,
+      supportsThinking: row.supports_thinking === 1 ? true : row.supports_thinking === 0 ? false : undefined,
+      maxTokens: row.max_tokens ?? undefined,
+      maxOutputTokens: row.max_output_tokens ?? undefined,
+    };
+  }
+  return rows;
+}
+
+/** Builtin and synced families share this shape, so resolveFamilyRuntime needs no special case. */
+function familyEntry(id, name, source = {}) {
+  return {
+    id,
+    name,
+    family: id,
+    variants: source.variants || {},
+    unsuffixed: source.unsuffixed,
+    tiered: source.tiered,
+    supportsImages: source.supportsImages,
+    supportsThinking: source.supportsThinking,
+    maxTokens: source.maxTokens,
+    maxOutputTokens: source.maxOutputTokens,
+    source: source.source || "synced",
+  };
+}
 
 const REGISTRY = [
   claude,
@@ -103,6 +140,29 @@ export function getProviderModels(p) {
   };
 
   const staticModels = p.models.map((m) => withCaps({ id: m.id, name: m.name, source: "builtin" }));
+
+  // Antigravity publishes a per-subscription catalog, so accounts on a higher
+  // plan carry families the builtin list never had (gemini-4-argon, Claude 5.5).
+  // Both sides are families now; the builtin list stays as the fallback for
+  // whatever discovery has not reported yet.
+  if (p.id === "antigravity") {
+    const builtinFamilies = new Map(p.models.map((m) => [m.id, familyEntry(m.id, m.name, { ...m, source: "builtin" })]));
+    for (const [family, discovered] of buildAntigravityFamilies(antigravityModelRows())) {
+      const existing = builtinFamilies.get(family);
+      // A discovered family wins its variants: it is what this account can call.
+      if (existing) {
+        existing.variants = { ...existing.variants, ...discovered.variants };
+        existing.unsuffixed = discovered.unsuffixed || existing.unsuffixed;
+        existing.tiered = discovered.tiered || existing.tiered;
+        existing.supportsImages = discovered.supportsImages ?? existing.supportsImages;
+        existing.supportsThinking = discovered.supportsThinking ?? existing.supportsThinking;
+      } else {
+        builtinFamilies.set(family, familyEntry(family, discovered.displayName || family, discovered));
+      }
+    }
+    return [...builtinFamilies.values()].map((f) => withCaps(f));
+  }
+
   if (!p.freeModelSync) return staticModels;
 
   const synced = listSyncedModels(p.id).map((m) =>
@@ -113,6 +173,23 @@ export function getProviderModels(p) {
 
   const staticIds = new Set(staticModels.map((m) => m.id));
   return [...staticModels, ...synced.filter((m) => !staticIds.has(m.id))];
+}
+
+/**
+ * Runtime id and thinking level a catalog model resolves to for one effort.
+ * Only families carry variants; any other id is already a runtime id, so the
+ * result is undefined and the caller keeps the id it was given.
+ */
+export function resolveProviderRuntime(providerDef, modelId, effort, accountRows = null) {
+  // With an account's own rows, variants come from what that account carries, so
+  // the level falls back within it and never picks an id it cannot serve.
+  const entry = accountRows
+    ? buildAntigravityFamilies(
+        Object.fromEntries([...accountRows].map(([id, row]) => [id, { displayName: row.display_name }]))
+      ).get(modelId)
+    : getProviderModels(providerDef)?.find((m) => m.id === modelId);
+  if (!entry) return undefined;
+  return resolveFamilyRuntime(entry, effort);
 }
 
 /**

@@ -45,6 +45,7 @@ export function recordUsage({
   apiKeyId = null,
   provider = null,
   comboName = null,
+  fallbackFrom = null,
   model,
   inputTokens = 0,
   outputTokens = 0,
@@ -68,8 +69,8 @@ export function recordUsage({
     const providerId = provider ? String(provider) : null;
 
     const stmt = db.prepare(`
-      INSERT INTO usage_history (connection_id, api_key_id, provider, model, combo_name, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (connection_id, api_key_id, provider, model, combo_name, fallback_from, input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const info = stmt.run(
@@ -78,6 +79,7 @@ export function recordUsage({
       providerId,
       model || "unknown",
       comboName || null,
+      fallbackFrom || null,
       inTok,
       outTok,
       totalTok,
@@ -165,7 +167,7 @@ export function estimateResponsesInputTokens(body) {
 /**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
-export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, comboName = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
+export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, comboName = null, fallbackFrom = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
   // Last usage object seen in the client protocol. Claude splits usage over
   // message_start and message_delta, so its fields are merged.
   let lastUsage = null;
@@ -255,6 +257,7 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
           apiKeyId,
           provider,
           comboName,
+          fallbackFrom,
           model,
           inputTokens,
           outputTokens,
@@ -382,7 +385,7 @@ export function getRecentUsage(limit = 10) {
     return (
       db
         .prepare(
-          `SELECT model, combo_name, input_tokens, output_tokens, cache_read_tokens, duration_ms, timestamp
+          `SELECT model, combo_name, fallback_from, input_tokens, output_tokens, cache_read_tokens, duration_ms, timestamp
            FROM usage_history
            ORDER BY timestamp DESC, id DESC
            LIMIT ?`

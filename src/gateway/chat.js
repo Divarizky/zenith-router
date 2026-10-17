@@ -68,7 +68,7 @@ export async function handleChat(c) {
       return routed.response;
     }
 
-    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName } = routed;
+    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName, fallbackFrom } = routed;
     const apiKeyId = c.get("apiKeyId") || null;
 
     if (body.stream) {
@@ -92,6 +92,7 @@ export async function handleChat(c) {
           apiKeyId,
           provider: provider?.id,
           comboName,
+          fallbackFrom,
           model: targetModel,
           startTime,
           estimatedInputTokens: estimateTokens(body.messages),
@@ -118,6 +119,7 @@ export async function handleChat(c) {
         apiKeyId,
         provider: provider?.id,
         comboName,
+        fallbackFrom,
         model: targetModel,
         ...usage,
         durationMs,

@@ -278,7 +278,7 @@ test("GET /dashboard/usage - the recent panel attributes a request to its combo"
 
   const html = await (await app.request("/dashboard/usage")).text();
   assert.ok(html.includes("antai-utama"), "nama combo tampil di panel request terbaru");
-  assert.ok(html.includes("esc(r.combo_name"), "pembaruan live merender nama combo, bukan sekadar memuatnya");
+  assert.ok(html.includes("esc(r.fallback_from || r.combo_name"), "pembaruan live merender nama combo, bukan sekadar memuatnya");
 
   const api = JSON.parse(await (await app.request("/api/usage/recent")).text());
   assert.strictEqual(api.recent[0].combo_name, "antai-utama");

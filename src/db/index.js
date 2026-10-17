@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS usage_history (
   connection_id INTEGER,
   api_key_id INTEGER,
   combo_name TEXT,
+  fallback_from TEXT,
   model TEXT NOT NULL,
   input_tokens INTEGER DEFAULT 0,
   output_tokens INTEGER DEFAULT 0,
@@ -234,6 +235,11 @@ function migrateSchema(db) {
   }
   if (!usageColumns.some((col) => col.name === "combo_name")) {
     db.exec("ALTER TABLE usage_history ADD COLUMN combo_name TEXT");
+  }
+  // Kolom terpisah, bukan menumpang combo_name: combo_name menyimpan combo yang
+  // benar-benar menjawab, sedangkan baris ini menyimpan target yang diminta klien.
+  if (!usageColumns.some((col) => col.name === "fallback_from")) {
+    db.exec("ALTER TABLE usage_history ADD COLUMN fallback_from TEXT");
   }
   for (const col of ["cache_read_tokens", "cache_write_tokens", "reasoning_tokens"]) {
     if (!usageColumns.some((c) => c.name === col)) {

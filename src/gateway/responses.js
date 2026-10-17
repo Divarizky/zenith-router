@@ -74,7 +74,7 @@ export async function handleResponses(c) {
       return routed.response;
     }
 
-    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName } = routed;
+    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName, fallbackFrom } = routed;
     const apiKeyId = c.get("apiKeyId") || null;
 
     if (rawBody.stream) {
@@ -93,6 +93,7 @@ export async function handleResponses(c) {
           apiKeyId,
           provider: provider?.id,
           comboName,
+          fallbackFrom,
           model: targetModel,
           startTime,
           estimatedInputTokens: estimateResponsesInputTokens(rawBody),
@@ -126,6 +127,7 @@ export async function handleResponses(c) {
           apiKeyId,
           provider: provider?.id,
           comboName,
+          fallbackFrom,
           model: targetModel,
           inputTokens,
           outputTokens,
@@ -146,6 +148,7 @@ export async function handleResponses(c) {
         apiKeyId,
         provider: provider?.id,
         comboName,
+        fallbackFrom,
         model: targetModel,
         inputTokens,
         outputTokens,

@@ -3,6 +3,56 @@ import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getBindHost, isLoopbackHost } from "../../security.js";
 import { countActiveApiKeys } from "../../services/apiKeys.js";
+import { listCombos } from "../../services/combos.js";
+import { getAvailableModels, getProvider } from "../../providers/index.js";
+
+/**
+ * Options of the default fallback picker: plain models grouped per provider,
+ * plus the active combos, which are cross-provider chains in their own right.
+ * A value saved earlier stays selectable even when its provider, model, or combo
+ * has since gone away, so saving an unrelated setting never drops it silently.
+ */
+function fallbackOptions(current) {
+  const byProvider = new Map();
+  for (const model of getAvailableModels()) {
+    const providerId = model.owned_by || "lain";
+    if (!byProvider.has(providerId)) byProvider.set(providerId, []);
+    byProvider.get(providerId).push(model.id);
+  }
+
+  const providerName = (providerId) => getProvider(providerId)?.name || providerId;
+  const modelGroups = [...byProvider.keys()]
+    .sort((a, b) => providerName(a).localeCompare(providerName(b)))
+    .map((providerId) => {
+      const options = byProvider
+        .get(providerId)
+        .sort()
+        .map(
+          (id) =>
+            `<option value="${escapeHtml(id)}"${id === current ? " selected" : ""}>${escapeHtml(id)}</option>`
+        )
+        .join("");
+      return `<optgroup label="${escapeHtml(providerName(providerId))}">${options}</optgroup>`;
+    })
+    .join("");
+
+  const activeCombos = listCombos().filter((combo) => combo.enabled);
+  const comboOptions = activeCombos
+    .map(
+      (combo) =>
+        `<option value="${escapeHtml(combo.name)}"${combo.name === current ? " selected" : ""}>${escapeHtml(combo.name)}</option>`
+    )
+    .join("");
+  const comboGroup = comboOptions ? `<optgroup label="Combo">${comboOptions}</optgroup>` : "";
+
+  const known = new Set([...byProvider.values()].flat().concat(activeCombos.map((c) => c.name)));
+  const staleOption =
+    current && !known.has(current)
+      ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} (tidak aktif)</option>`
+      : "";
+
+  return `<option value=""${current ? "" : " selected"}>Nonaktif</option>${staleOption}${comboGroup}${modelGroups}`;
+}
 
 /**
  * Render Settings Control page
@@ -16,6 +66,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const isTrafficGuard = settings.traffic_guard_enabled !== "false";
   const maxConcurrency = settings.max_account_concurrency || "2";
   const isJitter = settings.request_jitter_enabled !== "false";
+  const fallbackModel = settings.default_fallback_model || "";
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
   const isSaved = query.saved === "1" || query.saved === "true";
@@ -122,6 +173,18 @@ export function renderSettingsPage(port = 20120, query = {}) {
           </div>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Default Fallback Model</strong>
+            <p class="hint">Model atau combo yang dipakai otomatis saat model yang diminta kena rate limit, kuota habis, atau gangguan upstream. Nonaktif berarti tidak ada cadangan.</p>
+          </div>
+          <div class="setting-action">
+            <select name="default_fallback_model" class="input-select">
+              ${fallbackOptions(fallbackModel)}
+            </select>
+          </div>
+        </div>
+
         <div style="margin-top: 1.5rem;">
           <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
         </div>
@@ -149,6 +212,7 @@ export async function handleSaveSettings(c) {
   const maxConcurrency = String(Number(body.max_account_concurrency) || 2);
   const requestJitter = body.request_jitter_enabled === "true" || body.request_jitter_enabled === "on" ? "true" : "false";
   const comboHoldCount = String(Math.max(1, Math.trunc(Number(body.combo_round_robin_count) || 1)));
+  const fallbackModel = String(body.default_fallback_model || "").trim();
 
   setSetting("require_api_key", requireKey);
   setSetting("account_rotation", rotation);
@@ -156,6 +220,7 @@ export async function handleSaveSettings(c) {
   setSetting("max_account_concurrency", maxConcurrency);
   setSetting("request_jitter_enabled", requestJitter);
   setSetting("combo_round_robin_count", comboHoldCount);
+  setSetting("default_fallback_model", fallbackModel);
 
   return c.redirect("/dashboard/settings?saved=1");
 }

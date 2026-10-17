@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   traffic_guard_enabled: "true",
   max_account_concurrency: "2",
   request_jitter_enabled: "true",
+  default_fallback_model: "",
 };
 
 /**

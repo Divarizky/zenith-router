@@ -451,6 +451,16 @@ function cacheHitLabel(summary) {
 }
 
 /**
+ * Origin shown before the arrow: the model or combo the client actually asked for.
+ * `fallback_from` only exists after a real failover and wins over `combo_name`,
+ * because the combo recorded there is the one that ended up answering, not the
+ * one the client requested.
+ */
+function originLabel(row) {
+  return row.fallback_from || row.combo_name || "";
+}
+
+/**
  * Recent requests list beside the topology, mirroring the 9router panel:
  * model, in/out tokens, and when the request finished.
  */
@@ -460,7 +470,7 @@ function renderRecentPanel(recent) {
       (r) => `
         <li class="recent-item">
           <div class="recent-line">
-            <code class="recent-model">${r.combo_name ? `${escapeHtml(r.combo_name)} &rarr; ` : ""}${escapeHtml(r.model)}</code>
+            <code class="recent-model">${originLabel(r) ? `${escapeHtml(originLabel(r))} &rarr; ` : ""}${escapeHtml(r.model)}</code>
             <span class="recent-when">${relWhen(r.timestamp)}</span>
           </div>
           <div class="recent-io">in ${fmtNum(r.input_tokens)} · out ${fmtNum(r.output_tokens)}${r.cache_read_tokens > 0 ? ` · cache ${fmtNum(r.cache_read_tokens)}` : ""}</div>
@@ -925,7 +935,8 @@ function renderQuotaCard(s, antigravityInventory = null) {
         return Math.floor(h / 24) + "d ago";
       }
       function key(r) {
-        return [r.combo_name || "", r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
+        const label = r.fallback_from || r.combo_name || '';
+        return [label, r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
       }
       function poll() {
         fetch("/api/usage/recent?limit=10", { cache: "no-store" })
@@ -943,7 +954,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
               seen[key(r)] = true;
               return '<li class="recent-item' + (fresh ? ' recent-item-new' : '') + '">' +
                 '<div class="recent-line">' +
-                '<code class="recent-model">' + esc(r.combo_name ? r.combo_name + ' \u2192 ' : '') + esc(r.model) + '</code>' +
+                '<code class="recent-model">' + esc(r.fallback_from || r.combo_name ? (r.fallback_from || r.combo_name) + ' \u2192 ' : '') + esc(r.model) + '</code>' +
                 '<span class="recent-when">' + esc(rel(r.timestamp)) + '</span>' +
                 '</div>' +
                 '<div class="recent-io">in ' + compact(r.input_tokens) + ' \u00b7 out ' + compact(r.output_tokens) +

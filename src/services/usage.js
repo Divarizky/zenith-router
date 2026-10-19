@@ -90,11 +90,19 @@ export function recordUsage({
       timestamp
     );
 
+    let connName = null;
+    if (connId) {
+      try {
+        const cRow = db.prepare("SELECT name FROM connections WHERE id = ?").get(connId);
+        connName = cRow?.name || null;
+      } catch {}
+    }
+
     captureLine(
       `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok}${
         cacheRead || cacheWrite ? ` cache_read=${cacheRead} cache_write=${cacheWrite}` : ""
       } | ${dur}ms${
-        connId ? ` | conn#${connId}` : providerId ? ` | provider=${providerId}` : ""
+        connName ? ` | account="${connName}"` : connId ? ` | conn#${connId}` : providerId ? ` | provider=${providerId}` : ""
       }`
     );
 
@@ -346,6 +354,22 @@ export function getUsageStats(options = {}) {
   `);
   const byProvider = providerStmt.all(since) || [];
 
+  // Breakdown by account/connection
+  const accountStmt = db.prepare(`
+    SELECT
+      u.connection_id,
+      COALESCE(c.name, c.provider, 'direct') AS connection_name,
+      COALESCE(c.provider, u.provider, 'unknown') AS provider,
+      COUNT(*) AS count,
+      COALESCE(SUM(u.total_tokens), 0) AS total_tokens
+    FROM usage_history u
+    LEFT JOIN connections c ON u.connection_id = c.id
+    WHERE u.timestamp >= ?
+    GROUP BY u.connection_id
+    ORDER BY total_tokens DESC
+  `);
+  const byAccount = accountStmt.all(since) || [];
+
   return {
     summary: {
       total_requests: Number(summary.total_requests),
@@ -359,6 +383,13 @@ export function getUsageStats(options = {}) {
     },
     by_model: byModel.map((row) => ({
       model: row.model,
+      count: Number(row.count),
+      total_tokens: Number(row.total_tokens),
+    })),
+    by_account: byAccount.map((row) => ({
+      connection_id: row.connection_id,
+      name: row.connection_name,
+      provider: row.provider,
       count: Number(row.count),
       total_tokens: Number(row.total_tokens),
     })),
@@ -385,9 +416,11 @@ export function getRecentUsage(limit = 10) {
     return (
       db
         .prepare(
-          `SELECT model, combo_name, fallback_from, input_tokens, output_tokens, cache_read_tokens, duration_ms, timestamp
-           FROM usage_history
-           ORDER BY timestamp DESC, id DESC
+          `SELECT u.model, u.combo_name, u.fallback_from, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.duration_ms, u.timestamp,
+                  c.name AS connection_name
+           FROM usage_history u
+           LEFT JOIN connections c ON u.connection_id = c.id
+           ORDER BY u.timestamp DESC, u.id DESC
            LIMIT ?`
         )
         .all(Number(limit) || 10) || []

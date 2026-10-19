@@ -227,13 +227,18 @@ export async function handleMessages(c) {
         })
       );
 
+      const streamHeaders = {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      };
+      if (connection?.name) {
+        streamHeaders["X-Zenith-Account"] = connection.name;
+      }
+
       return new Response(responseStream, {
         status: 200,
-        headers: {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive",
-        },
+        headers: streamHeaders,
       });
     }
 
@@ -254,6 +259,9 @@ export async function handleMessages(c) {
       });
     });
 
+    if (connection?.name) {
+      c.header("X-Zenith-Account", connection.name);
+    }
     return c.json(finalData, 200);
   } catch (err) {
     return c.json(

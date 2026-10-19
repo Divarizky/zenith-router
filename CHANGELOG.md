@@ -21,9 +21,19 @@ Ketahanan OpenCode free tier: endpoint mengikuti katalog resmi, 403 direspons de
 - Pesan 502 menyebut langkah yang gagal dan host tujuan (contoh: `[ENOTFOUND getaddrinfo] host=...`), dan string abort tidak lagi tampil sebagai `undefined`.
 - Klien yang memutus koneksi dijawab 499 `client_closed`, tidak dicatat sebagai `[FAILOVER]`, dan tidak mengunci akun.
 
+### Failover Kuota & Auth
+
+- Waktu reset kuota dibaca dari body error 429 Google (`RetryInfo.retryDelay` dan `ErrorInfo.metadata.quotaResetTimeStamp`/`quotaResetDelay`) selain header `Retry-After`, sehingga akun yang kuotanya habis dikunci sampai reset — bukan 60 detik yang membuat request terus mencoba akun yang sama.
+- Percobaan refresh token yang tetap menjawab 401/402/403 mengunci akun 10 menit dan melanjutkan request ke koneksi berikutnya, alih-alih langsung mengembalikan error ke klien.
+
+### Atribusi Akun
+
+- Respons ketiga endpoint (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`) menyertakan header `X-Zenith-Account` pada mode streaming maupun non-streaming; log `[USAGE]` menyertakan `account="<nama>"`.
+- Panel Recent Requests kini bergabung dengan `connections` (kolom `connection_name`), dan halaman Usage menambah kartu Token Consumption by Account.
+
 ### Pengujian
 
-- Seluruh test lulus (686 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, dan ketahanan transport.
+- Seluruh test lulus (690 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, dan failover kuota/auth.
 
 ## [0.1.6] - 17-10-2026
 

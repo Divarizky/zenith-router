@@ -465,12 +465,14 @@ function originLabel(row) {
  * model, in/out tokens, and when the request finished.
  */
 function renderRecentPanel(recent) {
+  const originPart = (r) => (originLabel(r) ? `${originLabel(r)} &rarr; ` : "");
+
   const rows = recent
     .map(
       (r) => `
         <li class="recent-item">
           <div class="recent-line">
-            <code class="recent-model">${originLabel(r) ? `${escapeHtml(originLabel(r))} &rarr; ` : ""}${escapeHtml(r.model)}</code>
+            <code class="recent-model">${originPart(r)}${escapeHtml(r.model)}</code>
             <span class="recent-when">${relWhen(r.timestamp)}</span>
           </div>
           <div class="recent-io">in ${fmtNum(r.input_tokens)} · out ${fmtNum(r.output_tokens)}${r.cache_read_tokens > 0 ? ` · cache ${fmtNum(r.cache_read_tokens)}` : ""}</div>
@@ -898,6 +900,32 @@ function renderQuotaCard(s, antigravityInventory = null) {
       </table>`
       }
     </div>
+
+    ${
+      stats.by_account && stats.by_account.length > 0
+        ? `<div class="card">
+      <h3>Token Consumption by Account</h3>
+      <table>
+        <thead>
+          <tr><th>Akun / Koneksi</th><th>Provider</th><th>Permintaan</th><th>Total Token</th></tr>
+        </thead>
+        <tbody>
+          ${stats.by_account
+            .map(
+              (a) => `
+            <tr>
+              <td><code>${escapeHtml(a.name || "direct")}</code></td>
+              <td><span class="pill">${escapeHtml(a.provider || "-")}</span></td>
+              <td>${a.count}</td>
+              <td><strong>${a.total_tokens.toLocaleString()}</strong></td>
+            </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>`
+        : ""
+    }
   `;
 
   return renderLayout({
@@ -936,7 +964,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
       }
       function key(r) {
         const label = r.fallback_from || r.combo_name || '';
-        return [label, r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
+        return [r.connection_name || '', label, r.model, r.input_tokens, r.output_tokens, r.timestamp].join("|");
       }
       function poll() {
         fetch("/api/usage/recent?limit=10", { cache: "no-store" })
@@ -952,9 +980,10 @@ function renderQuotaCard(s, antigravityInventory = null) {
             var html = items.map(function (r) {
               var fresh = !seen[key(r)];
               seen[key(r)] = true;
+              var origin = r.fallback_from || r.combo_name ? (esc(r.fallback_from || r.combo_name) + ' \u2192 ') : '';
               return '<li class="recent-item' + (fresh ? ' recent-item-new' : '') + '">' +
                 '<div class="recent-line">' +
-                '<code class="recent-model">' + esc(r.fallback_from || r.combo_name ? (r.fallback_from || r.combo_name) + ' \u2192 ' : '') + esc(r.model) + '</code>' +
+                '<code class="recent-model">' + origin + esc(r.model) + '</code>' +
                 '<span class="recent-when">' + esc(rel(r.timestamp)) + '</span>' +
                 '</div>' +
                 '<div class="recent-io">in ' + compact(r.input_tokens) + ' \u00b7 out ' + compact(r.output_tokens) +

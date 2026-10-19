@@ -200,6 +200,59 @@ export function isTransportFailure(res, bodyText) {
   return res.status === 502 && TRANSPORT_FAILURE_RE.test(bodyText || "");
 }
 
+/**
+ * Parses Google/Antigravity and standard rate limit reset indications.
+ * Antigravity reports quota exhaustion with details containing:
+ * - RetryInfo: { retryDelay: "497880.916563646s" }
+ * - ErrorInfo: { metadata: { quotaResetTimeStamp: "2026-10-24T22:06:11Z", quotaResetDelay: "..." } }
+ */
+export function extractQuotaCooldownMs(res, bodyText, defaultDurationMs = 60000) {
+  const retryAfterSec = Number(res?.headers?.get?.("retry-after"));
+  if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+    return retryAfterSec * 1000;
+  }
+
+  if (!bodyText || typeof bodyText !== "string") return defaultDurationMs;
+
+  try {
+    const payload = JSON.parse(bodyText);
+    const errorObj = payload?.error || payload;
+    const details = Array.isArray(errorObj?.details) ? errorObj.details : [];
+
+    for (const item of details) {
+      // 1. Google RetryInfo: retryDelay format "123.456s" or numeric
+      if (item?.retryDelay) {
+        const sec = typeof item.retryDelay === "string" ? parseFloat(item.retryDelay) : Number(item.retryDelay);
+        if (Number.isFinite(sec) && sec > 0) {
+          return Math.ceil(sec * 1000);
+        }
+      }
+
+      // 2. Google ErrorInfo metadata
+      const meta = item?.metadata;
+      if (meta && typeof meta === "object") {
+        if (meta.quotaResetTimeStamp) {
+          const resetTime = new Date(meta.quotaResetTimeStamp).getTime();
+          const diffMs = resetTime - Date.now();
+          if (Number.isFinite(diffMs) && diffMs > 0) {
+            return diffMs;
+          }
+        }
+        if (meta.quotaResetDelay) {
+          const sec = typeof meta.quotaResetDelay === "string" ? parseFloat(meta.quotaResetDelay) : Number(meta.quotaResetDelay);
+          if (Number.isFinite(sec) && sec > 0) {
+            return Math.ceil(sec * 1000);
+          }
+        }
+      }
+    }
+  } catch {
+    // If not JSON, ignore and fallback to default
+  }
+
+  return defaultDurationMs;
+}
+
 export function buildErrorResponse(res, bodyText, targetFormat) {
   let payload;
   try {
@@ -447,8 +500,7 @@ export async function executeWithFallback({
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
       if (connection.id && !isTransportFailure(res, errText)) {
-        const retryAfterSec = Number(res.headers?.get?.("retry-after"));
-        const cooldownMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec * 1000 : 60000 * attempt;
+        const cooldownMs = extractQuotaCooldownMs(res, errText, 60000 * attempt);
         setConnectionCooldown(connection.id, Date.now() + cooldownMs, modelId);
       }
       await applyReactiveJitter(signal);
@@ -501,12 +553,20 @@ export async function executeWithFallback({
           releaseSlot();
           releaseSlot = null;
         }
-        lastFailureResponse = buildErrorResponse(res, await res.text(), targetFormat);
+        const retryErrText = await res.text();
+        lastFailureResponse = buildErrorResponse(res, retryErrText, targetFormat);
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
-          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 60000, modelId);
+          if (connection.id && !isTransportFailure(res, retryErrText)) {
+            const cooldownMs = extractQuotaCooldownMs(res, retryErrText, 60000);
+            setConnectionCooldown(connection.id, Date.now() + cooldownMs, modelId);
+          }
           await applyReactiveJitter(signal);
           continue;
+        }
+        if (res.status === 401 || res.status === 402 || res.status === 403) {
+          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          if (attempt < maxAttempts) continue;
         }
         return { ok: false, response: lastFailureResponse };
       } catch (err) {

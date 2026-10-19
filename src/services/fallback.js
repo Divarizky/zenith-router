@@ -193,7 +193,14 @@ function accountBusyResponse(targetFormat, connection) {
   );
 }
 
-function buildErrorResponse(res, bodyText, targetFormat) {
+// The executor's 502 for a failed upstream fetch, see src/executors/base.js.
+const TRANSPORT_FAILURE_RE = /"type":"transport_error"/;
+
+export function isTransportFailure(res, bodyText) {
+  return res.status === 502 && TRANSPORT_FAILURE_RE.test(bodyText || "");
+}
+
+export function buildErrorResponse(res, bodyText, targetFormat) {
   let payload;
   try {
     payload = JSON.parse(bodyText);
@@ -216,7 +223,13 @@ function buildErrorResponse(res, bodyText, targetFormat) {
       };
     }
   }
-  return new Response(JSON.stringify(payload), { status: res.status, headers: { "Content-Type": "application/json" } });
+  const headers = { "Content-Type": "application/json" };
+  // Clients back off on Retry-After; the gate labels say why a route was refused.
+  for (const name of ["retry-after", "x-opencode-gate", "x-opencode-log-id"]) {
+    const value = res.headers?.get?.(name);
+    if (value) headers[name] = value;
+  }
+  return new Response(JSON.stringify(payload), { status: res.status, headers });
 }
 
 /**
@@ -387,6 +400,10 @@ export async function executeWithFallback({
     const errText = await res.text();
     lastFailureResponse = buildErrorResponse(res, errText, targetFormat);
 
+    // The client hung up mid-attempt: nothing is waiting for this answer, so it is
+    // neither a failover nor a reason to park an account.
+    if (signal?.aborted) return { ok: false, response: lastFailureResponse };
+
     captureLine(
       `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
     );
@@ -426,10 +443,10 @@ export async function executeWithFallback({
 
     // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
-      // A client abort reaches us as a 502 from the executor. Parking accounts
-      // for a request nobody is waiting for would penalise every other caller.
-      if (signal?.aborted) return { ok: false, response: lastFailureResponse };
-      if (connection.id) {
+      // A transport failure means the path to upstream dropped, not that the
+      // account is unusable. Parking the account for a network blip would push
+      // every request onto the other connections for a minute.
+      if (connection.id && !isTransportFailure(res, errText)) {
         const retryAfterSec = Number(res.headers?.get?.("retry-after"));
         const cooldownMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec * 1000 : 60000 * attempt;
         setConnectionCooldown(connection.id, Date.now() + cooldownMs, modelId);

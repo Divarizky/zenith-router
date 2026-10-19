@@ -1,5 +1,5 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
-import { renderLayout } from "../layout.js";
+import { renderLayout, icon } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getBindHost, isLoopbackHost } from "../../security.js";
 import { countActiveApiKeys } from "../../services/apiKeys.js";
@@ -55,6 +55,23 @@ function fallbackOptions(current) {
 }
 
 /**
+ * One settings section. Every section is its own card so a long page stays
+ * scannable, while the single form around them keeps one save action and one
+ * POST handler — a per-card form would need partial writes, and a missing
+ * checkbox in a partial POST reads as "off".
+ */
+function sectionCard({ id, iconName, title, hint, rows }) {
+  return `
+    <section class="card" id="${id}">
+      <div class="section-head">
+        <h3>${icon(iconName, 16)} ${title}</h3>
+        <p class="hint">${hint}</p>
+      </div>
+      ${rows}
+    </section>`;
+}
+
+/**
  * Render Settings Control page
  */
 export function renderSettingsPage(port = 20120, query = {}) {
@@ -73,9 +90,9 @@ export function renderSettingsPage(port = 20120, query = {}) {
 
   let authNote = "";
   if (forcedByBind) {
-    authNote = `<p style="font-size: 0.8rem; color: var(--warning); margin-top: 0.25rem;">Selalu ditegakkan: Zenith Router terikat ke ${escapeHtml(getBindHost())}.</p>`;
+    authNote = `<p class="setting-note setting-note-warning">Selalu ditegakkan: Zenith Router terikat ke ${escapeHtml(getBindHost())}.</p>`;
   } else if (isRequireAuth && activeKeys === 0) {
-    authNote = `<p style="font-size: 0.8rem; color: var(--danger); margin-top: 0.25rem;">Tidak ada kunci API aktif: semua request /v1 ditolak. Buat satu di Kunci API.</p>`;
+    authNote = `<p class="setting-note setting-note-danger">Tidak ada kunci API aktif: semua request /v1 ditolak. Buat satu di Kunci API.</p>`;
   }
 
   const content = `
@@ -84,12 +101,13 @@ export function renderSettingsPage(port = 20120, query = {}) {
         ? `<div class="notice notice-ok"><span>Pengaturan Gateway berhasil disimpan.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
         : ""
     }
-    <div class="card">
-      <div class="section-head">
-        <h3>General</h3>
-        <p class="hint">Pengaturan dasar gateway dan keamanan akses.</p>
-      </div>
-      <form action="/dashboard/settings" method="POST">
+    <form action="/dashboard/settings" method="POST">
+      ${sectionCard({
+        id: "access",
+        iconName: "key",
+        title: "Access &amp; Security",
+        hint: "Siapa yang boleh memakai /v1 dan bagaimana permintaan diverifikasi.",
+        rows: `
         <div class="setting-row">
           <div class="setting-info">
             <strong>Wajibkan Kunci API untuk Akses Gateway</strong>
@@ -102,13 +120,15 @@ export function renderSettingsPage(port = 20120, query = {}) {
               <span class="slider"></span>
             </label>
           </div>
-        </div>
+        </div>`,
+      })}
 
-        <div class="section-head" style="margin-top: 1.75rem;">
-          <h3>Accounts &amp; Connections</h3>
-          <p class="hint">Perilaku pemilihan dan perlindungan akun provider yang tertaut.</p>
-        </div>
-
+      ${sectionCard({
+        id: "selection",
+        iconName: "list",
+        title: "Account Selection",
+        hint: "Bagaimana Zenith Router memilih akun dan anggota combo saat ada beberapa pilihan.",
+        rows: `
         <div class="setting-row">
           <div class="setting-info">
             <strong>Strategi Rotasi Akun</strong>
@@ -130,8 +150,15 @@ export function renderSettingsPage(port = 20120, query = {}) {
           <div class="setting-action">
             <input type="number" min="1" step="1" name="combo_round_robin_count" class="input-select" value="${escapeHtml(comboHoldCount)}" />
           </div>
-        </div>
+        </div>`,
+      })}
 
+      ${sectionCard({
+        id: "protection",
+        iconName: "bolt",
+        title: "Account Protection",
+        hint: "Penjaga agar pola request tidak terlihat seperti bot dan tidak kena rate limit.",
+        rows: `
         <div class="setting-row">
           <div class="setting-info">
             <strong>Penjaga Lalu Lintas Akun (Traffic Guard)</strong>
@@ -171,8 +198,15 @@ export function renderSettingsPage(port = 20120, query = {}) {
               <span class="slider"></span>
             </label>
           </div>
-        </div>
+        </div>`,
+      })}
 
+      ${sectionCard({
+        id: "routing",
+        iconName: "brain",
+        title: "Routing &amp; Fallback",
+        hint: "Ke mana request dialihkan saat model atau combo yang diminta tidak bisa melayani.",
+        rows: `
         <div class="setting-row">
           <div class="setting-info">
             <strong>Default Fallback Model</strong>
@@ -183,13 +217,14 @@ export function renderSettingsPage(port = 20120, query = {}) {
               ${fallbackOptions(fallbackModel)}
             </select>
           </div>
-        </div>
+        </div>`,
+      })}
 
-        <div style="margin-top: 1.5rem;">
-          <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
-        </div>
-      </form>
-    </div>
+      <div class="settings-actions">
+        <span class="hint">Perubahan berlaku setelah disimpan.</span>
+        <button type="submit" class="btn btn-primary">Simpan Pengaturan</button>
+      </div>
+    </form>
   `;
 
   return renderLayout({

@@ -1,3 +1,30 @@
+## [Unreleased]
+
+Ketahanan OpenCode free tier: endpoint mengikuti katalog resmi, 403 direspons dengan cooldown lokal, dan model pensiun ditolak di router.
+
+### Endpoint & Katalog OpenCode
+
+- Base URL OpenCode kini dibaca dari `models.opencode.ai/api.json` (TTL 6 jam), sama dengan yang dipanggil CLI resmi: `https://opencode.ai/inference/openai/v1`. Gateway lama `/inference/v1` menyaring trafik lebih ketat dan menolak keluarga nemotron dan space-bunny.
+- Daftar model gratis disinkronkan dari katalog yang sama; keputusan gratis mengikuti `cost.input`, bukan akhiran nama, dan model `status: deprecated` berhenti dirutekan serta ditolak lokal dengan HTTP 410 sebelum dikirim ke upstream.
+- `ZENITH_OPENCODE_BASE_URL` mengarahkan request ke proses bridge eksternal (misal `opencode-free-bridge` di WSL) tanpa mengubah kode. Bridge hanya melayani chat completions, jadi semua model dipaksa ke lane chat dan pindah lane otomatis dimatikan selama override aktif.
+
+### Gate 403 Free Tier
+
+- Pada 403 `FreeTierError`, executor melakukan satu retry dengan session ID baru. Bila tetap ditolak, request berikutnya dijawab lokal selama 30 detik (naik dua kali lipat per penolakan beruntun, maksimal 10 menit; pesan blokir jaringan/IP langsung memulai cooldown tanpa retry; 426 diberi label `version-rejected`) dengan `Retry-After` dan `X-OpenCode-Gate: ip-throttled|shape-rejected` alih-alih diteruskan, sehingga blokir per-IP tidak diperpanjang oleh retry klien. Session ID baru dari retry disimpan menggantikan yang ditolak, dan `Retry-After` serta label `X-OpenCode-*` ikut diteruskan ke klien.
+- Audit bentuk request memeriksa anchor yang diukur upstream (tool `read`, User-Agent `opencode/*`, header sesi, stream) untuk membedakan egress yang diblokir dari request yang dibentuk salah.
+- Status lokal selama cooldown adalah 429, yang tetap memicu Default Fallback Model sehingga request pindah ke model cadangan, bukan berhenti di dead end. Override: `ZENITH_OPENCODE_GATE_COOLDOWN_MS` (default 30000, 0 menonaktifkan) dan `ZENITH_OPENCODE_GATE_STATUS`.
+
+### Ketahanan Transport Upstream
+
+- Reset socket yang ditutup upstream saat idle (`ECONNRESET`, `EPIPE`, `UND_ERR_SOCKET`, `UND_ERR_CLOSED`) diulang sekali di koneksi baru, hanya untuk body string. Kegagalan DNS dan connect tidak diulang.
+- Kegagalan transport tidak lagi mengunci akun. Hanya cooldown per model yang dilewati, dan failover tetap berjalan ke koneksi lain.
+- Pesan 502 menyebut langkah yang gagal dan host tujuan (contoh: `[ENOTFOUND getaddrinfo] host=...`), dan string abort tidak lagi tampil sebagai `undefined`.
+- Klien yang memutus koneksi dijawab 499 `client_closed`, tidak dicatat sebagai `[FAILOVER]`, dan tidak mengunci akun.
+
+### Pengujian
+
+- Seluruh test lulus (686 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, dan ketahanan transport.
+
 ## [0.1.6] - 17-10-2026
 
 Model Antigravity dikelompokkan per keluarga, effort mengikuti permintaan klien, dan kuota ditampilkan per langganan akun.

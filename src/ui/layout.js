@@ -258,6 +258,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 .section-head { margin-bottom: 0.75rem; }
 .section-head h3 { font-size: 1rem; font-weight: 600; }
 .section-head .hint { color: var(--text-muted); font-size: 0.82rem; }
+.section-head h3 svg { vertical-align: -2px; color: var(--text-muted); margin-right: 0.3rem; }
 .provider-card { display: block; margin-bottom: 0; color: inherit; text-decoration: none; transition: border-color 0.12s, background 0.12s; }
 .provider-card:hover { border-color: var(--text-subtle); background: var(--surface-2); }
 .provider-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem 0.75rem; margin-bottom: 0.35rem; }
@@ -381,6 +382,13 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .setting-info { flex: 1; min-width: 0; }
     .setting-info strong { display: block; font-size: 0.9rem; color: var(--text); margin-bottom: 0.2rem; }
     .setting-action { flex-shrink: 0; display: flex; align-items: center; }
+    /* Catatan kondisional di bawah label, mis. kunci API wajib karena bind non-loopback. */
+    .setting-note { font-size: 0.8rem; margin-top: 0.25rem; }
+    .setting-note-warning { color: var(--warning); }
+    .setting-note-danger { color: var(--danger); }
+    /* Satu form, beberapa bagian: tiap bagian berupa card agar tetap terbaca. */
+    /* Tombol simpan mengapung di bawah pandangan agar terjangkau dari bagian mana pun. */
+    .settings-actions { position: sticky; bottom: 0.75rem; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
     /* Toggle switch */
     .switch { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; cursor: pointer; }
     .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -403,6 +411,11 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
       .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; }
       nav { flex-direction: row; flex-wrap: wrap; }
       .main { padding: 1.25rem; }
+      /* Baris pengaturan ditumpuk: hint panjang tidak lagi menghimpit kontrol. */
+      .setting-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+      .setting-action .input-select { width: 100%; }
+      .settings-actions { flex-direction: column-reverse; align-items: stretch; }
+      .settings-actions .btn { width: 100%; }
     }
   </style>
 </head>

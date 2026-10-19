@@ -108,15 +108,19 @@ test("GET /dashboard/settings - renders Settings page with form", async () => {
   assert.ok(html.includes("Settings"));
   assert.ok(html.includes("require_api_key"));
 
-  // Settings splits into two sections in one form with a single save button.
-  assert.ok(html.includes("General"));
-  assert.ok(html.includes("Accounts &amp; Connections"));
+  // Settings splits into four sections in one form with a single save button.
+  assert.ok(html.includes("Access &amp; Security"));
+  assert.ok(html.includes("Account Selection"));
+  assert.ok(html.includes("Account Protection"));
+  assert.ok(html.includes("Routing &amp; Fallback"));
   assert.strictEqual(
     (html.match(/<form action="\/dashboard\/settings"/g) || []).length,
     1,
     "both sections share one form"
   );
   assert.strictEqual((html.match(/Simpan Pengaturan/g) || []).length, 1, "one save button");
+  assert.strictEqual((html.match(/class="settings-actions"/g) || []).length, 1, "satu bar simpan");
+  assert.ok(!html.includes("margin-top: 1.75rem"), "jarak antar bagian memakai CSS, bukan inline style");
   // Auto quota sync has no on/off toggle anymore.
   assert.ok(!html.includes("quota_auto_sync"));
   assert.ok(!html.includes("Auto Sinkron Kuota"));

@@ -3,6 +3,21 @@ import { randomBytes } from "node:crypto";
 import { prepareResponsesBody, restoreResponsesToolNames, MAX_OUTPUT_TOKENS as MAX_RESPONSES_OUTPUT_TOKENS } from "./opencodeResponses.js";
 import { effectiveMaxTokens, MAX_OUTPUT_TOKENS } from "../utils/tokenBudget.js";
 import { openaiToResponsesRequest, responsesToOpenAIRequest } from "../translator/responses.js";
+import { getOpencodeBaseUrlOverride, isOpencodeModelDeprecated, resolveOpencodeUrl } from "../services/opencodeCatalog.js";
+import {
+  auditOpencodeGateShape,
+  buildOpencodeGateResponse,
+  getOpencodeGateState,
+  isOpencodeGateRejection,
+  isOpencodeGateShapeOk,
+  isOpencodeNetworkBlock,
+  isOpencodeGateStatus,
+  listMissingOpencodeGateAnchors,
+  noteOpencodeGateRejection,
+  noteOpencodeGateSuccess,
+  opencodeGateKey,
+  withOpencodeGateHeaders,
+} from "../services/opencodeGate.js";
 
 export const OPENCODE_UA = "opencode/latest/2.1.2/cli";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
@@ -61,6 +76,22 @@ export function resetOpencodeSessionCache() {
 
 export function getOpencodeSessionCacheSize() {
   return translatedSessions.size;
+}
+
+/**
+ * Replace the cached id for a conversation after upstream refused it, so the
+ * next request starts on the fresh id instead of retrying the rejected one.
+ * Ids the client supplied in `ses_` shape are never cached and pass through.
+ */
+export function rotateOpencodeSession(sessionId, clientTool = "", opts = {}) {
+  const trimmed = typeof sessionId === "string" ? sessionId.trim() : "";
+  const now = opts.now ?? Date.now();
+  const newId = opencodeSessionId(now);
+  if (trimmed && OPENCODE_SESSION_RE.test(trimmed)) return newId;
+  const key = `opencode:ses:${clientTool || "generic"}:${trimmed || "default"}`;
+  translatedSessions.delete(key);
+  translatedSessions.set(key, { sessionId: newId, lastUsed: now });
+  return newId;
 }
 
 export function translateOpencodeSession(sessionId, clientTool = "", opts = {}) {
@@ -126,13 +157,46 @@ export function resetOpencodeProtocolLanes() {
   dynamicProtocolLanes.clear();
 }
 
-export function opencodePathForModel(model) {
+/**
+ * Protocol lane a model is served on: it decides the request shape, the tools
+ * and which base URL the catalog resolves. Callers that only need a path keep
+ * using `opencodePathForModel` below.
+ */
+export function opencodeLaneForModel(model) {
+  // An external bridge serves chat completions only; the gateway then builds a
+  // chat-shaped body for every model instead of one the bridge would 404.
+  if (getOpencodeBaseUrlOverride()) return "chat";
   const dynamic = getOpencodeProtocolLane(model);
-  if (dynamic === "responses") return "/inference/v1/responses";
-  if (dynamic === "chat") return "/inference/v1/chat/completions";
-  if (RESPONSES_MODELS.has(model)) return "/inference/v1/responses";
-  if (MESSAGES_MODELS.has(model)) return "/inference/v1/messages";
-  return "/inference/v1/chat/completions";
+  if (dynamic === "responses" || dynamic === "chat") return dynamic;
+  if (RESPONSES_MODELS.has(model)) return "responses";
+  if (MESSAGES_MODELS.has(model)) return "messages";
+  return "chat";
+}
+
+function lanePath(lane) {
+  if (lane === "responses") return "/responses";
+  if (lane === "messages") return "/messages";
+  return "/chat/completions";
+}
+
+export function opencodePathForModel(model) {
+  return `/inference/v1${lanePath(opencodeLaneForModel(model))}`;
+}
+
+const SESSION_HEADER_KEYS = ["x-opencode-session", "x-opencode-session-id", "x-session-affinity", "x-session-id"];
+
+/** The four headers the CLI sets to the same session id. */
+export function opencodeSessionHeaders(session) {
+  return Object.fromEntries(SESSION_HEADER_KEYS.map((key) => [key, session]));
+}
+
+/** Read a copy of a response body without consuming the original. */
+async function peekResponseText(res) {
+  try {
+    return await res.clone().text();
+  } catch {
+    return "";
+  }
 }
 
 export const FINGERPRINT_TOOL_NAMES = ["read", "shell"];
@@ -382,18 +446,41 @@ export function prepareToolsWithFingerprint(body, path = "/inference/v1/chat/com
 
 export class OpencodeExecutor extends BaseExecutor {
   async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
+    // While an egress is cooling down, forwarding only feeds the block: answer
+    // locally so the gateway moves on to its fallback model instead.
+    const gateKey = opencodeGateKey(proxyUrl);
+    const coolingDown = getOpencodeGateState(gateKey);
+    if (coolingDown) return buildOpencodeGateResponse(coolingDown);
+
     let parsed = null;
     try {
       parsed = body ? JSON.parse(body) : null;
     } catch {}
 
     const model = targetModel || parsed?.model || "";
-    let path = opencodePathForModel(model);
-    if (String(targetFormat).includes("responses")) path = "/inference/v1/responses";
-    else if (String(targetFormat) === "claude") path = "/inference/v1/messages";
-    const finalUrl = `https://opencode.ai${path}`;
+    if (isOpencodeModelDeprecated(model)) {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: `Model '${model}' was retired upstream (the OpenCode catalog marks it deprecated). Pick another model.`,
+            type: "invalid_request_error",
+            code: "model_deprecated",
+          },
+        }),
+        { status: 410, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    let lane = opencodeLaneForModel(model);
+    if (String(targetFormat).includes("responses")) lane = "responses";
+    else if (String(targetFormat) === "claude") lane = "messages";
+    let path = lanePath(lane);
+    // The base comes from the OpenCode catalog (mirrors the CLI); the model or
+    // ZENITH_OPENCODE_BASE_URL can pin a different one.
+    let finalUrl = resolveOpencodeUrl(model, lane);
 
     let toolNameMap = null;
+    let didProtocolRetry = false;
     let budgetValue = null; // budget final — dihitung SEKALI, dibawa lintas lane saat retry
     if (parsed && typeof parsed === "object") {
       const aliasMap = prepareToolsWithFingerprint(parsed, path);
@@ -428,10 +515,7 @@ export class OpencodeExecutor extends BaseExecutor {
       Authorization: "Bearer public",
       "User-Agent": OPENCODE_UA,
       "x-opencode-client": "cli",
-      "x-opencode-session": session,
-      "x-opencode-session-id": session,
-      "x-session-affinity": session,
-      "x-session-id": session,
+      ...opencodeSessionHeaders(session),
       "x-opencode-project": "global",
       Accept: "text/event-stream",
     };
@@ -446,7 +530,8 @@ export class OpencodeExecutor extends BaseExecutor {
       proxyUrl,
     });
 
-    if (res.status === 400 && model) {
+    // A bridge override has no second lane to fall back to.
+    if (res.status === 400 && model && !getOpencodeBaseUrlOverride()) {
       try {
         const cloned = res.clone();
         const errText = await cloned.text();
@@ -472,8 +557,9 @@ export class OpencodeExecutor extends BaseExecutor {
 
           const wasResponses = path.endsWith("/responses");
           const alternateLane = wasResponses ? "chat" : "responses";
-          path = alternateLane === "responses" ? "/inference/v1/responses" : "/inference/v1/chat/completions";
-          const retryUrl = `https://opencode.ai${path}`;
+          path = lanePath(alternateLane);
+          const retryUrl = resolveOpencodeUrl(model, alternateLane);
+          didProtocolRetry = true;
 
           let retryParsed = null;
           try {
@@ -546,6 +632,86 @@ export class OpencodeExecutor extends BaseExecutor {
       }
     }
 
+    // The gate answers the same 403 FreeTierError for a refused shape and for a
+    // blocked egress, so one retry with a fresh identity is the only way to tell
+    // them apart. The session id is the identity this executor can rotate; the
+    // tool set and User-Agent are canonical on every request already. A second
+    // refusal means the egress, so the cooldown starts instead of hammering
+    // upstream. Skipped after a protocol retry to keep one client request at
+    // most two upstream calls.
+    if (!didProtocolRetry && isOpencodeGateStatus(res.status)) {
+      const firstText = await peekResponseText(res);
+      if (isOpencodeGateRejection(res.status, firstText)) {
+        const shape = auditOpencodeGateShape({ body, headers: opencodeHeaders });
+        const shapeOk = isOpencodeGateShapeOk(shape);
+        const missing = listMissingOpencodeGateAnchors(shape);
+        const firstLogId = res.headers?.get?.("x-opencode-log-id") || null;
+        let retryRes = null;
+
+        // An explicit network block is not a shape problem: a second request
+        // from the same IP only extends it, so the cooldown starts right away.
+        if (isOpencodeNetworkBlock(firstText) && shapeOk) {
+          const state = noteOpencodeGateRejection(gateKey, {
+            status: res.status,
+            shape,
+            shapeOk,
+            logId: firstLogId,
+            missing,
+          });
+          res = new Response(firstText, {
+            status: res.status,
+            statusText: res.statusText,
+            headers: withOpencodeGateHeaders(res, state),
+          });
+        } else {
+          try {
+            retryRes = await super.execute({
+              url: finalUrl,
+              method,
+              headers: {
+                ...opencodeHeaders,
+                ...opencodeSessionHeaders(rotateOpencodeSession(sessionKey || "default", "desktop")),
+              },
+              body,
+              signal,
+              timeoutMs,
+              proxyUrl,
+            });
+          } catch (retryErr) {
+            console.warn(`[opencode] gate retry failed for ${model}:`, retryErr?.message || retryErr);
+          }
+
+          if (retryRes && retryRes.ok) {
+            res = retryRes;
+          } else if (retryRes && isOpencodeGateStatus(retryRes.status)) {
+            const retryText = await peekResponseText(retryRes);
+            if (!isOpencodeGateRejection(retryRes.status, retryText)) {
+              res = retryRes;
+            } else {
+              const state = noteOpencodeGateRejection(gateKey, {
+                status: retryRes.status,
+                shape,
+                shapeOk,
+                // The retry is the refusal that started the cooldown, so its id is the one to quote.
+                logId: retryRes.headers?.get?.("x-opencode-log-id") || firstLogId,
+                missing,
+              });
+              // Keep upstream's own status and body; the labels are what let a
+              // reader tell a blocked egress from a shape this router got wrong.
+              res = new Response(retryText, {
+                status: retryRes.status,
+                statusText: retryRes.statusText,
+                headers: withOpencodeGateHeaders(retryRes, state),
+              });
+            }
+          } else if (retryRes) {
+            res = retryRes;
+          }
+        }
+      }
+    }
+
+    if (res.ok) noteOpencodeGateSuccess(gateKey);
     return restoreResponsesToolNames(res, toolNameMap);
   }
 }

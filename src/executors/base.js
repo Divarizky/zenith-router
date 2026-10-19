@@ -7,8 +7,38 @@ const EXECUTORS = new Map();
 const DEFAULT_HEADERS_TIMEOUT_MS = Number(process.env.ZENITH_UPSTREAM_HEADERS_TIMEOUT_MS) || 300000;
 const DEFAULT_IDLE_TIMEOUT_MS = Number(process.env.ZENITH_UPSTREAM_IDLE_TIMEOUT_MS) || 120000;
 
+// Resets on a socket the upstream closed while it sat idle. Nothing reached the
+// upstream application, so one retry on a fresh connection is safe. DNS and
+// connect failures are not retried: a second attempt there only adds latency.
+const TRANSPORT_RETRY_CODES = new Set(["ECONNRESET", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CLOSED"]);
+const TRANSPORT_ATTEMPTS = 2;
+
 function timeoutError(message) {
   return new DOMException(message, "TimeoutError");
+}
+
+function transportErrorCode(err) {
+  if (!err || typeof err !== "object") return null;
+  return err.cause?.code || err.code || null;
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "unknown-host";
+  }
+}
+
+/**
+ * Names the failing step (DNS, TCP, TLS, socket) instead of the bare "fetch failed".
+ * Undici throws a plain string when the caller aborts with a string reason.
+ */
+function transportFailureMessage(err, url) {
+  const reason = typeof err === "string" ? err : err?.message || "unknown error";
+  const cause = err?.cause && typeof err.cause === "object" ? err.cause : {};
+  const detail = [cause.code || err?.code, cause.syscall].filter(Boolean).join(" ");
+  return `Upstream transport failed: ${reason}${detail ? ` [${detail}]` : ""} host=${hostOf(url)}`;
 }
 
 /**
@@ -84,49 +114,76 @@ export class BaseExecutor {
     }
     const detachClientSignal = () => signal?.removeEventListener("abort", onClientAbort);
 
-    let headersTimedOut = false;
-    const headersTimer = setTimeout(() => {
-      headersTimedOut = true;
-      abort(timeoutError(`Upstream did not respond within ${headersTimeout}ms`));
-    }, headersTimeout);
-
     const requestHeaders = new Headers(headers);
     if (!requestHeaders.has("Content-Type") && typeof body === "string") {
       requestHeaders.set("Content-Type", "application/json");
     }
 
     const init = { method, headers: requestHeaders, body, signal: controller.signal };
+    // A stream body is consumed by the first attempt, so only buffered bodies can be sent twice.
+    const isReplayable = body === undefined || body === null || typeof body === "string";
 
     let response;
-    try {
-      response = proxyUrl ? await proxyFetch(url, init, proxyUrl) : await this.fetchFn(url, init);
-    } catch (err) {
-      detachClientSignal();
-      if (headersTimedOut || err.name === "TimeoutError") {
+    for (let attempt = 1; ; attempt++) {
+      let headersTimedOut = false;
+      const headersTimer = setTimeout(() => {
+        headersTimedOut = true;
+        abort(timeoutError(`Upstream did not respond within ${headersTimeout}ms`));
+      }, headersTimeout);
+
+      try {
+        response = proxyUrl ? await proxyFetch(url, init, proxyUrl) : await this.fetchFn(url, init);
+        break;
+      } catch (err) {
+        // The client hung up, so no account should be penalised for a request nobody awaits.
+        if (signal?.aborted) {
+          detachClientSignal();
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: "Client closed the request before upstream responded",
+                type: "client_closed",
+                code: "client_closed_request",
+              },
+            }),
+            { status: 499, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (headersTimedOut || err?.name === "TimeoutError") {
+          detachClientSignal();
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: `Upstream request timed out after ${headersTimeout}ms`,
+                type: "timeout_error",
+                code: "gateway_timeout",
+              },
+            }),
+            { status: 504, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        const code = transportErrorCode(err);
+        if (attempt < TRANSPORT_ATTEMPTS && isReplayable && TRANSPORT_RETRY_CODES.has(code)) {
+          console.warn(`[UPSTREAM] ${code} on ${hostOf(url)}, retrying once on a new connection`);
+          continue;
+        }
+
+        detachClientSignal();
         return new Response(
           JSON.stringify({
             error: {
-              message: `Upstream request timed out after ${headersTimeout}ms`,
-              type: "timeout_error",
-              code: "gateway_timeout",
+              message: transportFailureMessage(err, url),
+              type: "transport_error",
+              code: "bad_gateway",
             },
           }),
-          { status: 504, headers: { "Content-Type": "application/json" } }
+          { status: 502, headers: { "Content-Type": "application/json" } }
         );
+      } finally {
+        clearTimeout(headersTimer);
       }
-
-      return new Response(
-        JSON.stringify({
-          error: {
-            message: `Upstream transport failed: ${err.message}`,
-            type: "transport_error",
-            code: "bad_gateway",
-          },
-        }),
-        { status: 502, headers: { "Content-Type": "application/json" } }
-      );
-    } finally {
-      clearTimeout(headersTimer);
     }
 
     if (!response.body) {

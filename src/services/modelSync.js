@@ -2,6 +2,7 @@ import { getDb } from "../db/index.js";
 import { getAllProviders, getProvider } from "../providers/index.js";
 import { fetchProviderModels } from "./modelImport.js";
 import { fetchFreebuffCatalog } from "./freebuffCatalog.js";
+import { refreshOpencodeCatalog } from "./opencodeCatalog.js";
 import { getSetting, setSetting } from "./settings.js";
 
 const DEFAULT_INTERVAL_HOURS = 6;
@@ -139,8 +140,14 @@ export function getSyncIntervalMs() {
 export function startModelSyncScheduler() {
   const intervalMs = getSyncIntervalMs();
   if (!intervalMs) return null;
-  syncAllFreeModels().catch(() => {});
-  const timer = setInterval(() => syncAllFreeModels().catch(() => {}), intervalMs);
+  // The OpenCode model import installs the catalog it downloads, so the extra
+  // refresh only fetches when that import failed (it skips a fresh snapshot).
+  const run = async () => {
+    await syncAllFreeModels().catch(() => {});
+    await refreshOpencodeCatalog().catch(() => {});
+  };
+  run().catch(() => {});
+  const timer = setInterval(() => run().catch(() => {}), intervalMs);
   timer.unref?.();
   return timer;
 }

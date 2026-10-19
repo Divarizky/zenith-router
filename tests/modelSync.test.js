@@ -30,13 +30,19 @@ function mockUpstream(routes) {
 
 const OPENCODE = {
   payload: {
-    object: "list",
-    data: [
-      { id: "big-pickle" },
-      { id: "exo-free" },
-      { id: "muse-spark-1.3-contributor-free" },
-      { id: "claude-opus-5-5" },
-    ],
+    opencode: {
+      api: "https://opencode.ai/inference/openai/v1",
+      models: {
+        "big-pickle": { name: "Big Pickle", cost: { input: 0, output: 0 } },
+        "exo-free": { name: "Exo", cost: { input: 0, output: 0 } },
+        "nemotron-3-ultra-free": { name: "Nemotron 3 Ultra", cost: { input: 0, output: 0 } },
+        "claude-opus-5-5": { name: "Claude Opus 5.5", cost: { input: 3, output: 15 } },
+        // Cost is free but upstream retired it: status wins over price.
+        "muse-spark-1.3-contributor-free": { name: "Muse Spark 1.3", status: "deprecated", cost: { input: 0, output: 0 } },
+        // Free evaluation models are not routed.
+        "jev-1.13-free": { name: "JEV 1.13", cost: { input: 0, output: 0 } },
+      },
+    },
   },
 };
 
@@ -145,8 +151,11 @@ test("opencode sync - live free list replaces the hardcoded list; paid Zen model
   const routed = ids();
   assert.ok(routed.includes("oc/exo-free"));
   assert.ok(routed.includes("oc/big-pickle"), "free without the -free suffix");
+  assert.ok(routed.includes("oc/nemotron-3-ultra-free"), "model the legacy /inference/v1 gateway refuses");
   assert.ok(!routed.includes("oc/union-alpha"), "stale hardcoded model gone after sync");
   assert.ok(!routed.includes("oc/claude-opus-5-5"), "paid Zen model never synced");
+  assert.ok(!routed.includes("oc/muse-spark-1.3-contributor-free"), "deprecated model never synced");
+  assert.ok(!routed.includes("oc/jev-1.13-free"), "free evaluation model never synced");
   assert.ok(getProviderModels(getProvider("opencode")).every((m) => m.source === "synced"));
 
   const state = getModelSyncState("opencode");
@@ -214,7 +223,16 @@ test("sync - failures keep the previous list and record the error", async (t) =>
   assert.match(state.error, /HTTP 503/);
 
   // An empty free list is treated as a failure too, never as "no models".
-  mockUpstream({ "opencode.ai": { payload: { data: [{ id: "claude-opus-5-5" }] } } });
+  mockUpstream({
+    "opencode.ai": {
+      payload: {
+        opencode: {
+          api: "https://opencode.ai/inference/openai/v1",
+          models: { "claude-opus-5-5": { cost: { input: 3, output: 15 } } },
+        },
+      },
+    },
+  });
   assert.strictEqual((await syncFreeModels("opencode")).code, "empty");
   assert.strictEqual(listSyncedModels("opencode").length, 3);
 

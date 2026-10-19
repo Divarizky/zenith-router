@@ -58,7 +58,7 @@ test("Retry 400 chat->responses - payload dikonversi ke bentuk Responses", async
   });
 
   const retryBody = calls[1].body;
-  assert.strictEqual(calls[1].url, "https://opencode.ai/inference/v1/responses");
+  assert.strictEqual(calls[1].url, "https://opencode.ai/inference/openai/v1/responses");
   assert.ok(Array.isArray(retryBody.input), "conversation dikonversi ke input");
   assert.strictEqual("messages" in retryBody, false, "field chat tidak dibawa ke /responses");
   assert.ok(String(retryBody.instructions).includes("Jawab singkat."), "system message jadi instructions");
@@ -90,7 +90,7 @@ test("Retry 400 responses->chat - payload dikonversi ke bentuk chat", async () =
   });
 
   const retryBody = calls[1].body;
-  assert.strictEqual(calls[1].url, "https://opencode.ai/inference/v1/chat/completions");
+  assert.strictEqual(calls[1].url, "https://opencode.ai/inference/openai/v1/chat/completions");
   assert.ok(Array.isArray(retryBody.messages), "input dikonversi ke messages");
   assert.strictEqual("input" in retryBody, false, "field responses tidak dibawa ke /chat/completions");
   assert.strictEqual(retryBody.messages[0].role, "system");

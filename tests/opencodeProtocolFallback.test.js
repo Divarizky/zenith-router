@@ -43,8 +43,8 @@ test("OpencodeExecutor - transparently retries on 400 ModelProtocolUnsupported a
 
   assert.strictEqual(res.status, 200);
   assert.strictEqual(calls.length, 2);
-  assert.strictEqual(calls[0].url, "https://opencode.ai/inference/v1/chat/completions");
-  assert.strictEqual(calls[1].url, "https://opencode.ai/inference/v1/responses");
+  assert.strictEqual(calls[0].url, "https://opencode.ai/inference/openai/v1/chat/completions");
+  assert.strictEqual(calls[1].url, "https://opencode.ai/inference/openai/v1/responses");
 
   // Learned lane is cached
   assert.strictEqual(getOpencodeProtocolLane("new-future-model"), "responses");
@@ -61,7 +61,7 @@ test("OpencodeExecutor - transparently retries on 400 ModelProtocolUnsupported a
     }),
   });
   assert.strictEqual(calls.length, 1);
-  assert.strictEqual(calls[0].url, "https://opencode.ai/inference/v1/responses");
+  assert.strictEqual(calls[0].url, "https://opencode.ai/inference/openai/v1/responses");
 });
 
 test("OpencodeExecutor - non-protocol 400 error is not retried", async () => {

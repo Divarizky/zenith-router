@@ -9,10 +9,12 @@ import {
 } from "../src/executors/opencode.js";
 import opencode from "../src/providers/registry/opencode.js";
 
-test("opencode registry - chat baseUrl points at inference API", () => {
-  assert.strictEqual(opencode.transport.baseUrl, "https://opencode.ai/inference/v1/chat/completions");
+test("opencode registry - chat baseUrl points at the CLI's inference base", () => {
+  // The catalog base, not the legacy /inference/v1 gateway: that one carries a
+  // stricter abuse filter and refuses models this base serves.
+  assert.strictEqual(opencode.transport.baseUrl, "https://opencode.ai/inference/openai/v1/chat/completions");
   assert.strictEqual(opencode.transport.messagesUrl, "https://opencode.ai/inference/v1/messages");
-  assert.strictEqual(opencode.transport.responsesUrl, "https://opencode.ai/inference/v1/responses");
+  assert.strictEqual(opencode.transport.responsesUrl, "https://opencode.ai/inference/openai/v1/responses");
 });
 
 test("opencodePathForModel - routes muse-spark/union-alpha to their own endpoints", () => {
@@ -50,7 +52,7 @@ test("OpencodeExecutor - rewrites legacy url, sets free-tier headers, keeps clie
   });
 
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(seen.url, "https://opencode.ai/inference/v1/chat/completions");
+  assert.strictEqual(seen.url, "https://opencode.ai/inference/openai/v1/chat/completions");
   assert.strictEqual(seen.headers.get("Authorization"), "Bearer public");
   assert.strictEqual(seen.headers.get("x-opencode-client"), "cli");
   assert.match(seen.headers.get("x-opencode-session"), /^ses_/);
@@ -89,7 +91,7 @@ test("OpencodeExecutor - fingerprint tools match the upstream tool schema per pa
     targetModel: "muse-spark-1.3-contributor-free",
     targetFormat: "openai-responses",
   });
-  assert.strictEqual(seen.url, "https://opencode.ai/inference/v1/responses");
+  assert.strictEqual(seen.url, "https://opencode.ai/inference/openai/v1/responses");
   assert.strictEqual(seen.body.tools.length, 19);
   for (const tool of seen.body.tools) {
     assert.strictEqual(typeof tool.name, "string", `tool tanpa name: ${JSON.stringify(tool)}`);

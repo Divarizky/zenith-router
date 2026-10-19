@@ -91,6 +91,7 @@ import {
 import { getConnections } from "./db/index.js";
 import { getAllProviders } from "./providers/index.js";
 import { startModelSyncScheduler } from "./services/modelSync.js";
+import { startOpencodeCatalogRefresh } from "./services/opencodeCatalog.js";
 import { startQuotaSyncScheduler, syncAllQuotas } from "./services/quotaSync.js";
 import { startTokenRefreshScheduler } from "./services/tokenRefresh.js";
 
@@ -323,7 +324,7 @@ app.get("/api/console-logs/stream", async (c) => {
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 export function startServer() {
   initConsoleLogCapture();
-  startModelSyncScheduler();
+  if (!startModelSyncScheduler()) startOpencodeCatalogRefresh();
   startQuotaSyncScheduler();
   startTokenRefreshScheduler();
   const hostname = getBindHost();

@@ -5,7 +5,8 @@ import { applyConnectionAuth } from "./auth.js";
 import { MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { requireResolvedProxy } from "./proxyPools.js";
 import { capabilitiesFromApi } from "../providers/capabilities.js";
-import { isFreeOpencodeModel } from "./opencodeDiscovery.js";
+import { parseOpencodeCatalogFreeModels } from "./opencodeDiscovery.js";
+import { OPENCODE_CATALOG_URL } from "./opencodeCatalog.js";
 
 const IMPORT_TIMEOUT_MS = 20000;
 
@@ -95,17 +96,17 @@ const IMPORTERS = {
     },
   },
   opencode: {
-    url: "https://opencode.ai/inference/v1/models",
+    // The authoritative catalog, not the inference gateway's own model list:
+    // it marks retired models and prices every entry, so `isFree` is decided by
+    // cost instead of by name suffix. Parsing also installs the endpoint
+    // snapshot (services/opencodeCatalog.js).
+    url: OPENCODE_CATALOG_URL,
     public: true,
-    // Paid Zen models in the same list need an API key; only free ones work without an account.
+    // Paid Zen models in the same payload need an API key; only free ones work
+    // without an account.
     modes: ["free"],
     headers: { "x-opencode-client": "cli" },
-    parse: (json) =>
-      listOf(json).map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        isFree: isFreeOpencodeModel(m.id),
-      })),
+    parse: parseOpencodeCatalogFreeModels,
   },
   kilocode: {
     url: "https://api.kilo.ai/api/openrouter/models",

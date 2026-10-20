@@ -167,6 +167,7 @@ test("guard - no traffic path reads the manual proxy address outside the resolve
     "src/services/quota/github.js",
     "src/services/quota/glm.js",
     "src/services/quota/kiro.js",
+    "src/services/quota/ollama.js",
     "src/services/quota/openrouter.js",
     "src/services/quota/xkiro.js",
   ];

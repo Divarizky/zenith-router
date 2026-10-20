@@ -760,7 +760,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
       : quotaRows(q);
   if (rows.length === 0) rows.push({ label: "Quota", remaining: null, used: q?.error ? String(q.error) : "No quota data yet", reset: null });
   const statusPill = s.is_exhausted
-    ? `<span class="pill pill-danger">Exhausted</span>`
+    ? `<span class="pill pill-danger">Kuota Habis</span>`
     : s.is_active === 0
       ? `<span class="pill">Disabled</span>`
       : `<span class="pill pill-success">OK</span>`;

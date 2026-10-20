@@ -7,6 +7,7 @@ import { fetchGitHubQuota } from "./github.js";
 import { fetchGlmQuota } from "./glm.js";
 import { fetchOpenRouterQuota } from "./openrouter.js";
 import { fetchCommandCodeQuota } from "./commandcode.js";
+import { fetchOllamaQuota } from "./ollama.js";
 
 const QUOTA_FETCHERS = {
   codex: fetchCodexQuota,
@@ -18,6 +19,8 @@ const QUOTA_FETCHERS = {
   glm: fetchGlmQuota,
   openrouter: fetchOpenRouterQuota,
   commandcode: fetchCommandCodeQuota,
+  ollama: fetchOllamaQuota,
+  "ollama-cloud": fetchOllamaQuota,
 };
 
 /**

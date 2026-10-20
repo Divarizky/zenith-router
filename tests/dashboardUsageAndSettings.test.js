@@ -417,6 +417,32 @@ test("Dashboard usage - tingkat habis dari inventaris tanpa bucket kuota tetap d
   assert.ok(html.includes("high <b class=\"q-bad\">Kuota habis</b>"), "tingkat habis dari inventaris ditandai tanpa bucket kuota");
 });
 
+test("Dashboard usage - kartu kuota menampilkan pill 'Kuota Habis' saat limit habis", async () => {
+  initDb(":memory:");
+  addConnection({
+    provider: "openrouter",
+    name: "OpenRouter Exhausted",
+    credentials: {
+      api_key: "sk-or-exhausted",
+      quota: {
+        provider: "openrouter",
+        is_exhausted: true,
+        remaining: 0,
+        limit: 10,
+        usage: 10,
+        unit: "credits_usd",
+      },
+    },
+  });
+
+  const res = await app.request("/dashboard/usage");
+  assert.strictEqual(res.status, 200);
+  const html = await res.text();
+  assert.ok(html.includes("OpenRouter Exhausted"));
+  assert.ok(html.includes('<span class="pill pill-danger">Kuota Habis</span>'));
+  assert.ok(!html.includes('<span class="pill pill-danger">Exhausted</span>'));
+});
+
 test("POST /dashboard/settings/password/reset - mereset password ke default 123456 dan redirect", async () => {
   const { initDb } = await import("../src/db/index.js");
   const { setDashboardPassword, isUsingDefaultPassword } = await import("../src/services/dashboardAuth.js");

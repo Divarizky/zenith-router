@@ -118,29 +118,113 @@ test("Failover - client 400 error does not fail over to other accounts", async (
   setCustomExecutor(null);
 });
 
-test("Account Rotation - respects sticky vs LRU strategy", async () => {
+test("Account Priority - order follows priority, not last use or a leftover rotation setting", async () => {
   const { listAvailableConnections } = await import("../src/services/fallback.js");
   const { setSetting } = await import("../src/services/settings.js");
 
   const db = initDb(":memory:");
   const c1 = addConnection({ provider: "glm", name: "GLM Acc 1", credentials: { api_key: "k1" } });
   const c2 = addConnection({ provider: "glm", name: "GLM Acc 2", credentials: { api_key: "k2" } });
+  const c3 = addConnection({ provider: "glm", name: "GLM Acc 3", credentials: { api_key: "k3" } });
 
-  // Update c1 last_used_at to 1000, c2 last_used_at to 2000
-  db.prepare("UPDATE connections SET last_used_at = ? WHERE id = ?").run(1000, c1.id);
+  // Under LRU c3 would come first and under sticky c1; priority ignores both.
+  db.prepare("UPDATE connections SET last_used_at = ? WHERE id = ?").run(3000, c1.id);
   db.prepare("UPDATE connections SET last_used_at = ? WHERE id = ?").run(2000, c2.id);
+  db.prepare("UPDATE connections SET last_used_at = ? WHERE id = ?").run(1000, c3.id);
+  for (const leftover of ["lru", "sticky"]) {
+    setSetting("account_rotation", leftover);
+    assert.deepStrictEqual(
+      listAvailableConnections("glm").map((c) => c.id),
+      [c1.id, c2.id, c3.id],
+      `account_rotation=${leftover} lama tidak boleh mengubah urutan`
+    );
+  }
 
-  // LRU strategy (default): oldest last_used_at (c1: 1000) should be first
-  setSetting("account_rotation", "lru");
-  const lruList = listAvailableConnections("glm");
-  assert.strictEqual(lruList[0].id, c1.id);
-  assert.strictEqual(lruList[1].id, c2.id);
+  // A user-chosen order wins over creation order.
+  db.prepare("UPDATE connections SET priority = ? WHERE id = ?").run(1, c3.id);
+  db.prepare("UPDATE connections SET priority = ? WHERE id = ?").run(2, c1.id);
+  db.prepare("UPDATE connections SET priority = ? WHERE id = ?").run(3, c2.id);
+  assert.deepStrictEqual(listAvailableConnections("glm").map((c) => c.id), [c3.id, c1.id, c2.id]);
+});
 
-  // Sticky strategy: newest last_used_at (c2: 2000) should be first to stay on the same account
-  setSetting("account_rotation", "sticky");
-  const stickyList = listAvailableConnections("glm");
-  assert.strictEqual(stickyList[0].id, c2.id);
-  assert.strictEqual(stickyList[1].id, c1.id);
+test("Account Priority - a locked #1 is skipped and used again once its lock ends", async () => {
+  const { listAvailableConnections } = await import("../src/services/fallback.js");
+
+  const db = initDb(":memory:");
+  const c1 = addConnection({ provider: "glm", name: "GLM Acc 1", credentials: { api_key: "k1" } });
+  const c2 = addConnection({ provider: "glm", name: "GLM Acc 2", credentials: { api_key: "k2" } });
+  const c3 = addConnection({ provider: "glm", name: "GLM Acc 3", credentials: { api_key: "k3" } });
+
+  setConnectionCooldown(c1.id, Date.now() + 60_000, "glm-4-flash");
+  assert.deepStrictEqual(
+    listAvailableConnections("glm", { model: "glm-4-flash" }).map((c) => c.id),
+    [c2.id, c3.id],
+    "#2 mengambil alih selama #1 terkunci"
+  );
+  assert.strictEqual(
+    listAvailableConnections("glm", { model: "glm-5" })[0].id,
+    c1.id,
+    "kunci per model tidak memindahkan model lain dari #1"
+  );
+
+  db.prepare("UPDATE connection_model_locks SET locked_until = ? WHERE connection_id = ?").run(Date.now() - 1, c1.id);
+  assert.strictEqual(listAvailableConnections("glm", { model: "glm-4-flash" })[0].id, c1.id, "kembali ke #1");
+
+  db.prepare("UPDATE connections SET is_active = 0 WHERE id = ?").run(c2.id);
+  setConnectionCooldown(c1.id, Date.now() + 60_000);
+  assert.deepStrictEqual(
+    listAvailableConnections("glm", { model: "glm-4-flash" }).map((c) => c.id),
+    [c3.id],
+    "#2 nonaktif dilewati, #3 dipakai"
+  );
+});
+
+test("Account Priority - gateway answers from #2 on a 429 and returns to #1 after the lock", async () => {
+  const db = initDb(":memory:");
+  addConnection({ provider: "glm", name: "GLM Utama", credentials: { api_key: "key-1" } });
+  addConnection({ provider: "glm", name: "GLM Cadangan", credentials: { api_key: "key-2" } });
+
+  let limited = true;
+  const attempts = [];
+  setCustomExecutor({
+    async execute({ headers }) {
+      const auth = headers.Authorization || headers.authorization;
+      attempts.push(auth);
+      if (auth === "Bearer key-1" && limited) {
+        return new Response(JSON.stringify({ error: { message: "Rate limit" } }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+  const chat = () =>
+    app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "glm/glm-4-flash", messages: [{ role: "user", content: "hi" }] }),
+    });
+
+  try {
+    assert.strictEqual((await chat()).status, 200);
+    assert.deepStrictEqual(attempts, ["Bearer key-1", "Bearer key-2"], "429 di #1 dilanjutkan ke #2");
+
+    attempts.length = 0;
+    assert.strictEqual((await chat()).status, 200);
+    assert.deepStrictEqual(attempts, ["Bearer key-2"], "selama #1 terkunci, request langsung ke #2");
+
+    limited = false;
+    db.prepare("UPDATE connection_model_locks SET locked_until = ?").run(Date.now() - 1);
+    attempts.length = 0;
+    assert.strictEqual((await chat()).status, 200);
+    assert.deepStrictEqual(attempts, ["Bearer key-1"], "setelah kunci berakhir, kembali ke #1");
+  } finally {
+    setCustomExecutor(null);
+  }
 });
 
 function mistralChat(model, extra = {}) {

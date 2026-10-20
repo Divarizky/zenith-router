@@ -12,7 +12,7 @@ function fromSnapshot(quota) {
 
 /**
  * Normalize GitHub Copilot quota payloads (paid `quota_snapshots` or free
- * `monthly_quotas`/`limited_user_quotas`) into 9router-style rows.
+ * `monthly_quotas`/`limited_user_quotas`) into progress rows.
  */
 function buildGitHubQuotas(data) {
   const quotas = {};

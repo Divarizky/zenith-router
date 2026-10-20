@@ -11,6 +11,7 @@ import { serve } from "@hono/node-server";
 import { app } from "../src/index.js";
 import { initDb, addConnection } from "../src/db/index.js";
 import { getProvider } from "../src/providers/index.js";
+import { createSessionToken } from "../src/services/dashboardAuth.js";
 
 const STUB_MODEL_OK = "gpt-oss:20b";
 const STUB_MODEL_FAIL = "gpt-oss:120b";
@@ -97,7 +98,10 @@ test("Smoke - combo dari dashboard dilayani anggota kedua lewat HTTP nyata", asy
   // Combo dibuat lewat form dashboard, bukan lewat service.
   const created = await fetch(`http://127.0.0.1:${port}/dashboard/combos/create`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Cookie: `zenith_session=${createSessionToken()}`,
+    },
     body: new URLSearchParams({
       name: "smoke-antai",
       models: `ollama/${STUB_MODEL_FAIL}\nollama/${STUB_MODEL_OK}`,
@@ -109,7 +113,12 @@ test("Smoke - combo dari dashboard dilayani anggota kedua lewat HTTP nyata", asy
     `form combo harus diterima, dapat ${created.status}`
   );
 
-  const listed = await (await fetch(`http://127.0.0.1:${port}/dashboard/combos`)).text();
+  const sessionCookie = `zenith_session=${createSessionToken()}`;
+  const listed = await (
+    await fetch(`http://127.0.0.1:${port}/dashboard/combos`, {
+      headers: { Cookie: sessionCookie },
+    })
+  ).text();
   assert.ok(listed.includes("smoke-antai"), "combo tampil di halaman dashboard");
 
   const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {

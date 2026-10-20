@@ -419,7 +419,7 @@ test("Proxy list row - test, edit, and delete controls are present per entry", a
   assert.ok(html.includes("edit-proxy-modal"), "modal ubah proxy tersedia");
 });
 
-test("UI 9router - badges, empty state, and toggle/bulk controls", async () => {
+test("UI proxy pools - badges, empty state, and toggle/bulk controls", async () => {
   initDb(":memory:");
   // Empty state
   const emptyHtml = await (await app.request("/dashboard/proxies")).text();

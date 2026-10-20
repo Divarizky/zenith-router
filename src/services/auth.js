@@ -57,8 +57,7 @@ export function getActiveConnection(providerId) {
   );
 
   if (available.length > 0) {
-    // Sort by last_used_at ascending (least-recently-used rotation)
-    available.sort((a, b) => (a.last_used_at || 0) - (b.last_used_at || 0));
+    // Same order as routing: getConnections returns the provider by priority.
     const picked = available[0];
     if (picked.id) {
       updateConnectionLastUsed(picked.id);
@@ -85,7 +84,7 @@ export function getActiveConnection(providerId) {
   return null;
 }
 
-// Trimmed from 9router open-sse/providers/shared.js (CLAUDE_CODE_HEADERS + ANTHROPIC_BETA_BASE).
+// Trimmed from the upstream shared.js (CLAUDE_CODE_HEADERS + ANTHROPIC_BETA_BASE).
 // Pinned version; bump when the real CLI moves (format changes are rare).
 const CLAUDE_CLI_VERSION = "2.1.280";
 const CLAUDE_CODE_BETAS = [
@@ -111,7 +110,7 @@ export function applyConnectionAuth(headers, connection) {
   if (connection.auth_type === "oauth") {
     let token = creds.access_token || creds.api_key;
     if (!token) return headers;
-    // Cline free models are gated to recognized product surfaces (mirrors 9router
+    // Cline free models are gated to recognized product surfaces (mirrors the upstream
     // shared/clineAuth.js buildClineHeaders): without client identity headers the
     // upstream answers 403 "only available via Cline product surfaces".
     if (connection.provider === "cline") {
@@ -127,7 +126,7 @@ export function applyConnectionAuth(headers, connection) {
       headers["X-IS-MULTIROOT"] = headers["X-IS-MULTIROOT"] || "false";
     }
     headers["Authorization"] = `Bearer ${token}`;
-    // Claude Code subscription usage: same identity bundle 9router sends (shared.js CLAUDE_CODE_HEADERS).
+    // Claude Code subscription usage: same identity bundle the upstream sends (shared.js CLAUDE_CODE_HEADERS).
     // ponytail: x-claude-code-session-id alignment and X-Stainless SDK telemetry skipped; add if upstream rejects.
     if (connection.provider === "claude") {
       const beta = headers["anthropic-beta"] || headers["Anthropic-Beta"];

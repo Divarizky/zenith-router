@@ -250,7 +250,7 @@ function fakeEl(extra = {}) {
 
 test("GET /dashboard - a new release renders the badge with its upgrade button", async () => {
   const html = await (await app.request("/dashboard")).text();
-  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+  const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
     .map((m) => m[1])
     .find((s) => s.includes("update-badge"));
   assert.ok(script, "script badge ada di halaman");

@@ -11,9 +11,9 @@
  *      null so the dashboard shows no icon and /v1/models omits the field
  *      instead of claiming a capability nobody verified.
  *
- * The pattern table is adapted from 9router's open-sse/providers/capabilities.js
- * (MIT, https://github.com/decolua/9router), trimmed to the fields Zenith uses.
- * Anything 9router keeps per gateway (context truncation, thinking wire format)
+ * The pattern table is adapted from the upstream gateway reference
+ * (attribution in NOTICE), trimmed to the fields Zenith uses.
+ * Anything the reference keeps per gateway (context truncation, thinking wire format)
  * is left out on purpose: Zenith only publishes limits it can state as fact.
  */
 export const DEFAULT_CAPABILITIES = {

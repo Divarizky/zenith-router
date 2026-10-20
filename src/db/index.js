@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS connections (
   proxy_url TEXT,
   proxy_pool_id INTEGER,
   is_active INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 0,
   last_used_at INTEGER DEFAULT 0,
   cooldown_until INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL
@@ -268,6 +269,17 @@ function migrateSchema(db) {
   if (!connectionColumns.some((col) => col.name === "proxy_pool_id")) {
     db.exec("ALTER TABLE connections ADD COLUMN proxy_pool_id INTEGER");
   }
+  // Accounts were picked by last use before priorities existed; numbering them in
+  // creation order keeps the oldest account as #1 instead of a five-way tie at 0.
+  if (!connectionColumns.some((col) => col.name === "priority")) {
+    db.exec("ALTER TABLE connections ADD COLUMN priority INTEGER NOT NULL DEFAULT 0");
+    db.exec(`
+      UPDATE connections SET priority = (
+        SELECT COUNT(*) FROM connections AS earlier
+        WHERE earlier.provider = connections.provider AND earlier.id <= connections.id
+      )
+    `);
+  }
   const proxyPoolColumns = db.prepare("PRAGMA table_info(proxy_pools)").all();
   if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === "last_test_ms")) {
     db.exec("ALTER TABLE proxy_pools ADD COLUMN last_test_ms INTEGER");
@@ -345,17 +357,33 @@ export function addConnection({
   const now = Date.now();
   const credsJson = JSON.stringify(credentials || {});
 
+  // A new account always joins at the bottom, so adding a spare never takes
+  // traffic away from the account the user already ranked first.
   const stmt = db.prepare(`
-    INSERT INTO connections (provider, name, auth_type, credentials, proxy_url, proxy_pool_id, is_active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO connections (provider, name, auth_type, credentials, proxy_url, proxy_pool_id, is_active, priority, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(priority), 0) + 1 FROM connections WHERE provider = ?), ?)
   `);
 
-  const info = stmt.run(provider, name, auth_type, credsJson, proxy_url, proxy_pool_id ?? null, is_active ? 1 : 0, now);
+  const info = stmt.run(
+    provider,
+    name,
+    auth_type,
+    credsJson,
+    proxy_url,
+    proxy_pool_id ?? null,
+    is_active ? 1 : 0,
+    provider,
+    now
+  );
   return getConnectionById(Number(info.lastInsertRowid));
 }
 
 /**
- * Get all connections, optionally filtered by provider
+ * Get all connections, optionally filtered by provider.
+ *
+ * A provider's accounts come back in priority order (#1 first), which is the
+ * order routing tries them in. The unfiltered list stays in id order because it
+ * spans providers, where priorities are not comparable.
  */
 export function getConnections(provider = null) {
   const db = getDb();
@@ -363,7 +391,7 @@ export function getConnections(provider = null) {
   let rows;
 
   if (provider) {
-    stmt = db.prepare(`SELECT * FROM connections WHERE provider = ? ORDER BY id ASC`);
+    stmt = db.prepare(`SELECT * FROM connections WHERE provider = ? ORDER BY priority ASC, id ASC`);
     rows = stmt.all(provider);
   } else {
     stmt = db.prepare(`SELECT * FROM connections ORDER BY id ASC`);
@@ -436,13 +464,61 @@ export function deleteConnection(id) {
   const key = Number(id);
   // Baris per koneksi ikut dibersihkan. Tanpa ini, inventaris yang ditinggalkan
   // tetap terbaca sebagai milik akun yang sudah tidak ada.
+  const provider = getConnectionById(key)?.provider;
   db.exec("BEGIN");
   try {
     db.prepare(`DELETE FROM antigravity_account_models WHERE connection_id = ?`).run(key);
     db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ?`).run(key);
     const res = db.prepare(`DELETE FROM connections WHERE id = ?`).run(key);
+    if (provider) renumberConnections(db, provider);
     db.exec("COMMIT");
     return res.changes > 0;
+  } catch (err) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw err;
+  }
+}
+
+/**
+ * Rewrite a provider's priorities as 1..n in their current order. The caller
+ * owns the transaction.
+ */
+function renumberConnections(db, provider, orderedIds = null) {
+  const ids =
+    orderedIds ||
+    db
+      .prepare(`SELECT id FROM connections WHERE provider = ? ORDER BY priority ASC, id ASC`)
+      .all(provider)
+      .map((row) => row.id);
+  const update = db.prepare(`UPDATE connections SET priority = ? WHERE id = ?`);
+  ids.forEach((id, index) => update.run(index + 1, id));
+}
+
+/**
+ * Swap an account with its neighbour in its provider's priority order.
+ * Returns false when the account is unknown or already at that end.
+ */
+export function moveConnection(id, direction) {
+  const db = getDb();
+  const current = getConnectionById(id);
+  if (!current || (direction !== "up" && direction !== "down")) return false;
+
+  db.exec("BEGIN");
+  try {
+    const ids = db
+      .prepare(`SELECT id FROM connections WHERE provider = ? ORDER BY priority ASC, id ASC`)
+      .all(current.provider)
+      .map((row) => row.id);
+    const from = ids.indexOf(current.id);
+    const to = direction === "up" ? from - 1 : from + 1;
+    if (to < 0 || to >= ids.length) {
+      db.exec("ROLLBACK");
+      return false;
+    }
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    renumberConnections(db, current.provider, ids);
+    db.exec("COMMIT");
+    return true;
   } catch (err) {
     try { db.exec("ROLLBACK"); } catch {}
     throw err;

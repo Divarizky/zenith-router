@@ -41,7 +41,7 @@ test("auth service - handles cloudflare accountId:apiToken split in applyConnect
   assert.strictEqual(h2["Authorization"], "Bearer sk-or-v1-abc");
 });
 
-test("auth service - picks available connection and rotates by least-used", () => {
+test("auth service - always picks the #1 account, regardless of last use", () => {
   initDb(":memory:");
 
   const c1 = addConnection({
@@ -59,9 +59,11 @@ test("auth service - picks available connection and rotates by least-used", () =
   assert.ok(picked1);
   assert.strictEqual(picked1.id, c1.id);
 
+  // Picking #1 stamps its last use; it must stay first anyway.
   const picked2 = getActiveConnection("glm");
   assert.ok(picked2);
-  assert.strictEqual(picked2.id, c2.id);
+  assert.strictEqual(picked2.id, c1.id);
+  assert.ok(c2.id);
 });
 
 test("auth service - skips connection in cooldown", () => {

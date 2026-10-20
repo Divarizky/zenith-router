@@ -72,7 +72,7 @@ test("kiro executor routes authenticated connections through Amazon Q first", as
   assert.strictEqual(seenHeaders.get("X-Amz-Target"), null);
 });
 
-test("cline auth adds 9router-style client identity headers plus workos token", () => {
+test("cline auth adds vendor-style client identity headers plus workos token", () => {
   const h = applyConnectionAuth(
     { "Content-Type": "application/json" },
     { provider: "cline", auth_type: "oauth", credentials: { access_token: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig" } }

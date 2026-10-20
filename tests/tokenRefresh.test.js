@@ -8,9 +8,12 @@ import {
   startTokenRefreshScheduler,
   stopTokenRefreshScheduler,
   setCustomTokenRefresher,
+  setRefreshTimeoutMs,
 } from "../src/services/tokenRefresh.js";
 import { app } from "../src/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
+import { setOAuthFetch } from "../src/services/oauth/providers.js";
+import { clearConsoleLogs, getConsoleLogs } from "../src/services/logger.js";
 
 test("tokenRefresh - needsTokenRefresh detects expired or near-expiry token", () => {
   const notExpired = {
@@ -316,4 +319,180 @@ test("tokenRefresh - concurrent calls for the same expiring connection share sin
   assert.strictEqual(subsequent.credentials.access_token, "single_fresh_token");
 
   setCustomTokenRefresher(null);
+});
+
+function freshOAuthConnection(provider = "antigravity") {
+  return addConnection({
+    provider,
+    name: `${provider} OAuth`,
+    auth_type: "oauth",
+    credentials: {
+      access_token: "still_valid",
+      refresh_token: "ref_tok",
+      expires_at: Date.now() + 3600 * 1000,
+    },
+  });
+}
+
+test("tokenRefresh - a refresh that turns out unnecessary does not stick, so a forced one still runs", async () => {
+  initDb(":memory:");
+  const conn = freshOAuthConnection();
+
+  let executions = 0;
+  setCustomTokenRefresher(async () => {
+    executions++;
+    return { access_token: `minted_${executions}`, expires_at: Date.now() + 3600 * 1000 };
+  });
+
+  try {
+    // A caller holding a stale snapshot asks while the stored token is still fresh.
+    const noop = await refreshOAuthToken(conn);
+    assert.strictEqual(executions, 0);
+    assert.strictEqual(noop.credentials.access_token, "still_valid");
+
+    // Upstream then rejects the token: the forced refresh must reach the refresher.
+    const forced = await refreshOAuthToken(getConnectionById(conn.id), { force: true });
+    assert.strictEqual(executions, 1, "refresh paksa tidak boleh memakai hasil lama yang tertinggal");
+    assert.strictEqual(forced.credentials.access_token, "minted_1");
+    assert.strictEqual(getConnectionById(conn.id).credentials.access_token, "minted_1");
+  } finally {
+    setCustomTokenRefresher(null);
+  }
+});
+
+test("tokenRefresh - after an unnecessary refresh, an expired token is renewed by a plain call", async () => {
+  initDb(":memory:");
+  const conn = freshOAuthConnection();
+
+  let executions = 0;
+  setCustomTokenRefresher(async () => {
+    executions++;
+    return { access_token: "renewed", expires_at: Date.now() + 3600 * 1000 };
+  });
+
+  try {
+    await refreshOAuthToken(conn);
+    mergeConnectionCredentials(conn.id, { expires_at: Date.now() - 1000 });
+
+    const renewed = await refreshOAuthToken(getConnectionById(conn.id));
+    assert.strictEqual(executions, 1);
+    assert.strictEqual(renewed.credentials.access_token, "renewed");
+  } finally {
+    setCustomTokenRefresher(null);
+  }
+});
+
+test("POST /v1/chat/completions - reactive 401 refreshes even after an earlier unnecessary refresh", async () => {
+  initDb(":memory:");
+  const conn = freshOAuthConnection("glm");
+
+  let executions = 0;
+  setCustomTokenRefresher(async () => {
+    executions++;
+    return { access_token: "reauthorized", expires_at: Date.now() + 3600 * 1000 };
+  });
+
+  const receivedAuth = [];
+  setCustomExecutor({
+    async execute({ headers }) {
+      const auth = headers.Authorization || headers.get?.("Authorization");
+      receivedAuth.push(auth);
+      if (auth !== "Bearer reauthorized") {
+        return new Response(JSON.stringify({ error: "Invalid token" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          id: "1",
+          object: "chat.completion",
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    },
+  });
+
+  try {
+    // The quota sync / scheduler race: a no-op refresh before the request.
+    await refreshOAuthToken(conn);
+
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "glm/glm-4-flash", messages: [{ role: "user", content: "hi" }] }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(executions, 1, "refresh reaktif harus memanggil refresher");
+    assert.deepStrictEqual(receivedAuth, ["Bearer still_valid", "Bearer reauthorized"]);
+  } finally {
+    setCustomExecutor(null);
+    setCustomTokenRefresher(null);
+  }
+});
+
+test("tokenRefresh - a token endpoint that never answers times out and frees the connection", async () => {
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "antigravity",
+    name: "Hanging Google",
+    auth_type: "oauth",
+    credentials: { access_token: "old", refresh_token: "ref_tok", expires_at: Date.now() - 1000 },
+  });
+
+  let calls = 0;
+  setRefreshTimeoutMs(50);
+  setOAuthFetch(async (url, init) => {
+    calls++;
+    if (calls === 1) {
+      // Never answers; only the abort signal ends it.
+      return new Promise((_, reject) => {
+        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+      });
+    }
+    return new Response(JSON.stringify({ access_token: "after_timeout", expires_in: 3600 }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  try {
+    await assert.rejects(refreshOAuthToken(conn), /Google refresh timed out after 50ms/);
+
+    // The timed-out attempt must not stay in flight for the next caller.
+    const retried = await refreshOAuthToken(getConnectionById(conn.id));
+    assert.strictEqual(calls, 2);
+    assert.strictEqual(retried.credentials.access_token, "after_timeout");
+  } finally {
+    setOAuthFetch(null);
+    setRefreshTimeoutMs(null);
+  }
+});
+
+test("tokenRefresh - a successful refresh is logged with its new expiry", async () => {
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "antigravity",
+    name: "Logged",
+    auth_type: "oauth",
+    credentials: { access_token: "old", refresh_token: "ref_tok", expires_at: Date.now() - 1000 },
+  });
+  setCustomTokenRefresher(async () => ({ access_token: "new", expires_at: Date.now() + 3600 * 1000 }));
+  clearConsoleLogs();
+
+  try {
+    await refreshOAuthToken(conn);
+    const lines = getConsoleLogs().map((e) => (typeof e === "string" ? e : JSON.stringify(e)));
+    assert.ok(
+      lines.some(
+        (l) =>
+          l.includes(`[zenith] Token antigravity #${conn.id} diperbarui, berlaku sampai `) && /sampai \d{2}:\d{2}$/.test(l)
+      ),
+      "refresh yang berhasil harus tercatat di Console Log"
+    );
+  } finally {
+    setCustomTokenRefresher(null);
+  }
 });

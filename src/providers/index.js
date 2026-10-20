@@ -23,7 +23,7 @@ import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled
 import { resolveCapabilities } from "./capabilities.js";
 
 /**
- * Capability fields published per model on /v1/models, same shape as 9router:
+ * Capability fields published per model on /v1/models, same shape as the upstream reference:
  * clients read capabilities.vision to decide whether image input is allowed and
  * capabilities.reasoning to decide whether reasoning_effort may be sent. A model
  * nobody has data for gets no field at all — better an absent claim than a wrong one.
@@ -261,7 +261,7 @@ export function memberCapabilities(member) {
 /**
  * Return list of all available models in OpenAI Model List format.
  *
- * Mirroring 9router `buildModelsList` (src/app/api/v1/models/route.js) and
+ * Mirroring the upstream `buildModelsList` (src/app/api/v1/models/route.js) and
  * OmniRoute `handleGetModels` (src/app/api/models/route.ts): only providers with
  * an active connection contribute their catalog. `noAuth` free providers are
  * always kept. Callers needing the full registry (tests, audit) can pass

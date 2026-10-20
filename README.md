@@ -15,7 +15,7 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 - Failover ke akun berikutnya saat 429 atau 5xx, dengan cooldown 60 detik untuk akun bermasalah
 - Refresh token otomatis, proaktif sebelum request dan berkala di latar belakang, plus satu percobaan ulang setelah 401 atau 403
 - Traffic Guard: batas request in-flight per akun, antrean FIFO, jitter proaktif dan reaktif
-- Strategi rotasi akun `lru` dan `sticky`, dapat diganti dari halaman Settings
+- Prioritas akun per provider (#1, #2, dst.) yang diatur dengan tombol naik/turun di halaman detail provider: #1 selalu dipakai duluan, akun berikutnya hanya saat akun di atasnya tidak tersedia
 
 **Akun dan provider**
 
@@ -169,5 +169,4 @@ Halaman Overview, Providers, Usage & Quota, Token Saver, API Keys, dan Settings.
 
 MIT, lihat [LICENSE](LICENSE).
 
-- [9router](https://github.com/decolua/9router) — struktur layering dan tabel kapabilitas model.
-- [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — referensi format provider dan pola gateway.
+Sebagian modul diadaptasi dari proyek open-source pihak ketiga. Daftar lengkap beserta atribusi dan lisensinya ada di [NOTICE](NOTICE).

@@ -1,6 +1,37 @@
 import { cors } from "hono/cors";
 import { getSetting } from "./services/settings.js";
 import { extractClientApiKey, verifyApiKey } from "./services/apiKeys.js";
+import {
+  hasValidAdminToken,
+  isAdminProtected,
+} from "./services/adminAuth.js";
+import {
+  hasValidDashboardSession,
+  isLoginRequired,
+} from "./services/dashboardAuth.js";
+import { renderDashboardLoginPage } from "./ui/pages/login.js";
+
+const DASHBOARD_AUTH_EXEMPT_PATHS = new Set(["/dashboard/login", "/dashboard/logout"]);
+
+function dashboardChallenge(c) {
+  const acceptsHtml = String(c.req.header("accept") || "").includes("text/html");
+  const isHtml = (c.req.method === "GET" || c.req.method === "HEAD") && acceptsHtml;
+  const { pathname, search } = new URL(c.req.url);
+
+  // Jika ZENITH_ADMIN_TOKEN aktif, kembalikan 403 Forbidden sesuai kontrak F-14
+  if (isAdminProtected()) {
+    if (isHtml) {
+      return c.html(renderDashboardLoginPage({ next: pathname + search }), 403);
+    }
+    return c.text("Forbidden", 403);
+  }
+
+  // Jika require_login aktif biasa
+  if (isHtml) {
+    return c.redirect(`/dashboard/login?next=${encodeURIComponent(pathname + search)}`);
+  }
+  return c.text("Unauthorized", 401);
+}
 
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -88,6 +119,8 @@ function isControlPlanePath(path) {
 /**
  * Dashboard and /api are only reachable from this machine, and state-changing
  * requests must come from the dashboard itself (CSRF protection).
+ * With ZENITH_ADMIN_TOKEN set they additionally require the admin token, so a
+ * container that reaches the host through loopback cannot read credentials.
  */
 export async function controlPlaneGuard(c, next) {
   if (!isControlPlanePath(c.req.path)) {
@@ -103,6 +136,25 @@ export async function controlPlaneGuard(c, next) {
   const remote = c.env?.incoming?.socket?.remoteAddress;
   if (remote && !isLoopbackAddress(remote)) {
     return c.text("Dashboard is only available from localhost", 403);
+  }
+
+  // Wajib login dashboard:
+  // Aktif bila:
+  // 1. ZENITH_ADMIN_TOKEN diset, ATAU
+  // 2. Akses dari HTTP server nyata (remote terdefinisi) dan require_login aktif (default true), ATAU
+  // 3. require_login eksplisit diset "true" di DB / env.
+  const isRealHttp = Boolean(remote);
+  const requireLoginVal = getSetting("require_login", isRealHttp ? "true" : "false");
+  const mustAuthenticate = isAdminProtected() || (requireLoginVal !== "false" && requireLoginVal !== "0");
+
+  if (mustAuthenticate && !DASHBOARD_AUTH_EXEMPT_PATHS.has(c.req.path)) {
+    let isAuthenticated = hasValidDashboardSession(c);
+    if (!isAuthenticated && isAdminProtected() && hasValidAdminToken(c)) {
+      isAuthenticated = true;
+    }
+    if (!isAuthenticated) {
+      return dashboardChallenge(c);
+    }
   }
 
   if (c.req.method !== "GET" && c.req.method !== "HEAD") {

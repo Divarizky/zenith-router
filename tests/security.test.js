@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
 import { initDb, addConnection, getConnections } from "../src/db/index.js";
+import { createSessionToken } from "../src/services/dashboardAuth.js";
 import { setSetting } from "../src/services/settings.js";
 import { createApiKey, setApiKeyActive } from "../src/services/apiKeys.js";
 import { setCustomExecutor } from "../src/executors/base.js";
@@ -80,12 +81,13 @@ test("security - host guard blocks non-loopback Host headers (DNS rebinding)", a
 test("security - dashboard and /api are localhost-only", async () => {
   initDb(":memory:");
   const remote = (address) => ({ incoming: { socket: { remoteAddress: address } } });
+  const authHeaders = { Cookie: `zenith_session=${createSessionToken()}` };
 
-  assert.strictEqual((await app.request("/dashboard", {}, remote("192.168.1.20"))).status, 403);
-  assert.strictEqual((await app.request("/api/usage", {}, remote("10.0.0.5"))).status, 403);
-  assert.strictEqual((await app.request("/dashboard", {}, remote("127.0.0.1"))).status, 200);
-  assert.strictEqual((await app.request("/dashboard", {}, remote("::ffff:127.0.0.1"))).status, 200);
-  assert.strictEqual((await app.request("/dashboard", {}, remote("::1"))).status, 200);
+  assert.strictEqual((await app.request("/dashboard", { headers: authHeaders }, remote("192.168.1.20"))).status, 403);
+  assert.strictEqual((await app.request("/api/usage", { headers: authHeaders }, remote("10.0.0.5"))).status, 403);
+  assert.strictEqual((await app.request("/dashboard", { headers: authHeaders }, remote("127.0.0.1"))).status, 200);
+  assert.strictEqual((await app.request("/dashboard", { headers: authHeaders }, remote("::ffff:127.0.0.1"))).status, 200);
+  assert.strictEqual((await app.request("/dashboard", { headers: authHeaders }, remote("::1"))).status, 200);
 });
 
 test("security - dashboard POSTs reject cross-site requests (CSRF)", async () => {

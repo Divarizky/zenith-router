@@ -26,14 +26,51 @@ Ketahanan OpenCode free tier: endpoint mengikuti katalog resmi, 403 direspons de
 - Waktu reset kuota dibaca dari body error 429 Google (`RetryInfo.retryDelay` dan `ErrorInfo.metadata.quotaResetTimeStamp`/`quotaResetDelay`) selain header `Retry-After`, sehingga akun yang kuotanya habis dikunci sampai reset — bukan 60 detik yang membuat request terus mencoba akun yang sama.
 - Percobaan refresh token yang tetap menjawab 401/402/403 mengunci akun 10 menit dan melanjutkan request ke koneksi berikutnya, alih-alih langsung mengembalikan error ke klien.
 
+### Prioritas Akun
+
+- Setiap akun punya nomor prioritas per provider (#1, #2, dst.). Gateway selalu memakai akun #1 selama tersedia; akun berikutnya hanya dipakai saat akun di atasnya limit, cooldown, kuota habis, nonaktif, atau tidak melayani model yang diminta, lalu kembali ke #1 begitu pulih.
+- Urutan diatur dengan tombol naik/turun di tabel akun halaman detail provider. Akun baru masuk di nomor terakhir, dan nomor dirapatkan saat akun dihapus.
+- Database lama otomatis diberi nomor sesuai urutan akun dibuat.
+- Pilihan Strategi Rotasi Akun (`lru`/`sticky`) dihapus dari Settings. Beban tidak lagi dibagi bergantian antar akun: kuota akun #1 terpakai lebih dulu.
+
+### Refresh Token OAuth
+
+- Refresh token tidak lagi berhenti diam-diam. Sebelumnya, permintaan refresh yang ternyata tidak perlu (token sudah diperbarui proses lain) meninggalkan hasil lama di cache refresh. Sejak itu setiap refresh untuk akun tersebut, termasuk refresh paksa setelah 401, mengembalikan token lama tanpa memanggil penyedia token. Satu jam kemudian akun terus menjawab 401 sampai server di-restart. Cache kini selalu dibersihkan setelah refresh selesai.
+- Request ke endpoint token dibatasi 30 detik, sehingga endpoint yang tidak menjawab tidak lagi menahan penjadwal, quota sync, dan request akun yang sama.
+- Refresh yang berhasil dicatat di Console Log beserta jam berlakunya token baru.
+
 ### Atribusi Akun
 
 - Respons ketiga endpoint (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`) menyertakan header `X-Zenith-Account` pada mode streaming maupun non-streaming; log `[USAGE]` menyertakan `account="<nama>"`.
 - Panel Recent Requests kini bergabung dengan `connections` (kolom `connection_name`), dan halaman Usage menambah kartu Token Consumption by Account.
 
+### Login Dashboard Wajib
+
+- Dashboard kini mewajibkan login sebelum terbuka lewat halaman `/dashboard/login`.
+- Password awal adalah `ZENITH_INITIAL_PASSWORD` dari env atau default `123456`. Hash disimpan di database settings (`dashboard_password_hash`) memakai algoritma `scrypt` bawaan `node:crypto` tanpa dependensi tambahan.
+- Sesi login disimpan dalam cookie `zenith_session` (HMAC-SHA256, HttpOnly, SameSite=Lax, 24 jam) dengan secret sesi acak di `data/session-secret` (atau env `ZENITH_SESSION_SECRET`).
+- Limiter login berbasis memori: 5x kegagalan berturut-turut mengunci login bertahap (30 detik, 2m, 10m, 30m).
+- Banner peringatan kuning tampil di dashboard selama password masih default `123456` untuk mengingatkan pengguna menggantinya di Settings.
+- Halaman Settings menambah form ganti password (validasi password lama) dan toggle "Wajibkan Login Dashboard" (`require_login`).
+- Menu CLI terminal (`bin/zenith.js`) menyediakan opsi "Reset Password Dashboard ke Default (123456)" untuk pemulihan darurat jika pengguna lupa password.
+- Endpoint inferensi `/v1/*` dan status `/health` tetap memakai mekanisme Gateway API Key (`zr_...`) dan tidak terpengaruh oleh login dashboard.
+
+### Proteksi Control Plane
+
+- Env `ZENITH_ADMIN_TOKEN` mengaktifkan token admin untuk `/`, `/dashboard/*`, `/api/*`, dan `/callback`. Request dari container/jaringan yang menerobos loopback kini ditolak 403 tanpa token yang benar, sehingga kredensial provider tidak bisa dibaca dari endpoint dashboard atau API admin.
+- Token diterima lewat header `x-zenith-admin-token`, `Authorization: Bearer`, atau cookie sesi dashboard. Perbandingan token memakai hash SHA-256 + `timingSafeEqual`.
+- Navigasi browser tanpa token mendapat form login (status 403); `POST /dashboard/login` memvalidasi token lalu memasang cookie `zenith_admin_token` (HttpOnly, SameSite=Lax, 7 hari) dan kembali ke URL asal yang disaring ke path lokal. `POST /dashboard/logout` mencabut cookie.
+- Key gateway `zr_...` tidak membuka control plane; hanya `ZENITH_ADMIN_TOKEN` yang berlaku di sana. Endpoint data plane `/v1/*` tetap memakai `gatewayAuth` dan tidak terpengaruh. Tanpa `ZENITH_ADMIN_TOKEN`, perilaku lama (loopback-only) tidak berubah.
+
+### Dashboard Tanpa Reload
+
+- Seluruh aksi dashboard (sinkron kuota, sinkron model gratis, tambah/hapus/pindah akun, combo, proxy, API key, Settings, Token Saver, import model) kini berjalan tanpa reload halaman. Submit dikirim lewat fetch, hasil redirect diikuti, lalu isi halaman diganti di tempat dengan status sementara di tombol (spinner). Scroll dan posisi halaman dipertahankan untuk aksi di halaman yang sama.
+- Engine `public/zr-live.js` memakai delegation di `document` dan mengeksekusi ulang script halaman setelah swap; EventSource Live Console, polling Recent Requests/topologi, dan timer login OAuth didaftarkan ke registry cleanup sehingga ditutup sebelum elemen lama dibuang.
+- Form tetap berfungsi tanpa JavaScript (handler tetap redirect). Form yang butuh navigasi asli bisa diberi atribut `data-native`. Bila sesi admin berakhir di tengah aksi, browser dialihkan otomatis ke halaman login.
+
 ### Pengujian
 
-- Seluruh test lulus (690 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, dan failover kuota/auth.
+- Seluruh test lulus (745 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, failover kuota/auth, refresh token OAuth, prioritas akun, proteksi token admin control plane, dashboard tanpa reload, dan autentikasi login dashboard.
 
 ## [0.1.6] - 17-10-2026
 
@@ -127,7 +164,7 @@ Manajemen Proxy Pool mandiri, rotasi proxy provider tanpa akun, pembaruan protok
 
 ### Proxy Pool & Rotasi
 
-- Halaman mandiri **Proxy Pools** di sidebar (`/dashboard/proxies`) dengan antarmuka divide-y serupa 9router: tombol header Batch Import dan Add Proxy Pool dialog modal, status ringkasan (Total dan Active), daftar baris dengan badge dot status tes (`ok`/`error`/`unknown`), status aktif, dan jumlah akun terikat (`X bound`), serta aksi cepat (toggle aktif/nonaktif, tes kesehatan 8 detik, modal ubah aman, dan hapus terlindungi).
+- Halaman mandiri **Proxy Pools** di sidebar (`/dashboard/proxies`) dengan antarmuka divide-y: tombol header Batch Import dan Add Proxy Pool dialog modal, status ringkasan (Total dan Active), daftar baris dengan badge dot status tes (`ok`/`error`/`unknown`), status aktif, dan jumlah akun terikat (`X bound`), serta aksi cepat (toggle aktif/nonaktif, tes kesehatan 8 detik, modal ubah aman, dan hapus terlindungi).
 - Pengikatan proxy akun provider: akun dapat dihubungkan ke proxy dari daftar pool, alamat manual, atau koneksi langsung; seluruh lalu lintas akun (chat, kuota, token refresh, import model) mengikuti binding tersebut dan gagal tertutup (fail-closed) tanpa membocorkan request ke koneksi langsung saat proxy bermasalah.
 - Impor massal daftar proxy menerima format URL lengkap `http://...`, `host:port`, dan `host:port:user:pass`.
 - Rotasi proxy untuk provider tanpa akun (noAuth): pilihan strategi tidak aktif, bergiliran (round-robin), atau acak, dengan retry otomatis hingga 3 percobaan per request.
@@ -145,7 +182,7 @@ Manajemen Proxy Pool mandiri, rotasi proxy provider tanpa akun, pembaruan protok
 
 - Total 464 test (45 test baru) 100% hijau, mutasi terverifikasi.
 - Pencegahan stored XSS pada tombol Edit dashboard Proxy Pools dengan encoding JSON + atribut HTML ganda.
-- Kredit konsep antarmuka Proxy Pools kepada 9router (MIT).
+- Kredit konsep antarmuka Proxy Pools kepada proyek referensi upstream (lihat [NOTICE](NOTICE)).
 
 ## [0.1.2] - 12-10-2026
 
@@ -175,7 +212,7 @@ Fitur combo dari routing sampai dashboard, digabung dengan halaman Providers.
 ### Proyek
 
 - Suite 370 test dengan enam file test baru; perubahan krusial diverifikasi mutation testing.
-- Konsep rantai combo dan dialog pemilih model mengacu pada 9router (MIT).
+- Konsep rantai combo dan dialog pemilih model mengacu pada proyek referensi upstream (lihat [NOTICE](NOTICE)).
 
 ## [0.1.1] - 12-10-2026
 

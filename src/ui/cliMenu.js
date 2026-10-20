@@ -88,7 +88,7 @@ function selectMenu(title, subtitle, items) {
 }
 
 /**
- * Interactive menu like 9router: open dashboard in browser, hide menu, or exit.
+ * Interactive menu: open dashboard in browser, hide menu, or exit.
  */
 export async function showInterfaceMenu({ port, displayHost }) {
   const base = `http://${displayHost}:${port}`;

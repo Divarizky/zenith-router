@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { proxyFetch } from "../../executors/proxy.js";
 import { antigravityUserAgent } from "../antigravityIdentity.js";
 
-// Login flows for OAuth providers, ported from 9router src/lib/oauth/providers/*.
+// Login flows for OAuth providers, ported from the upstream OAuth provider definitions.
 // Client ids are the public ones shipped in each vendor's own CLI/IDE.
 //
 // Every flow resolves to the same shape so flows.js can store it as a connection:

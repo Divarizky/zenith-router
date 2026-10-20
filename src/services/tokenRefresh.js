@@ -40,31 +40,61 @@ export function needsTokenRefresh(connection) {
   return Number(creds.expires_at) - Date.now() < fiveMinutesMs;
 }
 
-async function postJson(url, body, label, extraHeaders = {}, proxyUrl = null) {
-  const res = await oauthFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json", ...extraHeaders },
-    body: JSON.stringify(body),
-  }, { proxyUrl });
-  if (!res.ok) throw new Error(`${label} refresh failed with HTTP ${res.status}`);
-  return res.json();
+// Every caller of one connection shares a single in-flight refresh, so a token
+// endpoint that never answers would stall the scheduler, quota sync, and each
+// request for that account until undici gives up minutes later.
+const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
+let refreshTimeoutMs = DEFAULT_REFRESH_TIMEOUT_MS;
+
+/** Override the token endpoint timeout (tests). Pass null to restore the default. */
+export function setRefreshTimeoutMs(ms) {
+  refreshTimeoutMs = ms ?? DEFAULT_REFRESH_TIMEOUT_MS;
 }
 
-async function postForm(url, params, label, proxyUrl = null) {
-  const res = await oauthFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: new URLSearchParams(params),
-  }, { proxyUrl });
-  if (!res.ok) throw new Error(`${label} refresh failed with HTTP ${res.status}`);
-  return res.json();
+async function postTokenRequest(url, init, label, proxyUrl) {
+  const timeoutMs = refreshTimeoutMs;
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const res = await oauthFetch(url, { ...init, signal }, { proxyUrl });
+    if (!res.ok) throw new Error(`${label} refresh failed with HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    if (signal.aborted) throw new Error(`${label} refresh timed out after ${timeoutMs}ms`);
+    throw err;
+  }
+}
+
+function postJson(url, body, label, extraHeaders = {}, proxyUrl = null) {
+  return postTokenRequest(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...extraHeaders },
+      body: JSON.stringify(body),
+    },
+    label,
+    proxyUrl
+  );
+}
+
+function postForm(url, params, label, proxyUrl = null) {
+  return postTokenRequest(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams(params),
+    },
+    label,
+    proxyUrl
+  );
 }
 
 function expiresAt(seconds) {
   return Date.now() + (Number(seconds) || 3600) * 1000;
 }
 
-// Per-provider refresh, matching 9router open-sse/services/tokenRefresh/providers.js.
+// Per-provider refresh, matching the upstream tokenRefresh providers.
 // Each returns { access_token, refresh_token?, expires_at, ...extra credential fields }.
 const REFRESHERS = {
   async claude(creds, proxyUrl) {
@@ -199,35 +229,50 @@ async function executeRefresh(connection) {
   };
   if (refresh_token) patch.refresh_token = refresh_token;
 
-  return mergeConnectionCredentials(connection.id, patch);
+  const updated = mergeConnectionCredentials(connection.id, patch);
+  logQuiet(
+    `[zenith] Token ${connection.provider} #${connection.id} diperbarui, berlaku sampai ${formatClock(patch.expires_at)}`
+  );
+  return updated;
+}
+
+function formatClock(ms) {
+  const d = new Date(Number(ms));
+  return Number.isNaN(d.getTime()) ? "?" : d.toTimeString().slice(0, 5);
 }
 
 /**
  * Refresh OAuth token for a connection and update the SQLite database.
  * Uses a single-flight mutex per connection.id to prevent race conditions on token rotation.
  * In-flight callers share the same refresh promise. Once resolved, subsequent callers re-check DB state.
+ *
+ * The entry is cleared by a `.finally()` chained outside the async body. A
+ * `finally` inside it would run before `set()` whenever the body returns without
+ * awaiting (the stored token turned out fresh), leaving a settled promise in the
+ * map that every later call, forced or not, would reuse with the old token.
  */
 export function refreshOAuthToken(connection, { force = false } = {}) {
   if (!connection || !connection.id) return Promise.resolve(null);
 
-  const existing = inFlightRefreshes.get(connection.id);
+  const id = connection.id;
+  const existing = inFlightRefreshes.get(id);
   if (existing) {
     return existing;
   }
 
-  const promise = (async () => {
-    try {
-      const freshConn = getConnectionById(connection.id) || connection;
-      if (!force && !needsTokenRefresh(freshConn)) {
-        return freshConn;
-      }
-      return await executeRefresh(freshConn);
-    } finally {
-      inFlightRefreshes.delete(connection.id);
+  const run = async () => {
+    const freshConn = getConnectionById(id) || connection;
+    if (!force && !needsTokenRefresh(freshConn)) {
+      return freshConn;
     }
-  })();
+    return executeRefresh(freshConn);
+  };
 
-  inFlightRefreshes.set(connection.id, promise);
+  const promise = run().finally(() => {
+    if (inFlightRefreshes.get(id) === promise) inFlightRefreshes.delete(id);
+  });
+
+  inFlightRefreshes.set(id, promise);
   return promise;
 }
 

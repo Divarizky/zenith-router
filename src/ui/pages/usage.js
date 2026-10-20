@@ -74,7 +74,7 @@ function buildTopologyData(stats) {
 }
 
 /**
- * Router-centered topology pane mirroring the 9router layout: router core in
+ * Router-centered topology pane: router core in
  * the middle, provider cards on an ellipse, electric particle edges for
  * in-flight providers, orange for last used, dim for idle.
  */
@@ -276,7 +276,7 @@ function renderTopologyPane(topology) {
         var key = String(n.id).toLowerCase();
         var path = edgePath(p);
 
-        // Glow per node: padanan box-shadow pada kartu provider aktif di 9router.
+        // Glow per node: padanan box-shadow pada kartu provider aktif.
         var filterId = "topo-glow-" + i;
         var glowFilter = document.createElementNS(NS, "filter");
         glowFilter.setAttribute("id", filterId);
@@ -408,13 +408,18 @@ function renderTopologyPane(topology) {
       }
 
       apply();
-      setInterval(function () {
+      var tickTimer = setInterval(function () {
         if (document.hidden) apply();
         else poll();
       }, POLL_MS);
-      document.addEventListener("visibilitychange", function () {
-        if (!document.hidden) poll();
-      });
+      var onVisible = function () { if (!document.hidden) poll(); };
+      document.addEventListener("visibilitychange", onVisible);
+      if (window.__zrSwapCleanups) {
+        window.__zrSwapCleanups.push(function () {
+          clearInterval(tickTimer);
+          document.removeEventListener("visibilitychange", onVisible);
+        });
+      }
     })();
     </script>`;
 }
@@ -461,7 +466,7 @@ function originLabel(row) {
 }
 
 /**
- * Recent requests list beside the topology, mirroring the 9router panel:
+ * Recent requests list beside the topology:
  * model, in/out tokens, and when the request finished.
  */
 function renderRecentPanel(recent) {
@@ -488,7 +493,7 @@ function renderRecentPanel(recent) {
     </aside>`;
 }
 
-/** Remaining percentage tone: green >70, yellow 30–70, red <30 (9router rule). */
+/** Remaining percentage tone: green >70, yellow 30–70, red <30. */
 function toneClass(remaining) {
   if (remaining > 70) return "q-ok";
   if (remaining >= 30) return "q-warn";
@@ -501,7 +506,7 @@ function toneEmoji(remaining) {
   return "🔴";
 }
 
-/** Countdown to a reset timestamp, like 9router: "12m", "3h 12m", "1d 4h 5m". */
+/** Countdown to a reset timestamp, "12m", "3h 12m", "1d 4h 5m". */
 function fmtCountdown(resetTime) {
   if (!resetTime) return "";
   try {
@@ -524,7 +529,7 @@ function fmtUsd(n) {
 }
 
 /**
- * Normalize one connection's quota object into 9router-style progress rows:
+ * Normalize one connection's quota object into progress rows:
  * { label, remaining (0–100|null when unlimited), used line, reset time }.
  */
 function quotaRows(q) {
@@ -532,7 +537,7 @@ function quotaRows(q) {
   const rows = [];
   const unit = q.unit;
 
-  // Per-model buckets (Antigravity): 9router-style one bar per model.
+  // Per-model buckets (Antigravity): one bar per model.
   if (q.quotas && typeof q.quotas === "object" && Object.keys(q.quotas).length > 0) {
     for (const [modelKey, r] of Object.entries(q.quotas)) {
       rows.push({
@@ -730,11 +735,29 @@ function antigravityFamilyRows(q, inventory) {
     .concat(leftovers);
 }
 
-/** 9router-style quota card for one account. */
+/**
+ * Limit 5 jam dan mingguan per grup model Antigravity, dibaca dari `q.pools`.
+ * Ditampilkan di atas baris per keluarga karena inilah limit yang menentukan
+ * apakah akun masih bisa dipakai.
+ */
+function antigravityPoolRows(q) {
+  const pools = Array.isArray(q?.pools) ? q.pools : [];
+  return pools.map((pool) => ({
+    label: pool.label,
+    remaining: pool.remainingPercentage,
+    used: `${Math.round(100 - pool.remainingPercentage)}% terpakai`,
+    reset: pool.resetAt || null,
+  }));
+}
+
+/** Quota card for one account. */
 function renderQuotaCard(s, antigravityInventory = null) {
   const q = s.quota;
-  // Antigravity memakai baris per keluarga; provider lain tetap memakai bucketnya.
-  const rows = (s.provider === "antigravity" ? antigravityFamilyRows(q, antigravityInventory?.get(s.id) || null) : null) || quotaRows(q);
+  // Antigravity: pool 5 jam/mingguan lalu baris per keluarga; provider lain tetap memakai bucketnya.
+  const rows =
+    s.provider === "antigravity"
+      ? [...antigravityPoolRows(q), ...(antigravityFamilyRows(q, antigravityInventory?.get(s.id) || null) || quotaRows(q))]
+      : quotaRows(q);
   if (rows.length === 0) rows.push({ label: "Quota", remaining: null, used: q?.error ? String(q.error) : "No quota data yet", reset: null });
   const statusPill = s.is_exhausted
     ? `<span class="pill pill-danger">Exhausted</span>`
@@ -994,8 +1017,15 @@ function renderQuotaCard(s, antigravityInventory = null) {
           })
           .catch(function () {});
       }
-      setInterval(function () { if (!document.hidden) poll(); }, 2000);
-      document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
+      var recentTimer = setInterval(function () { if (!document.hidden) poll(); }, 2000);
+      var onRecentVisible = function () { if (!document.hidden) poll(); };
+      document.addEventListener("visibilitychange", onRecentVisible);
+      if (window.__zrSwapCleanups) {
+        window.__zrSwapCleanups.push(function () {
+          clearInterval(recentTimer);
+          document.removeEventListener("visibilitychange", onRecentVisible);
+        });
+      }
     })();
     </script>`,
   });

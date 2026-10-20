@@ -6,7 +6,7 @@ const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
 /**
  * Fetch live quota for Claude Code OAuth accounts (session 5h + weekly 7d
- * windows, same parse as 9router open-sse/services/usage/claude.js).
+ * windows, same parse as the upstream Claude usage service).
  */
 export async function fetchClaudeQuota(connection) {
   const token = connection.credentials?.access_token;
@@ -30,7 +30,7 @@ export async function fetchClaudeQuota(connection) {
 
   const data = await res.json();
 
-  // utilization = % used; the quota object mirrors 9router's shape.
+  // utilization = % used; the quota object mirrors the upstream shape.
   const hasUtilization = (w) => w && typeof w === "object" && typeof w.utilization === "number";
   const makeRow = (w) => {
     const used = w.utilization;

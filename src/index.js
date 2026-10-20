@@ -30,6 +30,7 @@ import {
   handleSetAccountProxy,
   handleSetProxyRotation,
   handleDeleteAccount,
+  handleMoveAccount,
   handleAddCustomModel,
   handleDeleteCustomModel,
   handleDisableModel,
@@ -72,6 +73,7 @@ import { renderTokenSaverPage, handleSaveTokenSaver } from "./ui/pages/tokenSave
 import {
   renderSettingsPage,
   handleSaveSettings,
+  handleResetDashboardPassword,
 } from "./ui/pages/settings.js";
 import {
   renderApiKeysPage,
@@ -79,6 +81,11 @@ import {
   handleToggleApiKey,
   handleDeleteApiKey,
 } from "./ui/pages/apiKeys.js";
+import {
+  handleDashboardLoginPage,
+  handleDashboardLogin,
+  handleDashboardLogout,
+} from "./ui/pages/login.js";
 import {
   getBindHost,
   isLoopbackHost,
@@ -88,6 +95,7 @@ import {
   requireJsonBody,
   gatewayAuth,
 } from "./security.js";
+import { isAdminProtected } from "./services/adminAuth.js";
 import { getConnections } from "./db/index.js";
 import { getAllProviders } from "./providers/index.js";
 import { startModelSyncScheduler } from "./services/modelSync.js";
@@ -132,11 +140,16 @@ app.get("/favicon.ico", (c) => c.redirect("/logo.png"));
 // process is started from outside the package directory (e.g. the global `zenith` shim).
 app.use("/*", serveStatic({ root: PUBLIC_DIR }));
 
+// Dashboard login (proteksi password dashboard / ZENITH_ADMIN_TOKEN)
+app.get("/dashboard/login", handleDashboardLoginPage);
+app.post("/dashboard/login", handleDashboardLogin);
+app.post("/dashboard/logout", handleDashboardLogout);
+
 // Home & Dashboard Overview
 app.get("/", (c) => c.html(renderOverviewPage(PORT)));
 app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
 
-// Dashboard Providers: accounts + models per provider (9router-style list and detail)
+// Dashboard Providers: accounts + models per provider, list and detail views
 app.get("/dashboard/providers", (c) => {
   if (c.req.query("tab") === "proxy") {
     const q = new URLSearchParams(c.req.query());
@@ -148,11 +161,12 @@ app.get("/dashboard/providers", (c) => {
 });
 app.post("/dashboard/providers/accounts/add", handleAddAccount);
 app.post("/dashboard/providers/accounts/delete", handleDeleteAccount);
+app.post("/dashboard/providers/accounts/move", handleMoveAccount);
 app.post("/dashboard/providers/accounts/set-proxy", handleSetAccountProxy);
 app.post("/dashboard/providers/proxy-rotation", handleSetProxyRotation);
 app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
 
-// OAuth login flows (9router-style): browser redirect to /callback, or device code polling
+// OAuth login flows: browser redirect to /callback, or device code polling
 app.post("/dashboard/oauth/start", handleOAuthStart);
 app.post("/dashboard/oauth/poll", handleOAuthPoll);
 app.post("/dashboard/oauth/manual", handleOAuthManual);
@@ -180,6 +194,7 @@ app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT, c.req
 app.post("/dashboard/token-saver", handleSaveTokenSaver);
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query())));
 app.post("/dashboard/settings", handleSaveSettings);
+app.post("/dashboard/settings/password/reset", handleResetDashboardPassword);
 
 // Dashboard Combos UI & Actions
 app.get("/dashboard/combos", (c) => {
@@ -337,6 +352,9 @@ export function startServer() {
   console.log(`  Dashboard:  ${base}/dashboard`);
   console.log(`  Endpoint:   ${base}/v1`);
   console.log(`  Health:     ${base}/health`);
+  if (isAdminProtected()) {
+    console.log(`  Admin:      token aktif (ZENITH_ADMIN_TOKEN) — /dashboard dan /api butuh token admin`);
+  }
   console.log(`  Providers:  ${getAllProviders().length} registered, ${getConnections().length} connection(s)`);
   console.log(`\n  ${dim}Ctrl+C untuk berhenti. Setup awal lewat dashboard.${reset}\n`);
   if (!isLoopbackHost(hostname)) {

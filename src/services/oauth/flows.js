@@ -272,7 +272,7 @@ export function renderCallbackPage({ ok, error, account }) {
 }
 
 // ---------------------------------------------------------------------------
-// Import from a vendor CLI/IDE already logged in on this machine (9router auto-import).
+// Import from a vendor CLI/IDE already logged in on this machine (vendor auto-import).
 // ---------------------------------------------------------------------------
 
 async function readJsonFile(path) {
@@ -307,7 +307,7 @@ async function importFreebuff() {
   throw new Error("Kredensial Freebuff tidak ditemukan. Jalankan `freebuff` (npm i -g freebuff) lalu login dulu.");
 }
 
-/** Credential blobs are raw bytes: UTF-8 for most CLIs (9router zedCredentials.js), UTF-16LE for some. */
+/** Credential blobs are raw bytes: UTF-8 for most CLIs (upstream zedCredentials.js), UTF-16LE for some. */
 export function decodeCredentialBlob(buf) {
   const looksUtf16 = buf.length >= 2 && buf.length % 2 === 0 && buf.every((b, i) => i % 2 === 0 || b === 0);
   return buf.toString(looksUtf16 ? "utf16le" : "utf8").replace(/\0+$/, "").trim();

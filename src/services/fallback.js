@@ -5,19 +5,19 @@ import {
   updateConnectionLastUsed,
   getAntigravityModelsByConnection,
 } from "../db/index.js";
-import { getProvider, resolveProviderRuntime } from "../providers/index.js";
+import { getProvider, getProviderModels, resolveProviderRuntime } from "../providers/index.js";
 import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { disableModel } from "./modelOverrides.js";
-import { isConnectionExhausted } from "./quota.js";
+import { isConnectionExhausted, syncProviderQuota } from "./quota.js";
+import { isAntigravityPoolExhausted } from "./antigravityPools.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
-import { getSetting } from "./settings.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
 
-export function listAvailableConnections(providerId, { rotation = null, model = null, effort = undefined } = {}) {
+export function listAvailableConnections(providerId, { model = null, effort = undefined } = {}) {
   if (!providerId) return [];
   const providerDef = getProvider(providerId);
   const connections = getConnections(providerId);
@@ -38,14 +38,10 @@ export function listAvailableConnections(providerId, { rotation = null, model = 
       // here and never falls back to a direct connection.
       !resolveConnectionProxy(c).blocked
   );
+  // getConnections already returns the provider in priority order, so the first
+  // account left after filtering is the highest-ranked one that can serve. A
+  // spare is reached only while every account above it is unavailable.
   const available = candidates.filter((c) => servesModel(c, request, antigravityInventory));
-
-  const strategy = rotation || getSetting("account_rotation", "lru");
-  if (strategy === "sticky") {
-    available.sort((a, b) => (b.last_used_at || 0) - (a.last_used_at || 0));
-  } else {
-    available.sort((a, b) => (a.last_used_at || 0) - (b.last_used_at || 0));
-  }
 
   if (available.length === 0 && providerDef?.noAuth) {
     available.push({
@@ -65,16 +61,21 @@ export function listAvailableConnections(providerId, { rotation = null, model = 
 
 /**
  * True when the model may be sent to this account. Only Antigravity is gated
- * today: its catalog is per subscription. Everything else always passes, as
- * does every account with no synced rows. The effort resolves against this
+ * today: its catalog is per subscription, and its 5h or weekly pool limit can
+ * block a model group until the reset. Everything else always passes. An account
+ * with no synced rows passes unless its pool is exhausted. The effort resolves against this
  * account's own variants, the same way the executor resolves it.
  */
 function servesModel(connection, { providerDef, model, effort }, inventory) {
   if (!inventory || !connection.id) return true;
   const rows = inventory.get(connection.id);
-  if (!rows || rows.size === 0) return true;
+  const hasRows = Boolean(rows && rows.size > 0);
+  // Without synced rows the runtime cannot be resolved, so the requested id is checked against its pool.
+  const runtimeId = hasRows ? (resolveProviderRuntime(providerDef, model, effort, rows)?.id ?? model) : model;
+  // A pool limit applies even before the first inventory sync.
+  if (isAntigravityPoolExhausted(connection.credentials?.quota, runtimeId)) return false;
+  if (!hasRows) return true;
 
-  const runtimeId = resolveProviderRuntime(providerDef, model, effort, rows)?.id ?? model;
   const row = rows.get(runtimeId);
   if (!row) return false;
   const isExhausted = typeof row.quota_remaining === "number" && row.quota_remaining === 0;
@@ -191,6 +192,34 @@ function accountBusyResponse(targetFormat, connection) {
     JSON.stringify(buildErrorPayload(targetFormat, "rate_limit_error", message, "account_busy")),
     { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "5" } }
   );
+}
+
+/**
+ * Models that draw from the account's free-tier budget: the free models synced for
+ * the provider, plus any `:free` id in its builtin list, plus the model that was called.
+ */
+function freeTierModelIds(provider, modelId) {
+  const ids = new Set(modelId ? [modelId] : []);
+  for (const m of getProviderModels(provider)) {
+    if (m.source === "synced" || String(m.id).endsWith(":free")) ids.add(m.id);
+  }
+  return ids;
+}
+
+/**
+ * Cooldown after a 429 or 5xx on one account. A 429 with `x-ratelimit-scope: free`
+ * means the account's daily free-token budget is spent. That budget is shared by
+ * every free model on the account, so all of them wait for the same reset. The
+ * quota is then re-synced so the dashboard stops showing the stale balance.
+ */
+function applyRateLimitCooldown(connection, provider, res, errText, modelId, defaultMs) {
+  const until = Date.now() + extractQuotaCooldownMs(res, errText, defaultMs);
+  if (res.status === 429 && res.headers?.get?.("x-ratelimit-scope") === "free") {
+    for (const id of freeTierModelIds(provider, modelId)) setConnectionCooldown(connection.id, until, id);
+    syncProviderQuota(connection, { quiet: true }).catch(() => {});
+    return;
+  }
+  setConnectionCooldown(connection.id, until, modelId);
 }
 
 // The executor's 502 for a failed upstream fetch, see src/executors/base.js.
@@ -500,8 +529,7 @@ export async function executeWithFallback({
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
       if (connection.id && !isTransportFailure(res, errText)) {
-        const cooldownMs = extractQuotaCooldownMs(res, errText, 60000 * attempt);
-        setConnectionCooldown(connection.id, Date.now() + cooldownMs, modelId);
+        applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000 * attempt);
       }
       await applyReactiveJitter(signal);
       continue;
@@ -558,8 +586,7 @@ export async function executeWithFallback({
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
           if (connection.id && !isTransportFailure(res, retryErrText)) {
-            const cooldownMs = extractQuotaCooldownMs(res, retryErrText, 60000);
-            setConnectionCooldown(connection.id, Date.now() + cooldownMs, modelId);
+            applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
           }
           await applyReactiveJitter(signal);
           continue;

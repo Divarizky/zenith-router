@@ -8,6 +8,7 @@ import {
   getConnectionById,
   getConnections,
   addProxyPool,
+  moveConnection,
 } from "../src/db/index.js";
 import { resolveConnectionProxy, requireResolvedProxy } from "../src/services/proxyPools.js";
 import { setCustomExecutor } from "../src/executors/base.js";
@@ -83,7 +84,9 @@ test("chat - account traffic uses its effective proxy in list, manual, direct or
   });
 
   try {
-    for (let i = 0; i < 3; i++) {
+    for (const [i, target] of [a, b, c].entries()) {
+      // Routing always takes #1, so raise each account to the top in turn.
+      while (getConnections("glm")[0].id !== target.id) moveConnection(target.id, "up");
       const res = await app.request("/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -95,7 +98,7 @@ test("chat - account traffic uses its effective proxy in list, manual, direct or
     setCustomExecutor(null);
   }
 
-  assert.strictEqual(calls.length, 3, "tiga request, tiga akun berbeda (LRU)");
+  assert.strictEqual(calls.length, 3, "tiga request, tiga akun berbeda (masing-masing di #1)");
   const byAuth = new Map(calls.map((x) => [x.auth, x.proxyUrl]));
   assert.strictEqual(byAuth.get("Bearer key-list"), "http://pool.local:3128", "akun daftar memakai proxy daftar");
   assert.strictEqual(byAuth.get("Bearer key-manual"), "http://manual.local:1", "akun manual memakai alamat manual");

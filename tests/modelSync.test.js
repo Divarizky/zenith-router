@@ -164,7 +164,7 @@ test("opencode sync - live free list replaces the hardcoded list; paid Zen model
   assert.ok(state.last_success_at > 0);
 });
 
-test("kilocode sync - free models merge into the hardcoded list (9router kiloFreeModels)", async (t) => {
+test("kilocode sync - free models merge into the hardcoded list (kiloFreeModels)", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
   mockUpstream({ "api.kilo.ai": KILO });

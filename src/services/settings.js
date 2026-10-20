@@ -38,7 +38,6 @@ const DEFAULT_SETTINGS = {
   require_api_key: "false",
   token_saver_rtk: "true",
   token_saver_caveman: "false",
-  account_rotation: "lru",
   traffic_guard_enabled: "true",
   max_account_concurrency: "2",
   request_jitter_enabled: "true",

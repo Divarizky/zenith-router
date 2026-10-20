@@ -113,6 +113,7 @@ test("GET /dashboard/settings - renders Settings page with form", async () => {
   assert.ok(html.includes("Account Selection"));
   assert.ok(html.includes("Account Protection"));
   assert.ok(html.includes("Routing &amp; Fallback"));
+  assert.ok(html.includes('formaction="/dashboard/settings/password/reset"'), "tombol reset password ke default ada di form");
   assert.strictEqual(
     (html.match(/<form action="\/dashboard\/settings"/g) || []).length,
     1,
@@ -414,4 +415,17 @@ test("Dashboard usage - tingkat habis dari inventaris tanpa bucket kuota tetap d
   ]);
   const html = renderUsagePage(20120, {});
   assert.ok(html.includes("high <b class=\"q-bad\">Kuota habis</b>"), "tingkat habis dari inventaris ditandai tanpa bucket kuota");
+});
+
+test("POST /dashboard/settings/password/reset - mereset password ke default 123456 dan redirect", async () => {
+  const { initDb } = await import("../src/db/index.js");
+  const { setDashboardPassword, isUsingDefaultPassword } = await import("../src/services/dashboardAuth.js");
+  initDb(":memory:");
+  setDashboardPassword("kunciRahasiaBaru", "123456");
+  assert.strictEqual(isUsingDefaultPassword(), false);
+
+  const res = await app.request("/dashboard/settings/password/reset", { method: "POST" });
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(res.headers.get("location"), "/dashboard/settings?reset=1#password");
+  assert.strictEqual(isUsingDefaultPassword(), true);
 });

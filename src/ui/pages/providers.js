@@ -1,4 +1,12 @@
-import { getConnections, addConnection, deleteConnection, getConnectionById, updateConnection, getProxyPoolById } from "../../db/index.js";
+import {
+  getConnections,
+  addConnection,
+  deleteConnection,
+  moveConnection,
+  getConnectionById,
+  updateConnection,
+  getProxyPoolById,
+} from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionFullyCooledDown } from "../../services/auth.js";
 import { isConnectionExhausted } from "../../services/quota.js";
@@ -69,6 +77,7 @@ const IMPORT_MODE_LABELS = {
 function importNotice(query = {}) {
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
   if (query.notice === "account_deleted") return { ok: true, text: "Akun berhasil dihapus." };
+  if (query.notice === "account_moved") return { ok: true, text: "Urutan akun diperbarui." };
   if (query.notice === "proxy_invalid") {
     return { ok: false, text: "Alamat proxy tidak valid. Gunakan skema http:// — aturan yang sama dengan daftar proxy." };
   }
@@ -244,7 +253,7 @@ export function renderProvidersPage(port = 20120, query = {}) {
   const sections = SECTIONS.map((s) => {
     const providers = getAllProviders()
       .filter((p) => (p.category || "apikey") === s.category)
-      // Ready (noAuth) first, then connected, then alphabetical, like 9router.
+      // Ready (noAuth) first, then connected, then alphabetical.
       .sort((a, b) => {
         const ra = a.noAuth ? 0 : accountStats(byProvider.get(a.id) || []).healthy > 0 ? 1 : 2;
         const rb = b.noAuth ? 0 : accountStats(byProvider.get(b.id) || []).healthy > 0 ? 1 : 2;
@@ -418,6 +427,11 @@ const OAUTH_SCRIPT = `
     clearTimeout(timer);
     statusEl.hidden = true;
   };
+  // Alur login dibatalkan saat isi <main> diganti swap tanpa reload, karena
+  // polling dan elemen status lama ikut terbuang.
+  if (window.__zrSwapCleanups) {
+    window.__zrSwapCleanups.push(function () { if (flowId) window.zrOAuthCancel(); });
+  }
 })();
 </script>`;
 
@@ -532,6 +546,28 @@ function renderAddAccountModal(p) {
 }
 
 /**
+ * Account row priority cell: the #n badge plus up/down controls, the same
+ * pattern as a combo chain. A lone account has nothing to reorder against.
+ */
+function accountOrderCell(c, id, index, total) {
+  const badge = `<span class="combo-order" title="Prioritas #${index + 1}">${index + 1}</span>`;
+  if (total < 2) return badge;
+  return `<div class="combo-member">
+      ${badge}
+      <form action="/dashboard/providers/accounts/move" method="POST" class="combo-move">
+        <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
+        <input type="hidden" name="provider" value="${id}" />
+        <button type="submit" name="direction" value="up" class="btn btn-ghost" title="Naikkan prioritas" ${
+          index === 0 ? "disabled" : ""
+        }>&uarr;</button>
+        <button type="submit" name="direction" value="down" class="btn btn-ghost" title="Turunkan prioritas" ${
+          index === total - 1 ? "disabled" : ""
+        }>&darr;</button>
+      </form>
+    </div>`;
+}
+
+/**
  * Account row proxy cell: shows the effective binding plus an inline
  * form to rebind it at any time. The manual address itself is never echoed.
  */
@@ -579,20 +615,21 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const notice = importNotice(query);
 
   const alias = primaryAlias(p);
-  const accounts = getConnections().filter((c) => c.provider === p.id);
+  const accounts = getConnections(p.id);
   const stats = accountStats(accounts);
   const id = escapeHtml(p.id);
   const proxyPools = listProxyPools();
   const proxyRotationStrategy = getProxyRotationStrategy(p.id);
 
   const accountRows = accounts
-    .map((c) => {
+    .map((c, index) => {
       let status = `<span class="pill pill-success">Aktif</span>`;
       if (c.is_active !== 1) status = `<span class="pill">Nonaktif</span>`;
       else if (isConnectionFullyCooledDown(c)) status = `<span class="pill pill-warning">Cooldown</span>`;
       else if (isConnectionExhausted(c)) status = `<span class="pill pill-danger">Habis Kuota</span>`;
       return `
         <tr>
+          <td>${accountOrderCell(c, id, index, accounts.length)}</td>
           <td><strong>${escapeHtml(c.name)}</strong></td>
           <td>${escapeHtml(c.auth_type)}</td>
           <td>${accountProxyCell(c, id, proxyPools)}</td>
@@ -615,7 +652,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     accountsBody = `<div class="empty"><p class="big">Belum ada akun</p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
     accountsBody = `<table>
-        <thead><tr><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th title="Akun #1 dipakai duluan; akun berikutnya hanya saat akun di atasnya tidak tersedia">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th></th></tr></thead>
         <tbody>${accountRows}</tbody>
       </table>`;
   }
@@ -923,6 +960,18 @@ export async function handleSetProxyRotation(c) {
     return c.redirect(`${backTo(provider.id)}?notice=rotation_updated`);
   }
   return c.redirect(`${backTo(provider.id)}?notice=rotation_invalid`);
+}
+
+export async function handleMoveAccount(c) {
+  const body = await c.req.parseBody();
+  const id = Number(body.id);
+  const direction = String(body.direction || "");
+  // Redirect by the account's own provider: the form field is only a hint and
+  // must not decide which provider page the user lands on.
+  const connection = id ? getConnectionById(id) : null;
+  if (!connection) return c.redirect(backTo(body.provider));
+  const moved = moveConnection(id, direction);
+  return c.redirect(moved ? `${backTo(connection.provider)}?notice=account_moved` : backTo(connection.provider));
 }
 
 export async function handleDeleteAccount(c) {

@@ -1,5 +1,6 @@
 import { escapeHtml } from "./html.js";
 import { getLogoDataUri } from "./assets.js";
+import { isUsingDefaultPassword } from "../services/dashboardAuth.js";
 // Versi sidebar dibaca dari package.json, sama dengan banner CLI dan User-Agent upstream.
 import pkg from "../../package.json" with { type: "json" };
 
@@ -23,6 +24,7 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1c-.6 0-1.2.4-1.5 1z"/>',
   brain: '<path d="M12 4.6a3 3 0 0 0-5.7-1.1A2.6 2.6 0 0 0 4 6a2.5 2.5 0 0 0 .5 4.8 2.8 2.8 0 0 0 1.4 4.6A2.5 2.5 0 0 0 8.6 18H12z"/><path d="M12 4.6a3 3 0 0 1 5.7-1.1A2.6 2.6 0 0 1 20 6a2.5 2.5 0 0 1-.5 4.8 2.8 2.8 0 0 1-1.4 4.6A2.5 2.5 0 0 1 15.4 18H12z"/><path d="M12 4.6V18"/><path d="M9.2 8.2h1.4M13.4 8.2h1.4M9.2 12.4h1.4M13.4 12.4h1.4"/>',
   eye: '<path d="M2.5 12S6.5 5.5 12 5.5 21.5 12 21.5 12 17.5 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/>',
   list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
@@ -236,6 +238,12 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       padding: 2rem;
     }
     .sidebar-footer { margin-top: auto; padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border-subtle); color: var(--text-subtle); font-size: 0.72rem; }
+    .sidebar-footer form { margin: 0; }
+    .sidebar-user { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+    /* Banner peringatan password awal */
+    .banner { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem 0.9rem; border-radius: var(--radius); border: 1px solid var(--border); font-size: 0.85rem; margin-bottom: 1.25rem; }
+    .banner-warning { color: var(--warning); border-color: rgba(251,191,36,.3); background: rgba(251,191,36,.08); }
+    .banner strong { font-weight: 600; }
     /* Main */
     .main { flex: 1; min-width: 0; padding: 1.75rem 2rem 3rem; }
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
@@ -383,6 +391,24 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .setting-info strong { display: block; font-size: 0.9rem; color: var(--text); margin-bottom: 0.2rem; }
     .setting-action { flex-shrink: 0; display: flex; align-items: center; }
     /* Catatan kondisional di bawah label, mis. kunci API wajib karena bind non-loopback. */
+    .setting-stack { flex-direction: column; align-items: stretch; gap: 0.7rem; width: 260px; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field-label { font-size: 0.75rem; color: var(--text-muted); }
+    .field input { padding: 0.45rem 0.65rem; font-size: 0.85rem; }
+    .input-password-wrap { position: relative; display: flex; align-items: center; width: 100%; }
+    .input-password-wrap input { width: 100%; padding-right: 2.2rem; }
+    .btn-toggle-pw {
+      position: absolute; right: 0.3rem; top: 50%; transform: translateY(-50%);
+      background: transparent; border: none; padding: 0.25rem;
+      color: var(--text-subtle); cursor: pointer; border-radius: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+      line-height: 1; transition: color 0.12s, background 0.12s;
+    }
+    .btn-toggle-pw:hover { color: var(--text); background: var(--surface-3); }
+    .btn-toggle-pw:focus-visible { outline: 2px solid var(--text-subtle); outline-offset: 1px; }
+    .btn-toggle-pw .icon-eye-off { display: none; }
+    .btn-toggle-pw.is-visible .icon-eye { display: none; }
+    .btn-toggle-pw.is-visible .icon-eye-off { display: inline-flex; }
     .setting-note { font-size: 0.8rem; margin-top: 0.25rem; }
     .setting-note-warning { color: var(--warning); }
     .setting-note-danger { color: var(--danger); }
@@ -414,9 +440,30 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
       /* Baris pengaturan ditumpuk: hint panjang tidak lagi menghimpit kontrol. */
       .setting-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
       .setting-action .input-select { width: 100%; }
+      .setting-stack { width: 100%; }
       .settings-actions { flex-direction: column-reverse; align-items: stretch; }
       .settings-actions .btn { width: 100%; }
     }
+    /* Swap tanpa reload: tombol sibuk dan toast hasil aksi */
+    .zr-toast {
+      position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 1200;
+      max-width: 22rem; padding: 0.75rem 1rem;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); font-size: 0.85rem;
+    }
+    .zr-toast-error { border-color: var(--danger); color: var(--danger); }
+    button.is-busy, input.is-busy { position: relative; opacity: 0.7; pointer-events: none; }
+    button.is-busy:not(.btn-icon)::after, input.is-busy::after {
+      content: ""; width: 0.8em; height: 0.8em; margin-left: 0.5em;
+      display: inline-block; vertical-align: -0.12em;
+      border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
+      animation: zr-spin 0.7s linear infinite;
+    }
+    button.btn-icon.is-busy svg {
+      animation: zr-spin 0.7s linear infinite;
+    }
+    @keyframes zr-spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -430,17 +477,29 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     </div>
     <div id="update-badge"></div>
     <nav>${navHtml}</nav>
-    <div class="sidebar-footer">Ultra-lightweight personal AI gateway</div>
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <span>Ultra-lightweight personal AI gateway</span>
+        <form action="/dashboard/logout" method="POST">
+          <button type="submit" class="btn btn-ghost btn-sm" title="Logout">Keluar</button>
+        </form>
+      </div>
+    </div>
   </aside>
   <main class="main">
+    ${isUsingDefaultPassword() ? `
+    <div class="banner banner-warning">
+      <span><strong>Perhatian:</strong> dashboard masih memakai password awal <code>123456</code>. Ubah lewat menu Settings.</span>
+      <a href="/dashboard/settings#password" class="btn btn-ghost">Ubah Password</a>
+    </div>` : ""}
     <div class="topbar">
       <h2>${escapeHtml(title)}</h2>
       <span class="pill pill-success"><span style="width:7px;height:7px;border-radius:50%;background:var(--success);display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
     </div>
     ${content}
   </main>
-  <script>
-    // Force reload if page was restored from browser bfcache on back/forward
+  <script src="/zr-live.js" data-once></script>
+  <script data-once>
     window.addEventListener('pageshow', function(event) {
       if (event.persisted) {
         window.location.reload();
@@ -465,11 +524,11 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
       var el = document.getElementById(id);
       if (el) el.classList.remove('open');
     }
-    document.querySelectorAll('[data-close-modal]').forEach(function(el) {
-      el.addEventListener('click', function() { closeModal(el.getAttribute('data-close-modal')); });
-    });
-    document.querySelectorAll('.modal-backdrop').forEach(function(m) {
-      m.addEventListener('click', function(e) { if (e.target === m) m.classList.remove('open'); });
+    // Delegation supaya tombol dan modal hasil swap tanpa reload tetap berfungsi.
+    document.addEventListener('click', function(e) {
+      var closer = e.target.closest ? e.target.closest('[data-close-modal]') : null;
+      if (closer) { closeModal(closer.getAttribute('data-close-modal')); return; }
+      if (e.target.classList && e.target.classList.contains('modal-backdrop')) e.target.classList.remove('open');
     });
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
@@ -500,9 +559,15 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
         btn.textContent = on ? 'Batalkan Pilih' : 'Pilih';
       });
     }
-    document.querySelectorAll('table[data-sync-row]').forEach(function(table) {
-      setSelectMode(table, false);
-    });
+    // Inisialisasi ulang setiap kali isi <main> diganti oleh swap tanpa reload.
+    function initSelectionUi() {
+      document.querySelectorAll('table[data-sync-row]').forEach(function(table) {
+        setSelectMode(table, false);
+      });
+      document.querySelectorAll('input[data-select-all]').forEach(function(all) { syncSelection(all.getAttribute('data-select-all')); });
+    }
+    if (window.__zrSwapInit) window.__zrSwapInit.push(initSelectionUi);
+    initSelectionUi();
     document.addEventListener('click', function(clickEvent) {
       var toggle = clickEvent.target.closest ? clickEvent.target.closest('[data-select-mode-toggle]') : null;
       if (toggle) {
@@ -540,7 +605,6 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
         syncSelection(t.getAttribute('data-select-group'));
       }
     });
-    document.querySelectorAll('input[data-select-all]').forEach(function(all) { syncSelection(all.getAttribute('data-select-all')); });
 
     // Confirm a bulk action; controls tied with form="..." are part of form.elements.
     function confirmSelected(form, name, label) {
@@ -551,8 +615,23 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
       }
       return n > 0 && confirm('Hapus ' + n + ' ' + label + '?');
     }
+
+    // Toggle lihat/sembunyi password pada input berkait
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest ? e.target.closest('[data-toggle-password]') : null;
+      if (!btn) return;
+      var targetId = btn.getAttribute('data-toggle-password');
+      var wrap = btn.closest('.input-password-wrap');
+      var input = (targetId && document.getElementById(targetId)) || (wrap && wrap.querySelector('input'));
+      if (!input) return;
+      var show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.classList.toggle('is-visible', show);
+      btn.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Lihat password');
+      btn.setAttribute('title', show ? 'Sembunyikan password' : 'Lihat password');
+    });
     // Update badge: tanya versi terbaru sekali, 2,5 detik setelah halaman siap
-    // (pola 9router) supaya render awal tidak menunggu jaringan.
+    // supaya render awal tidak menunggu jaringan.
     setTimeout(function () {
       var badge = document.getElementById("update-badge");
       if (!badge) return;

@@ -1,0 +1,32 @@
+Zenith Router
+Copyright (c) 2026 Divarizky
+
+This product includes software and reference material adapted from third-party
+open-source projects. Their names, copyright notices, and license terms are
+recorded here as required by their licenses.
+
+---
+
+9router (https://github.com/decolua/9router)
+MIT License
+
+Adapted material: gateway layering structure, provider capability pattern
+table, OAuth login flow definitions, credential import handling, quota parsing
+for Claude, Kiro, GitHub, and Antigravity, token refresh provider definitions,
+shared upstream request identity headers, Cline/Kilo registry quirks, and the
+Proxy Pools and combo-chain dashboard interaction patterns.
+
+---
+
+OmniRoute (https://github.com/diegosouzapw/OmniRoute)
+MIT License
+
+Adapted material: provider format reference, gateway patterns, and combo
+strategy ordering.
+
+---
+
+Both projects are distributed under the MIT License. The MIT License permits
+use, modification, and redistribution provided the copyright notice and
+permission notice are retained. See each project's repository for the full
+license text.

@@ -200,6 +200,9 @@ export function renderOverviewPage(port = 20120) {
         }
 
         connectSSE();
+        if (window.__zrSwapCleanups) {
+          window.__zrSwapCleanups.push(function () { if (es) { es.close(); es = null; } });
+        }
       })();
     </script>
   `;

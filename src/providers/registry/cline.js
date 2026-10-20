@@ -1,6 +1,6 @@
 import "../../executors/cline.js";
 
-// Cline quirks (from 9router/OmniRoute): non-streaming requests are forced to
+// Cline quirks (from the upstream reference): non-streaming requests are forced to
 // stream upstream, then SSE is aggregated back into a normal completion. Some
 // non-streaming responses are wrapped in {"success":true,"data":{...}} and are
 // unwrapped by the gateway.
@@ -10,7 +10,7 @@ export default {
   alias: ["cl", "cline"],
   category: "oauth",
   // The free catalog is published by the public recommended-models feed,
-  // so sync works without an account (9router clinepassModels.js).
+  // so sync works without an account (upstream clinepassModels.js).
   freeModelSync: "merge",
   format: "openai",
   // Envelope {"success":false} dengan HTTP 200 diubah jadi status error

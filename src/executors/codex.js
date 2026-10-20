@@ -21,7 +21,7 @@ function extractAccountId(credentials) {
   return null;
 }
 
-// The ChatGPT Codex backend rejects an output budget (9router codex executor
+// The ChatGPT Codex backend rejects an output budget (upstream codex executor
 // drops it for the same reason) and sampling params (codex_cli_rs never sends
 // them). Since the /v1/responses passthrough forwards the raw body, a
 // generic Responses client could introduce fields the backend refuses; these

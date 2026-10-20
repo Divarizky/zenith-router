@@ -5,6 +5,12 @@ import { getBindHost, isLoopbackHost } from "../../security.js";
 import { countActiveApiKeys } from "../../services/apiKeys.js";
 import { listCombos } from "../../services/combos.js";
 import { getAvailableModels, getProvider } from "../../providers/index.js";
+import {
+  isLoginRequired,
+  setLoginRequired,
+  setDashboardPassword,
+  resetDashboardPassword,
+} from "../../services/dashboardAuth.js";
 
 /**
  * Options of the default fallback picker: plain models grouped per provider,
@@ -78,7 +84,6 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const settings = getAllSettings();
 
   const isRequireAuth = settings.require_api_key === "true";
-  const rotationStrategy = settings.account_rotation || "lru";
   const comboHoldCount = settings.combo_round_robin_count || "1";
   const isTrafficGuard = settings.traffic_guard_enabled !== "false";
   const maxConcurrency = settings.max_account_concurrency || "2";
@@ -87,6 +92,9 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
   const isSaved = query.saved === "1" || query.saved === "true";
+  const isReset = query.reset === "1" || query.reset === "true";
+  const passwordError = query.pw_error ? String(query.pw_error) : "";
+  const isLoginReq = isLoginRequired();
 
   let authNote = "";
   if (forcedByBind) {
@@ -101,12 +109,22 @@ export function renderSettingsPage(port = 20120, query = {}) {
         ? `<div class="notice notice-ok"><span>Pengaturan Gateway berhasil disimpan.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
         : ""
     }
+    ${
+      isReset
+        ? `<div class="notice notice-ok"><span>Password dashboard berhasil direset ke default (<code>123456</code>).</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+        : ""
+    }
+    ${
+      passwordError
+        ? `<div class="notice notice-error"><span>Gagal mengubah password: ${escapeHtml(passwordError)}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+        : ""
+    }
     <form action="/dashboard/settings" method="POST">
       ${sectionCard({
         id: "access",
         iconName: "key",
         title: "Access &amp; Security",
-        hint: "Siapa yang boleh memakai /v1 dan bagaimana permintaan diverifikasi.",
+        hint: "Keamanan akses API inferensi /v1 dan proteksi dashboard.",
         rows: `
         <div class="setting-row">
           <div class="setting-info">
@@ -120,6 +138,51 @@ export function renderSettingsPage(port = 20120, query = {}) {
               <span class="slider"></span>
             </label>
           </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Wajibkan Login Dashboard</strong>
+            <p class="hint">Meminta password saat membuka dashboard di browser. Nonaktifkan jika hanya diakses lokal tanpa proteksi.</p>
+          </div>
+          <div class="setting-action">
+            <label class="switch" aria-label="Wajibkan Login Dashboard">
+              <input type="checkbox" name="require_login" value="true" ${isLoginReq ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-row" id="password">
+          <div class="setting-info">
+            <strong>Ubah Password Dashboard</strong>
+            <p class="hint">Password awal adalah <code>123456</code>. Isi kolom password baru untuk menggantinya; biarkan kosong bila tidak ingin mengubah sekarang.</p>
+          </div>
+          <div class="setting-action setting-stack">
+            <div class="field">
+              <label for="current_password" class="field-label">Password saat ini</label>
+              <div class="input-password-wrap">
+                <input type="password" id="current_password" name="current_password" placeholder="••••••" autocomplete="current-password" />
+                <button type="button" class="btn-toggle-pw" data-toggle-password="current_password" title="Lihat password" aria-label="Lihat password">
+                  <span class="icon-eye">${icon("eye", 15)}</span>
+                  <span class="icon-eye-off">${icon("eyeOff", 15)}</span>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="new_password" class="field-label">Password baru</label>
+              <div class="input-password-wrap">
+                <input type="password" id="new_password" name="new_password" placeholder="Minimal 4 karakter" autocomplete="new-password" />
+                <button type="button" class="btn-toggle-pw" data-toggle-password="new_password" title="Lihat password" aria-label="Lihat password">
+                  <span class="icon-eye">${icon("eye", 15)}</span>
+                  <span class="icon-eye-off">${icon("eyeOff", 15)}</span>
+                </button>
+              </div>
+            </div>
+            <div style="margin-top: 0.35rem; display: flex; justify-content: flex-end;">
+              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-ghost btn-sm" onclick="return confirm('Kembalikan password dashboard ke default (123456)?');">Reset ke Default (123456)</button>
+            </div>
+          </div>
         </div>`,
       })}
 
@@ -127,21 +190,8 @@ export function renderSettingsPage(port = 20120, query = {}) {
         id: "selection",
         iconName: "list",
         title: "Account Selection",
-        hint: "Bagaimana Zenith Router memilih akun dan anggota combo saat ada beberapa pilihan.",
+        hint: "Bagaimana Zenith Router memilih anggota combo. Urutan akun (#1, #2, dst.) diatur di halaman detail tiap provider.",
         rows: `
-        <div class="setting-row">
-          <div class="setting-info">
-            <strong>Strategi Rotasi Akun</strong>
-            <p class="hint">Cara Zenith Router memilih antar akun aktif untuk penyedia yang sama.</p>
-          </div>
-          <div class="setting-action">
-            <select name="account_rotation" class="input-select">
-              <option value="lru" ${rotationStrategy === "lru" ? "selected" : ""}>LRU (Giliran Akun)</option>
-              <option value="sticky" ${rotationStrategy === "sticky" ? "selected" : ""}>Sticky (Akun Sama)</option>
-            </select>
-          </div>
-        </div>
-
         <div class="setting-row">
           <div class="setting-info">
             <strong>Batas Giliran Combo</strong>
@@ -242,7 +292,7 @@ export async function handleSaveSettings(c) {
   const body = await c.req.parseBody();
 
   const requireKey = body.require_api_key === "true" || body.require_api_key === "on" ? "true" : "false";
-  const rotation = body.account_rotation === "sticky" ? "sticky" : "lru";
+  const requireLogin = body.require_login === "true" || body.require_login === "on";
   const trafficGuard = body.traffic_guard_enabled === "true" || body.traffic_guard_enabled === "on" ? "true" : "false";
   const maxConcurrency = String(Number(body.max_account_concurrency) || 2);
   const requestJitter = body.request_jitter_enabled === "true" || body.request_jitter_enabled === "on" ? "true" : "false";
@@ -250,12 +300,32 @@ export async function handleSaveSettings(c) {
   const fallbackModel = String(body.default_fallback_model || "").trim();
 
   setSetting("require_api_key", requireKey);
-  setSetting("account_rotation", rotation);
+  setLoginRequired(requireLogin);
   setSetting("traffic_guard_enabled", trafficGuard);
   setSetting("max_account_concurrency", maxConcurrency);
   setSetting("request_jitter_enabled", requestJitter);
   setSetting("combo_round_robin_count", comboHoldCount);
   setSetting("default_fallback_model", fallbackModel);
 
+  // Ubah password jika new_password diisi
+  const newPassword = String(body.new_password || "").trim();
+  const currentPassword = String(body.current_password || "").trim();
+  if (newPassword) {
+    try {
+      setDashboardPassword(newPassword, currentPassword);
+    } catch (err) {
+      return c.redirect(`/dashboard/settings?pw_error=${encodeURIComponent(err.message)}`);
+    }
+  }
+
   return c.redirect("/dashboard/settings?saved=1");
+}
+
+/**
+ * Handle form POST /dashboard/settings/password/reset
+ * Mengembalikan password dashboard ke default (123456).
+ */
+export async function handleResetDashboardPassword(c) {
+  resetDashboardPassword();
+  return c.redirect("/dashboard/settings?reset=1#password");
 }

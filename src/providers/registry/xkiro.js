@@ -4,8 +4,9 @@ export default {
   alias: ["xkr", "xkiro"],
   category: "apikey",
   keyUrl: "https://xkiro.com/dashboard/api/keys",
-  // 5M tokens/day (~150M/mo) free pool across models tagged access_tier: "free".
-  // Public models endpoint allows syncing without an account.
+  // Daily free-token allowance is per account and can differ between accounts;
+  // GET /v1/usage reports it. Free models are tagged access_tier: "free" upstream.
+  // The public models endpoint allows syncing without an account.
   freeModelSync: "merge",
   format: "openai",
   transport: {

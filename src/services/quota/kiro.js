@@ -6,7 +6,7 @@ const CW_HOST = "https://codewhisperer.us-east-1.amazonaws.com";
 const Q_HOST = "https://q.us-east-1.amazonaws.com";
 const LIMITS_PATH = "/getUsageLimits";
 
-/** Parse GetUsageLimits/usage response (same shape as 9router usage/kiro.js). */
+/** Parse GetUsageLimits/usage response (same shape as the upstream Kiro usage service). */
 function parseKiroQuotaData(data) {
   const usageList = data.usageBreakdownList || [];
   const resetAt = parseResetTime(data.nextDateReset || data.resetDate);
@@ -51,7 +51,7 @@ function parseKiroQuotaData(data) {
 
 /**
  * Fetch live usage limits for Kiro (AWS CodeWhisperer). Tries the known
- * endpoints in order, like 9router usage/kiro.js.
+ * endpoints in order, like the upstream Kiro usage service.
  */
 export async function fetchKiroQuota(connection) {
   const token = connection.credentials?.access_token;

@@ -10,6 +10,14 @@ const ANTIGRAVITY_LEGACY_QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1inte
 const ANTIGRAVITY_CONSUMER_PROJECT = "aicode-consumers";
 
 const LOAD_CODE_ASSIST_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
+// 5h and weekly pool limits per model group. The daily host matches what agy reads;
+// the legacy host returns different buckets.
+const ANTIGRAVITY_QUOTA_SUMMARY_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+
+const POOL_WINDOW_LABELS = new Map([
+  ["5h", "5 jam"],
+  ["weekly", "Mingguan"],
+]);
 
 
 // Models worth a bar. fetchAvailableModels also returns tab-completion helpers,
@@ -29,7 +37,7 @@ function prettifyKey(key) {
 
 /**
  * Parse per-model quota buckets from fetchAvailableModels (same shape used by
- * 9router / vscode-antigravity-cockpit): data.models[key].quotaInfo.remainingFraction.
+ * upstream reference and vscode-antigravity-cockpit): data.models[key].quotaInfo.remainingFraction.
  */
 function parseModelQuotas(models) {
   const quotas = {};
@@ -53,7 +61,7 @@ function parseModelQuotas(models) {
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     const fraction = Number(quotaInfo.remainingFraction) || 0;
-    const total = 1000; // normalized base, same as 9router
+    const total = 1000; // normalized base, same as the upstream
     const remaining = Math.round(total * fraction);
     quotas[modelKey] = {
       used: total - remaining,
@@ -64,6 +72,43 @@ function parseModelQuotas(models) {
     };
   }
   return quotas;
+}
+
+/**
+ * Parses the pool limits from retrieveUserQuotaSummary. A group shares one 5h and one weekly limit
+ * across its models. Disabled buckets are skipped, and an unknown window is dropped instead of being
+ * forced into one of the two known windows.
+ */
+export function parseQuotaPools(summary) {
+  const groups = Array.isArray(summary?.groups) ? summary.groups : [];
+  const pools = [];
+  for (const group of groups) {
+    const groupName = typeof group?.displayName === "string" && group.displayName ? group.displayName : null;
+    if (!groupName || !Array.isArray(group.buckets)) continue;
+    for (const bucket of group.buckets) {
+      const windowLabel = POOL_WINDOW_LABELS.get(bucket?.window);
+      if (!windowLabel || bucket.disabled === true || typeof bucket.remainingFraction !== "number") continue;
+      if (!Number.isFinite(bucket.remainingFraction)) continue;
+      pools.push({
+        group: groupName,
+        window: bucket.window,
+        label: `${groupName} · ${windowLabel}`,
+        bucketId: typeof bucket.bucketId === "string" ? bucket.bucketId : null,
+        remainingPercentage: Math.min(100, Math.max(0, bucket.remainingFraction * 100)),
+        resetAt: parseResetTime(bucket.resetTime),
+      });
+    }
+  }
+  return pools;
+}
+
+async function fetchQuotaSummary(connection, projectId) {
+  try {
+    const res = await postQuota(ANTIGRAVITY_QUOTA_SUMMARY_URL, connection, projectId);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
 }
 
 async function postQuota(url, connection, projectId) {
@@ -135,7 +180,8 @@ export async function fetchAntigravityQuota(connection) {
 
   const models = data.models || [];
   const defaultTier = data.allowedTiers?.find((t) => t.isDefault)?.id || "standard";
-  const plan = await fetchPlanName(connection);
+  const [plan, summary] = await Promise.all([fetchPlanName(connection), fetchQuotaSummary(connection, projectId)]);
+  const pools = parseQuotaPools(summary);
   const quotas = parseModelQuotas(models);
   const modelCount = Array.isArray(models) ? models.length : Object.keys(models).length;
   const modelInventory = parseModelInventory(data);
@@ -149,6 +195,7 @@ export async function fetchAntigravityQuota(connection) {
     project_id: projectId,
     is_exhausted: Object.keys(quotas).length > 0 && isExhausted,
     unit: "tier",
+    pools,
     quotas,
     // Persisted into antigravity_account_models by the quota sync layer, then
     // stripped: the stored quota must not carry the whole catalog.

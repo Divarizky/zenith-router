@@ -112,6 +112,7 @@ export function getAllQuotaStatus() {
     provider: c.provider,
     auth_type: c.auth_type,
     is_active: c.is_active,
+    priority: c.priority,
     quota: c.credentials?.quota || null,
     is_exhausted: isConnectionExhausted(c),
   }));

@@ -444,6 +444,28 @@ export function prepareToolsWithFingerprint(body, path = "/inference/v1/chat/com
   return aliasToOriginal;
 }
 
+/**
+ * DeepSeek models in thinking mode reject multi-turn tool-calling requests
+ * if prior assistant messages omit `reasoning_content` (HTTP 400
+ * "The `reasoning_content` in the thinking mode must be passed back to the API").
+ *
+ * Ensure every historical assistant turn carries the field so clients that
+ * drop thinking blocks (or never saw reasoning on a turn) don't trigger the 400.
+ */
+export function ensureAssistantReasoningContent(body, model) {
+  if (!body || typeof body !== "object") return;
+  if (!Array.isArray(body.messages)) return;
+  const isDeepSeek = /deepseek/i.test(String(model || body.model || ""));
+  if (!isDeepSeek) return;
+  for (const msg of body.messages) {
+    if (msg && typeof msg === "object" && msg.role === "assistant") {
+      if (msg.reasoning_content === undefined) {
+        msg.reasoning_content = "";
+      }
+    }
+  }
+}
+
 export class OpencodeExecutor extends BaseExecutor {
   async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
     // While an egress is cooling down, forwarding only feeds the block: answer
@@ -483,6 +505,7 @@ export class OpencodeExecutor extends BaseExecutor {
     let didProtocolRetry = false;
     let budgetValue = null; // budget final — dihitung SEKALI, dibawa lintas lane saat retry
     if (parsed && typeof parsed === "object") {
+      ensureAssistantReasoningContent(parsed, model);
       const aliasMap = prepareToolsWithFingerprint(parsed, path);
       parsed.stream = true;
 
@@ -574,6 +597,7 @@ export class OpencodeExecutor extends BaseExecutor {
               ? responsesToOpenAIRequest(retryParsed)
               : openaiToResponsesRequest(retryParsed, model);
 
+            ensureAssistantReasoningContent(retryParsed, model);
             const aliasMap = prepareToolsWithFingerprint(retryParsed, path);
             retryParsed.stream = true;
 

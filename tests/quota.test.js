@@ -117,4 +117,6 @@ test("GET /api/quota - returns quota status for all accounts", async () => {
   assert.strictEqual(json.length, 1);
   assert.strictEqual(json[0].name, "Copilot Work");
   assert.strictEqual(json[0].quota.remaining, 1500);
+  // Prioritas dipakai klien usage untuk memilih akun seperti router.
+  assert.strictEqual(typeof json[0].priority, "number");
 });

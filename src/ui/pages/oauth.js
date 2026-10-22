@@ -63,7 +63,7 @@ export async function handleOAuthCancel(c) {
   return c.json({ ok: true });
 }
 
-/** GET /callback: where Claude, Antigravity, and Cline redirect after sign-in. */
+/** GET /callback: where providers that own their redirect send the browser back. */
 export async function handleOAuthCallback(c) {
   const result = await completeCallback(c.req.query());
   return c.html(renderCallbackPage(result), result.ok ? 200 : 400);

@@ -6,6 +6,7 @@ import {
 } from "../db/index.js";
 import { getProvider } from "../providers/index.js";
 import { isConnectionExhausted } from "./quota.js";
+import { claudeUserAgent } from "./claudeIdentity.js";
 import pkg from "../../package.json" with { type: "json" };
 
 /**
@@ -85,8 +86,7 @@ export function getActiveConnection(providerId) {
 }
 
 // Trimmed from the upstream shared.js (CLAUDE_CODE_HEADERS + ANTHROPIC_BETA_BASE).
-// Pinned version; bump when the real CLI moves (format changes are rare).
-const CLAUDE_CLI_VERSION = "2.1.280";
+// The CLI version lives in claudeIdentity.js; bump it when the real CLI moves.
 const CLAUDE_CODE_BETAS = [
   "claude-code-20250219",
   "oauth-2025-04-20",
@@ -102,7 +102,7 @@ const CLAUDE_CODE_BETAS = [
 /**
  * Apply credentials from connection to request headers, based on the connection auth type
  */
-export function applyConnectionAuth(headers, connection) {
+export function applyConnectionAuth(headers, connection, { claudeSessionId = null } = {}) {
   if (!connection || !connection.credentials || connection.auth_type === "noauth") return headers;
 
   const creds = connection.credentials;
@@ -127,15 +127,19 @@ export function applyConnectionAuth(headers, connection) {
     }
     headers["Authorization"] = `Bearer ${token}`;
     // Claude Code subscription usage: same identity bundle the upstream sends (shared.js CLAUDE_CODE_HEADERS).
-    // ponytail: x-claude-code-session-id alignment and X-Stainless SDK telemetry skipped; add if upstream rejects.
     if (connection.provider === "claude") {
       const beta = headers["anthropic-beta"] || headers["Anthropic-Beta"];
       delete headers["Anthropic-Beta"];
       const flags = new Set([...CLAUDE_CODE_BETAS, ...String(beta || "").split(",").map((s) => s.trim()).filter(Boolean)]);
       headers["anthropic-beta"] = [...flags].join(",");
-      headers["User-Agent"] = `claude-cli/${CLAUDE_CLI_VERSION} (external, sdk-cli)`;
+      headers["User-Agent"] = claudeUserAgent();
       headers["X-App"] = "cli";
       headers["Anthropic-Dangerous-Direct-Browser-Access"] = "true";
+      // The upstream checks the session id against metadata.user_id, so both
+      // have to come from the same request body.
+      if (!headers["x-claude-code-session-id"] && claudeSessionId) {
+        headers["x-claude-code-session-id"] = claudeSessionId;
+      }
     }
     if (connection.provider === "kilocode" && creds.org_id) headers["X-Kilocode-OrganizationID"] = creds.org_id;
     return headers;

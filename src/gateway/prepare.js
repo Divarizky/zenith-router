@@ -49,6 +49,13 @@ export function prepareUpstreamRequest({
     tokenSaverOptions(getAllSettings(), tokenSaverHeader)
   );
 
+  // metadata.user_id carries the client's account/session identity. Only Claude
+  // upstream needs it, and it must stay consistent with the session id header.
+  // Other metadata fields belong to the client and stay untouched.
+  if (upstreamPayload && typeof upstreamPayload === "object" && upstreamPayload.metadata) {
+    if (provider.id !== "claude") delete upstreamPayload.metadata.user_id;
+  }
+
   if (withUsageChunk && upstreamStream && targetFormat === FORMATS.OPENAI) {
     upstreamPayload.stream_options = { include_usage: true, ...(streamOptions || {}) };
   }

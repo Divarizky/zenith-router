@@ -309,6 +309,13 @@ export function openaiToClaude(body, targetModel) {
     result.system = systemParts.join("\n\n");
   }
 
+  // Claude Code sends metadata.user_id as the account/session identity. The
+  // upstream checks it against x-claude-code-session-id, so it has to travel
+  // with the request; other providers never see it.
+  if (body.metadata && typeof body.metadata.user_id === "string" && body.metadata.user_id.trim()) {
+    result.metadata = { user_id: body.metadata.user_id };
+  }
+
   // Ensure at least one message exists for Claude
   if (result.messages.length === 0) {
     result.messages.push({ role: "user", content: " " });

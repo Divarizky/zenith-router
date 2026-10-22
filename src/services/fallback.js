@@ -4,6 +4,7 @@ import {
   setConnectionCooldown,
   updateConnectionLastUsed,
   getAntigravityModelsByConnection,
+  getAntigravityAccountModels,
 } from "../db/index.js";
 import { getProvider, getProviderModels, resolveProviderRuntime } from "../providers/index.js";
 import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
@@ -11,6 +12,7 @@ import { disableModel } from "./modelOverrides.js";
 import { isConnectionExhausted, syncProviderQuota } from "./quota.js";
 import { isAntigravityPoolExhausted } from "./antigravityPools.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
+import { extractClaudeSessionId } from "./claudeIdentity.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
@@ -175,6 +177,53 @@ const reasoningUnsupported = new Set();
 
 function isReasoningRejected(res, errText) {
   return res.status === 400 && /reasoning_effort is not (enabled|supported)/i.test(errText);
+}
+
+/**
+ * Google's Cloud Code answers a model it cannot serve with this wording. When
+ * the name it reports is not one we asked for, the upstream translated the
+ * request into its own internal alias and routed it to a backend that does not
+ * serve that alias for this API version. The account itself is healthy — the
+ * same model served the previous request — so the failure is transient even
+ * though the status is 404.
+ */
+const TRANSIENT_UPSTREAM_404 = /models\/([\w.-]+) is not found for API version [^,]+, or is not supported for generateContent/i;
+
+// How often a transient upstream 404 is retried on the same account.
+const MAX_TRANSIENT_NOT_FOUND_RETRIES = 1;
+
+// Only Cloud Code speaks this wording, so no other provider is affected by
+// mistaking its own 404 for a transient one. Antigravity is the only provider
+// that talks to Cloud Code.
+const CLOUD_CODE_PROVIDERS = new Set(["antigravity"]);
+
+/**
+ * The model ids this request can have put on the wire: the routed id, plus the
+ * runtime id the executor resolves it to. A 404 that names one of these means
+ * the model really is unavailable here, so it is reported as is.
+ */
+function sentModelIds(provider, modelId, effort, connection) {
+  const ids = new Set(modelId ? [modelId] : []);
+  if (CLOUD_CODE_PROVIDERS.has(provider?.id) && connection?.id) {
+    try {
+      const rows = getAntigravityAccountModels(connection.id);
+      const picked = resolveProviderRuntime(provider, modelId, effort, rows?.size ? rows : null);
+      if (picked?.id) ids.add(picked.id);
+    } catch {}
+  }
+  return ids;
+}
+
+function isTransientUpstreamNotFound(res, errText, sentIds, provider) {
+  if (res.status !== 404) return false;
+  if (!CLOUD_CODE_PROVIDERS.has(provider?.id)) return false;
+  const match = TRANSIENT_UPSTREAM_404.exec(errText || "");
+  if (!match) return false;
+  const reported = match[1].toLowerCase();
+  for (const id of sentIds) {
+    if (String(id).toLowerCase() === reported) return false;
+  }
+  return true;
 }
 
 function buildErrorPayload(targetFormat, type, message, code) {
@@ -403,10 +452,20 @@ export async function executeWithFallback({
   const maxAttempts =
     rotationProxies.length > 0 ? rotationProxies.length : Math.max(1, available.length);
   let lastFailureResponse = null;
+  // A transient upstream 404 is retried on the same account this many times
+  // before it is reported to the client.
+  let transientNotFoundRetries = 0;
+  // The account a same-account retry goes back to.
+  let retryConnection = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let connection;
-    if (rotationProxies.length > 0) {
+    // An account held back for a same-account retry, so the retry does not
+    // depend on the order accounts are picked in.
+    if (retryConnection) {
+      connection = retryConnection;
+      retryConnection = null;
+    } else if (rotationProxies.length > 0) {
       // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
       connection = available[0];
     } else {
@@ -438,7 +497,11 @@ export async function executeWithFallback({
     }
 
     const headers = { ...baseHeaders };
-    applyConnectionAuth(headers, connection);
+    // The upstream checks the session id against metadata.user_id, so both
+    // have to come from the same request body.
+    const claudeSessionId =
+      provider.id === "claude" ? extractClaudeSessionId(payload?.metadata?.user_id) : null;
+    applyConnectionAuth(headers, connection, { claudeSessionId });
     const url = resolveUrl(connection);
     const proxyUrl =
       rotationProxies.length > 0 ? rotationProxies[attempt - 1] ?? null : requireResolvedProxy(connection);
@@ -500,6 +563,34 @@ export async function executeWithFallback({
       triedIds.pop();
       attempt--;
       continue;
+    }
+
+    // Upstream answered 404 for a model it does serve, because the request was
+    // routed to a backend that does not know that model for this API version.
+    // The account is healthy, so it is neither cooled down nor locked, and the
+    // model stays available: another account takes over, and the same account
+    // is retried once when no other one is left.
+    if (isTransientUpstreamNotFound(res, errText, sentModelIds(provider, modelId, effort, connection), provider)) {
+      const hasOtherAccount = listAvailableConnections(provider.id, { model: modelId, effort }).some(
+        (c) => c.id && !triedIds.includes(c.id)
+      );
+      if (hasOtherAccount) {
+        captureLine(
+          `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, pindah ke akun lain`
+        );
+        continue;
+      }
+      if (transientNotFoundRetries < MAX_TRANSIENT_NOT_FOUND_RETRIES) {
+        transientNotFoundRetries++;
+        captureLine(
+          `[RETRY] provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, mengulang ke akun yang sama`
+        );
+        // Hold this account back so the next round runs the same request
+        // against it again.
+        retryConnection = connection;
+        attempt--;
+        continue;
+      }
     }
 
     // Model- or request-level denial: no cooldown, other models stay usable.

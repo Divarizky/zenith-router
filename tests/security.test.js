@@ -243,7 +243,7 @@ test("security - applyConnectionAuth follows the connection auth type", () => {
       Authorization: "Bearer tok",
       "anthropic-beta":
         "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28,tools-2024",
-      "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+      "User-Agent": "claude-cli/2.1.280 (external, cli)",
       "X-App": "cli",
       "Anthropic-Dangerous-Direct-Browser-Access": "true",
     }

@@ -86,7 +86,7 @@ test("github device flow - code, pending, then Copilot token saved with the GitH
   assert.strictEqual(copilotCall.headers.Authorization, "token gho_live");
 });
 
-test("claude PKCE flow - auth URL, /callback exchange, and status done", async (t) => {
+test("claude PKCE flow - official redirect, manual completion, and status done", async (t) => {
   t.after(reset);
   initDb(":memory:");
   const calls = mockFetch({
@@ -96,14 +96,34 @@ test("claude PKCE flow - auth URL, /callback exchange, and status done", async (
       expires_in: 3600,
       account: { email_address: "me@example.com" },
     }),
+    "api.anthropic.com/api/claude_cli/bootstrap": json({
+      oauth_account: {
+        account_uuid: "acct-1",
+        account_email: "me@example.com",
+        organization_uuid: "org-1",
+        organization_name: "Acme",
+        organization_rate_limit_tier: "default",
+      },
+    }),
   });
 
   const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN, name: "Max" });
   assert.strictEqual(started.flowType, "authorization_code");
+  assert.strictEqual(started.manualOnly, true, "login Claude diselesaikan manual");
+  assert.strictEqual(started.listening, false);
   const auth = new URL(started.authUrl);
   assert.strictEqual(auth.origin + auth.pathname, "https://claude.ai/oauth/authorize");
-  assert.strictEqual(auth.searchParams.get("redirect_uri"), "http://localhost:20120/callback");
+  assert.strictEqual(
+    auth.searchParams.get("redirect_uri"),
+    "https://platform.claude.com/oauth/code/callback",
+    "redirect URI resmi Claude"
+  );
   assert.strictEqual(auth.searchParams.get("code_challenge_method"), "S256");
+  assert.strictEqual(auth.searchParams.get("code"), "true");
+  assert.strictEqual(auth.searchParams.get("prompt"), "login", "memaksa autentikasi ulang");
+  const scope = auth.searchParams.get("scope").split(" ");
+  assert.ok(scope.includes("user:sessions:claude_code"));
+  assert.ok(scope.includes("user:mcp_servers"));
   const state = auth.searchParams.get("state");
 
   // A callback for an unknown state is rejected without touching the flow.
@@ -111,14 +131,21 @@ test("claude PKCE flow - auth URL, /callback exchange, and status done", async (
   assert.strictEqual(bogus.status, 400);
   assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "pending");
 
-  const res = await app.request(`/callback?code=c0de&state=${encodeURIComponent(state)}`);
-  assert.strictEqual(res.status, 200);
-  assert.match(await res.text(), /Login berhasil/);
-  assert.strictEqual(res.headers.get("cache-control")?.includes("no-store"), true);
+  // Claude redirects to its own page, so the user pastes the callback back.
+  const pasted = await completeManual(
+    started.flowId,
+    `https://platform.claude.com/oauth/code/callback?code=c0de&state=${encodeURIComponent(state)}`
+  );
+  assert.strictEqual(pasted.ok, true);
+  assert.strictEqual(pasted.account, "Max");
 
   const exchange = calls.find((c) => c.url.includes("oauth/token"));
   assert.strictEqual(exchange.body.code, "c0de");
-  assert.strictEqual(exchange.body.redirect_uri, "http://localhost:20120/callback");
+  assert.strictEqual(
+    exchange.body.redirect_uri,
+    "https://platform.claude.com/oauth/code/callback",
+    "token exchange memakai redirect URI yang sama"
+  );
   assert.ok(exchange.body.code_verifier.length >= 43);
 
   assert.deepStrictEqual(await pollOAuthFlow(started.flowId), { status: "done", error: undefined, account: "Max" });
@@ -126,10 +153,207 @@ test("claude PKCE flow - auth URL, /callback exchange, and status done", async (
   assert.strictEqual(conn.name, "Max");
   assert.strictEqual(conn.credentials.refresh_token, "rt1");
   assert.strictEqual(conn.credentials.email, "me@example.com");
+  assert.strictEqual(conn.credentials.organization_uuid, "org-1");
+  assert.strictEqual(conn.credentials.organization_rate_limit_tier, "default");
   assert.ok(conn.credentials.expires_at > Date.now());
+});
 
-  // The same callback cannot be replayed.
-  assert.strictEqual((await app.request(`/callback?code=c0de&state=${encodeURIComponent(state)}`)).status, 400);
+test("claude login - bootstrap gagal tidak membatalkan login", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  mockFetch({
+    "api.anthropic.com/v1/oauth/token": json({
+      access_token: "sk-ant-oat01-b",
+      refresh_token: "rt2",
+      expires_in: 3600,
+    }),
+    "api.anthropic.com/api/claude_cli/bootstrap": new Response("nope", { status: 403 }),
+  });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state = new URL(started.authUrl).searchParams.get("state");
+  const res = await completeManual(started.flowId, `code-ok#${state}`);
+  assert.strictEqual(res.ok, true);
+  const [conn] = getConnections("claude");
+  assert.strictEqual(conn.credentials.access_token, "sk-ant-oat01-b");
+  assert.strictEqual(conn.credentials.organization_uuid, undefined);
+});
+
+test("claude login - error dari provider ditampilkan tanpa menyimpan token", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  mockFetch({
+    "api.anthropic.com/v1/oauth/token": new Response(
+      JSON.stringify({ error: "invalid_grant", error_description: "code expired" }),
+      { status: 400 }
+    ),
+  });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state = new URL(started.authUrl).searchParams.get("state");
+  const res = await completeManual(started.flowId, `code-bad#${state}`);
+  assert.strictEqual(res.ok, false);
+  assert.match(res.error, /code expired/);
+  assert.strictEqual(getConnections("claude").length, 0);
+});
+
+test("claude login - input code#state mengirim code dan state yang benar ke token endpoint", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const calls = mockFetch({
+    "api.anthropic.com/v1/oauth/token": json({
+      access_token: "sk-ant-oat01-hs",
+      refresh_token: "rths",
+      expires_in: 3600,
+    }),
+  });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state = new URL(started.authUrl).searchParams.get("state");
+
+  // The manual page shows "code#state".
+  const res = await completeManual(started.flowId, `code123#${state}`);
+  assert.strictEqual(res.ok, true);
+  const exchange = calls.find((c) => c.url.includes("oauth/token"));
+  assert.strictEqual(exchange.body.code, "code123", "hanya bagian sebelum # yang jadi code");
+  assert.strictEqual(exchange.body.state, state, "bagian setelah # jadi state");
+
+  // A "code#" without a state falls back to the flow's own state.
+  const started2 = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state2 = new URL(started2.authUrl).searchParams.get("state");
+  const res2 = await completeManual(started2.flowId, "code-no-state#");
+  assert.strictEqual(res2.ok, true);
+  const exchange2 = calls.filter((c) => c.url.includes("oauth/token")).pop();
+  assert.strictEqual(exchange2.body.code, "code-no-state");
+  assert.strictEqual(exchange2.body.state, state2, "state kosong memakai state flow");
+});
+
+test("claude login - parser menerima code polos, URL tidak valid, dan URL tanpa scheme", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const calls = mockFetch({
+    "api.anthropic.com/v1/oauth/token": json({
+      access_token: "sk-ant-oat01-c",
+      refresh_token: "rtc",
+      expires_in: 3600,
+    }),
+  });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state = new URL(started.authUrl).searchParams.get("state");
+
+  // A bare code with no state falls back to the flow's own state.
+  const bare = await completeManual(started.flowId, "bare-code");
+  assert.strictEqual(bare.ok, true);
+  const exchange = calls.find((c) => c.url.includes("oauth/token"));
+  assert.strictEqual(exchange.body.code, "bare-code");
+  assert.strictEqual(exchange.body.state, state);
+
+  // A URL that cannot be parsed is rejected before any token call.
+  const started2 = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const invalid = await completeManual(started2.flowId, "https://");
+  assert.strictEqual(invalid.ok, false);
+  assert.match(invalid.error, /tidak valid/i);
+
+  // A bare host without a scheme is not treated as a callback URL.
+  const started3 = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const noScheme = await completeManual(started3.flowId, "platform.claude.com/oauth/code/callback?code=x");
+  assert.strictEqual(noScheme.ok, true);
+  const last = calls.filter((c) => c.url.includes("oauth/token")).pop();
+  assert.strictEqual(last.body.code, "platform.claude.com/oauth/code/callback?code=x");
+});
+
+test("claude login - code di fragment callback URL tetap dipakai", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const calls = mockFetch({
+    "api.anthropic.com/v1/oauth/token": json({
+      access_token: "sk-ant-oat01-frag",
+      refresh_token: "rtf",
+      expires_in: 3600,
+    }),
+  });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state = new URL(started.authUrl).searchParams.get("state");
+  const res = await completeManual(
+    started.flowId,
+    `https://platform.claude.com/oauth/code/callback#code=frag-code&state=${encodeURIComponent(state)}`
+  );
+  assert.strictEqual(res.ok, true);
+  const exchange = calls.find((c) => c.url.includes("oauth/token"));
+  assert.strictEqual(exchange.body.code, "frag-code");
+});
+
+test("claude login - token exchange dan bootstrap memakai identitas Claude Code", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const calls = mockFetch({
+    "api.anthropic.com/v1/oauth/token": json({
+      access_token: "sk-ant-oat01-h",
+      refresh_token: "rth",
+      expires_in: 3600,
+    }),
+    "api.anthropic.com/api/claude_cli/bootstrap": json({
+      oauth_account: {
+        account_uuid: "acct-h",
+        account_email: "h@example.com",
+        organization_uuid: "org-h",
+        organization_name: "Org H",
+        organization_type: "claude_code",
+        organization_rate_limit_tier: "default",
+      },
+    }),
+  });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const state = new URL(started.authUrl).searchParams.get("state");
+  const res = await completeManual(started.flowId, `code-h#${state}`);
+  assert.strictEqual(res.ok, true);
+
+  const exchange = calls.find((c) => c.url.includes("oauth/token"));
+  assert.match(exchange.headers["User-Agent"], /^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/);
+  assert.strictEqual(exchange.headers["X-App"], "cli");
+  assert.strictEqual(exchange.headers["Anthropic-Dangerous-Direct-Browser-Access"], "true");
+
+  const bootstrap = calls.find((c) => c.url.includes("bootstrap"));
+  assert.strictEqual(bootstrap.headers["X-App"], "cli");
+  assert.strictEqual(bootstrap.headers["Anthropic-Dangerous-Direct-Browser-Access"], "true");
+  assert.match(bootstrap.headers["User-Agent"], /^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/);
+
+  const [conn] = getConnections("claude");
+  assert.strictEqual(conn.credentials.account_uuid, "acct-h");
+  assert.strictEqual(conn.credentials.account_email, "h@example.com");
+  assert.strictEqual(conn.credentials.organization_uuid, "org-h");
+  assert.strictEqual(conn.credentials.organization_name, "Org H");
+  assert.strictEqual(conn.credentials.organization_rate_limit_tier, "default");
+  assert.strictEqual(conn.credentials.organization_type, undefined, "field di luar spec tidak disimpan");
+});
+
+test("codex flow - tetap memakai callback port tetapnya", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  mockFetch({});
+
+  const started = await startOAuthFlow({ providerId: "codex", origin: ORIGIN });
+  const auth = new URL(started.authUrl);
+  assert.strictEqual(auth.searchParams.get("redirect_uri"), "http://localhost:1455/auth/callback");
+  assert.strictEqual(started.manualOnly, false, "Codex masih rely on callback, bukan tempel manual");
+});
+
+test("claude login - callback URL dengan error provider ditampilkan apa adanya", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  mockFetch({});
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const res = await completeManual(
+    started.flowId,
+    "https://platform.claude.com/oauth/code/callback?error=access_denied&error_description=User%20declined"
+  );
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, "User declined");
+  assert.strictEqual(getConnections("claude").length, 0);
 });
 
 test("manual completion - pasted callback URL or code#state, state must match", async (t) => {
@@ -157,6 +381,18 @@ test("manual completion - pasted callback URL or code#state, state must match", 
   const ccState = new URL(cc.authUrl).searchParams.get("state");
   assert.strictEqual((await completeManual(cc.flowId, `code123#${ccState}`)).ok, true);
   assert.strictEqual(getConnections("claude").length, 1);
+});
+
+test("manual completion - state yang tidak cocok ditolak untuk Claude", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  mockFetch({ "anthropic.com/v1/oauth/token": json({ access_token: "a", refresh_token: "r", expires_in: 60 }) });
+
+  const started = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const wrong = await completeManual(started.flowId, `code123#other-state`);
+  assert.strictEqual(wrong.ok, false);
+  assert.match(wrong.error, /State tidak cocok/);
+  assert.strictEqual(getConnections("claude").length, 0);
 });
 
 test("kilocode device flow - 202 pending, approved token keeps the organization id", async (t) => {

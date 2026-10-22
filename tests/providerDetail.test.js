@@ -4,6 +4,26 @@ import assert from "node:assert";
 import { app } from "../src/index.js";
 import { initDb, addConnection, setConnectionCooldown } from "../src/db/index.js";
 
+test("GET /dashboard/providers/:id - baris akun menampilkan identitas dari bootstrap Claude", async () => {
+  initDb(":memory:");
+  addConnection({
+    provider: "claude",
+    name: "Claude Akun 1",
+    auth_type: "oauth",
+    credentials: {
+      access_token: "sk-ant-oat01-x",
+      account_email: "acc@example.com",
+      organization_name: "Acme Inc",
+      organization_rate_limit_tier: "default",
+    },
+  });
+
+  const html = await (await app.request("/dashboard/providers/claude")).text();
+  assert.ok(html.includes("acc@example.com"), "email akun tampil");
+  assert.ok(html.includes("Acme Inc"), "nama organisasi tampil");
+  assert.ok(html.includes("tier default"), "tier rate limit tampil");
+});
+
 test("GET /dashboard/providers/:id - selection is behind a toggle button and rows are clickable", async () => {
   initDb(":memory:");
 

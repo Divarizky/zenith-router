@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { proxyFetch } from "../../executors/proxy.js";
 import { antigravityUserAgent } from "../antigravityIdentity.js";
+import { claudeUserAgent } from "../claudeIdentity.js";
 
 // Login flows for OAuth providers, ported from the upstream OAuth provider definitions.
 // Client ids are the public ones shipped in each vendor's own CLI/IDE.
@@ -54,7 +55,18 @@ export const OAUTH_CONFIG = {
     clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
     authorizeUrl: "https://claude.ai/oauth/authorize",
     tokenUrl: "https://api.anthropic.com/v1/oauth/token",
-    scopes: ["org:create_api_key", "user:profile", "user:inference"],
+    scopes: [
+      "org:create_api_key",
+      "user:profile",
+      "user:inference",
+      "user:sessions:claude_code",
+      "user:mcp_servers",
+    ],
+    // Anthropic only accepts the official Claude Code redirect for this client
+    // id, so the login finishes by pasting the callback URL or code back.
+    redirectUri:
+      process.env.CLAUDE_CODE_REDIRECT_URI || "https://platform.claude.com/oauth/code/callback",
+    bootstrapUrl: "https://api.anthropic.com/api/claude_cli/bootstrap",
   },
   codex: {
     clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
@@ -164,6 +176,10 @@ const AWS_REGION = /^[a-z]{2}-[a-z]+-\d{1,2}$/;
 const claude = {
   flowType: "authorization_code",
   pkce: true,
+  // Claude redirects to its own callback page, so the login is finished by
+  // pasting the callback URL or code back into the dashboard.
+  manualOnly: true,
+  redirectUri: OAUTH_CONFIG.claude.redirectUri,
   buildAuthUrl({ redirectUri, state, codeChallenge }) {
     const cfg = OAUTH_CONFIG.claude;
     const params = new URLSearchParams({
@@ -175,16 +191,29 @@ const claude = {
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
       state,
+      // Forces Anthropic to re-authenticate instead of silently reusing the
+      // browser session, which otherwise invalidates the previous account's
+      // refresh token family for this shared client id.
+      prompt: "login",
     });
     return `${cfg.authorizeUrl}?${params}`;
   },
   async exchange({ code, redirectUri, codeVerifier, state, proxyUrl = null }) {
     const cfg = OAUTH_CONFIG.claude;
-    // The manual-copy page shows "code#state".
-    const [authCode, codeState] = String(code).split("#");
+    // The manual-copy page shows "code#state"; the state part is optional
+    // because the flow already knows it.
+    const [authCode, ...codeStateParts] = String(code).split("#");
+    const codeState = codeStateParts.join("#");
     const res = await oauthFetch(cfg.tokenUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        // The token endpoint expects the same client identity the CLI sends.
+        "User-Agent": claudeUserAgent(),
+        "X-App": "cli",
+        "Anthropic-Dangerous-Direct-Browser-Access": "true",
+      },
       body: JSON.stringify({
         code: authCode,
         state: codeState || state,
@@ -195,14 +224,50 @@ const claude = {
       }),
     }, { proxyUrl });
     const t = await readJson(res, "Claude token exchange");
-    return {
+    const tokens = {
       access_token: t.access_token,
       refresh_token: t.refresh_token,
       expires_in: t.expires_in,
       email: t.account?.email_address,
     };
+    const extra = await fetchClaudeBootstrap(tokens.access_token, proxyUrl);
+    if (extra) tokens.extra = extra;
+    return tokens;
   },
 };
+
+/**
+ * Best-effort read of the Claude account behind an OAuth token. A failure here
+ * must not block the login, the access token alone is enough to use the API.
+ */
+async function fetchClaudeBootstrap(accessToken, proxyUrl) {
+  if (!accessToken) return null;
+  try {
+    const res = await oauthFetch(OAUTH_CONFIG.claude.bootstrapUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "User-Agent": claudeUserAgent(),
+        "X-App": "cli",
+        "Anthropic-Dangerous-Direct-Browser-Access": "true",
+        "anthropic-beta": "oauth-2025-04-20",
+      },
+    }, { proxyUrl });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const acct = data?.oauth_account;
+    if (!acct || typeof acct !== "object") return null;
+    return {
+      account_uuid: acct.account_uuid || null,
+      account_email: acct.account_email || null,
+      organization_uuid: acct.organization_uuid || null,
+      organization_name: acct.organization_name || null,
+      organization_rate_limit_tier: acct.organization_rate_limit_tier || null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const codex = {
   flowType: "authorization_code",

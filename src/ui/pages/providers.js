@@ -404,10 +404,17 @@ const OAUTH_SCRIPT = `
           '<p>' + link + '</p><p class="hint">Menunggu persetujuan...</p>');
       } else {
         pollMs = 2000;
+        var manualOnly = r.manualOnly === true;
         show('<p>Selesaikan login di tab yang terbuka. ' + link + '</p>' +
-          (r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
-            : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke Zenith Router, tempel URL callback atau kode di bawah.</p>') +
-          '<div class="field"><input id="oauth-manual" placeholder="http://localhost:.../callback?code=... atau code#state" autocomplete="off" /></div>' +
+          (manualOnly
+            ? '<p>Setelah login selesai, salin callback URL atau kode yang ditampilkan lalu tempelkan di bawah.</p>'
+            : r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
+              : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke Zenith Router, tempel URL callback atau kode di bawah.</p>') +
+          '<div class="field"><input id="oauth-manual" placeholder="' +
+          (manualOnly
+            ? 'https://platform.claude.com/oauth/code/callback?... atau code#state'
+            : 'http://localhost:.../callback?code=... atau code#state') +
+          '" autocomplete="off" /></div>' +
           '<button type="button" class="btn btn-sm" onclick="zrOAuthManual()">Kirim</button>' +
           '<p id="oauth-manual-error" class="hint" style="color: var(--danger); margin-top: 0.5rem;"></p>');
       }
@@ -605,6 +612,20 @@ function accountProxyCell(c, id, pools) {
 }
 
 /**
+ * The identity the provider reported for this account at login time, so a
+ * multi-account provider shows which Claude account is which.
+ */
+function accountIdentityCell(c) {
+  const creds = c.credentials || {};
+  const parts = [];
+  if (creds.account_email) parts.push(escapeHtml(creds.account_email));
+  if (creds.organization_name) parts.push(escapeHtml(creds.organization_name));
+  if (creds.organization_rate_limit_tier) parts.push(`tier ${escapeHtml(creds.organization_rate_limit_tier)}`);
+  if (parts.length === 0) return "";
+  return `<div class="hint" style="font-size: 0.75rem;">${parts.join(" · ")}</div>`;
+}
+
+/**
  * Provider detail: accounts, models (built-in + custom) with enable/disable.
  * Returns null when the provider id is unknown.
  */
@@ -630,7 +651,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       return `
         <tr>
           <td>${accountOrderCell(c, id, index, accounts.length)}</td>
-          <td><strong>${escapeHtml(c.name)}</strong></td>
+          <td><strong>${escapeHtml(c.name)}</strong>${accountIdentityCell(c)}</td>
           <td>${escapeHtml(c.auth_type)}</td>
           <td>${accountProxyCell(c, id, proxyPools)}</td>
           <td>${status}</td>

@@ -106,9 +106,13 @@ export async function startOAuthFlow({ providerId, origin, name, proxyUrl }) {
 
   const { codeVerifier, codeChallenge } = pkcePair();
   const state = crypto.randomBytes(24).toString("base64url");
-  const redirectUri = impl.fixedPort
-    ? `http://localhost:${impl.fixedPort}${impl.callbackPath}`
-    : `${origin.replace("127.0.0.1", "localhost")}/callback`;
+  // Claude only accepts its official callback for this client id, so the login
+  // finishes when the user pastes the callback URL or code back.
+  const redirectUri = impl.redirectUri
+    ? impl.redirectUri
+    : impl.fixedPort
+      ? `http://localhost:${impl.fixedPort}${impl.callbackPath}`
+      : `${origin.replace("127.0.0.1", "localhost")}/callback`;
   Object.assign(flow, { state, codeVerifier, redirectUri });
   flows.set(flowId, flow);
 
@@ -121,7 +125,8 @@ export async function startOAuthFlow({ providerId, origin, name, proxyUrl }) {
     flowType: "authorization_code",
     authUrl: impl.buildAuthUrl({ redirectUri, state, codeChallenge: impl.pkce ? codeChallenge : undefined }),
     // When the redirect cannot reach Zenith Router, the user pastes the callback URL instead.
-    listening,
+    listening: impl.manualOnly ? false : listening,
+    manualOnly: Boolean(impl.manualOnly),
   };
 }
 
@@ -209,12 +214,31 @@ export async function completeManual(flowId, input) {
   let state = flow.state;
   const stateless = Boolean(flow.impl.stateless);
   if (/^https?:\/\//i.test(raw)) {
-    const url = new URL(raw);
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      return { ok: false, error: "URL callback tidak valid." };
+    }
+    const err = url.searchParams.get("error");
+    if (err) {
+      return {
+        ok: false,
+        error: url.searchParams.get("error_description") || err,
+      };
+    }
     code = url.searchParams.get("code") || "";
     state = url.searchParams.get("state") || (stateless ? flow.state : "");
-    if (url.searchParams.get("error")) return { ok: false, error: url.searchParams.get("error") };
+    // The manual page sometimes carries the code or the state in the fragment.
+    if (url.hash) {
+      const frag = new URLSearchParams(url.hash.replace(/^#/, ""));
+      if (!code) code = frag.get("code") || "";
+      if (!state) state = frag.get("state") || "";
+    }
   } else if (raw.includes("#")) {
-    state = raw.split("#")[1];
+    const [codePart, ...rest] = raw.split("#");
+    code = codePart;
+    state = rest.join("#") || flow.state;
   }
   if (!code) return { ok: false, error: "Tidak menemukan code di input." };
   if (state !== flow.state) return { ok: false, error: "State tidak cocok. Pastikan URL berasal dari login yang sama." };

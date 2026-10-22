@@ -1,6 +1,6 @@
-## [Unreleased]
+## [0.1.7] - 22-10-2026
 
-Ketahanan OpenCode free tier: endpoint mengikuti katalog resmi, 403 direspons dengan cooldown lokal, dan model pensiun ditolak di router.
+Ketahanan OpenCode free tier, kuota Antigravity per pool, integrasi kuota OpenRouter dan Ollama Cloud, login Claude lewat redirect resmi, dan penanganan 404 transien upstream.
 
 ### Endpoint & Katalog OpenCode
 
@@ -68,9 +68,65 @@ Ketahanan OpenCode free tier: endpoint mengikuti katalog resmi, 403 direspons de
 - Engine `public/zr-live.js` memakai delegation di `document` dan mengeksekusi ulang script halaman setelah swap; EventSource Live Console, polling Recent Requests/topologi, dan timer login OAuth didaftarkan ke registry cleanup sehingga ditutup sebelum elemen lama dibuang.
 - Form tetap berfungsi tanpa JavaScript (handler tetap redirect). Form yang butuh navigasi asli bisa diberi atribut `data-native`. Bila sesi admin berakhir di tengah aksi, browser dialihkan otomatis ke halaman login.
 
+### Default Fallback Model
+
+- Model yang gagal pada seluruh akunnya dialihkan ke `default_fallback_model`, baik model tunggal maupun combo aktif.
+- Percobaan per request mencegah target yang sama dipanggil dua kali, dan guard abort klien menghentikan peralihan saat klien sudah disconnect.
+- Kolom `usage_history.fallback_from` mencatat model atau combo yang diminta klien, sehingga Recent Requests menampilkan asal peralihan sebagai "asal → model-penjawab".
+- Dropdown di Settings menawarkan Nonaktif, combo aktif, dan model per provider berkoneksi aktif; nilai tersimpan yang sudah tidak tersedia tetap ditampilkan.
+
+### Kuota Pool Antigravity
+
+- Kuota 5 jam dan mingguan per kelompok model dibaca dari `retrieveUserQuotaSummary` saat sinkronisasi kuota.
+- Setiap kelompok model berbagi satu limit 5 jam dan satu limit mingguan; bucket yang dinonaktifkan dilewati dan window yang tidak dikenal dibuang, bukan dipaksa ke window yang dikenal.
+- Routing ke model Antigravity dihentikan selama pool kelompoknya habis, sampai waktu reset terjadwal.
+
+### Kuota OpenRouter
+
+- Endpoint resmi `/api/v1/key` dan `/api/v1/credits` dipakai untuk mengambil limit key, saldo akun, dan pemakaian harian serta bulanan.
+- Kegagalan salah satu endpoint tidak menggagalkan yang lain, sehingga kuota tetap tampil sebagian.
+- Free tier tanpa limit key tidak ditandai habis meski saldo nol; bila limit key sudah ada, status habis mengikuti limit tersebut.
+
+### Kuota Ollama Cloud
+
+- Saldo diambil dari `https://ollama.com/api/balance`, dengan override `ZENITH_OLLAMA_BALANCE_URL`.
+- Allowance bulanan, window sesi, window mingguan, dan kredit yang dibeli ditampilkan sebagai baris terpisah, sehingga seluruh jenis kuota terlihat sekaligus.
+- Kredit yang dibeli mencegah akun ditandai habis saat allowance bulanan sudah nol.
+
+### Reasoning Content DeepSeek
+
+- Model DeepSeek dalam thinking mode menolak request multi-turn bila pesan assistant sebelumnya tidak membawa `reasoning_content` (HTTP 400).
+- Setiap giliran assistant historis kini pastikan field tersebut ada, baik pada jalur utama maupun retry pergantian protokol, sehingga klien yang membuang blok thinking tidak memicu error.
+
+### Kuota Free Tier xKiro
+
+- Respons 429 dengan header `x-ratelimit-scope: free` mengunci seluruh model free tier milik akun tersebut, bukan hanya model yang sedang dipanggil, sesuai durasi `Retry-After`. Berlaku untuk semua provider yang mengirim header tersebut.
+- Kuota akun disinkronkan segera setelah 429, sehingga batas harian yang terpakai tercatat tanpa menunggu jadwal sinkron berikutnya.
+
+### Login Claude OAuth
+
+- Login memakai redirect URI resmi `https://platform.claude.com/oauth/code/callback` (dapat dioverride lewat `CLAUDE_CODE_REDIRECT_URI`), sama persis pada authorization dan token exchange.
+- Scope ditambahkan `user:sessions:claude_code` dan `user:mcp_servers`, dan parameter `prompt=login` memaksa browser tidak memakai sesi Claude lama.
+- Callback diarahkan ke halaman Claude, jadi login diselesaikan manual dengan menempel callback URL atau `code#state`. Parser menangani URL penuh, `code#state`, code polos, error provider, dan input tidak valid; state yang tidak cocok ditolak.
+- Pengambilan profil best-effort: kegagalan tidak membatalkan login. Bila berhasil, UUID akun, email, UUID dan nama organisasi, serta tier rate limit disimpan di kredensial; yang ditampilkan di baris akun adalah email, nama organisasi, dan tier rate limit.
+- Identitas klien Claude Code kini konsisten di login, bootstrap, dan runtime: User-Agent `claude-cli/... (external, cli)`, `X-App: cli`, dan `Anthropic-Dangerous-Direct-Browser-Access`.
+- `x-claude-code-session-id` diteruskan dari `metadata.user_id`, yang hanya boleh sampai ke Claude. Untuk provider lain, `metadata.user_id` dibuang tanpa merusak metadata lainnya.
+
+### 404 Transien Upstream
+
+- 404 upstream dengan pola Google "model not found for API version / not supported for generateContent", yang menyebut model yang tidak benar-benar dikirim, tidak lagi diteruskan apa adanya ke klien. Berlaku pada provider Cloud Code (Antigravity), satu-satunya provider yang bicara dengan layanan itu.
+- Request dipindahkan ke akun lain bila tersedia; bila tidak ada, akun yang sama dicoba satu kali tanpa cooldown atau lock model.
+- 404 biasa dan 404 yang menyebut model yang benar-benar diminta tetap langsung dikembalikan.
+
+### Ketahanan Stream
+
+- Reset koneksi di tengah stream upstream berakhir dengan frame error sesuai protokol klien (chat, Claude, Responses), bukan stack yang membanjiri terminal.
+- Hang-up klien dibedakan dari reset upstream, sehingga disconnect normal tidak dicatat sebagai kegagalan.
+- Error handler yang tidak tertangani dilempar ke konsol dashboard dan dibalas JSON 500 tanpa stack, sementara `HTTPException` diteruskan apa adanya.
+
 ### Pengujian
 
-- Seluruh test lulus (745 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, failover kuota/auth, refresh token OAuth, prioritas akun, proteksi token admin control plane, dashboard tanpa reload, dan autentikasi login dashboard.
+- Seluruh test lulus (802 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, failover kuota/auth, refresh token OAuth, prioritas akun, proteksi token admin control plane, dashboard tanpa reload, autentikasi login dashboard, pool kuota Antigravity, kuota OpenRouter, kuota Ollama Cloud, reasoning content DeepSeek, login Claude, 404 transien, dan ketahanan stream.
 
 ## [0.1.6] - 17-10-2026
 

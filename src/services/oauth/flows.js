@@ -107,7 +107,7 @@ export async function startOAuthFlow({ providerId, origin, name, proxyUrl }) {
   const { codeVerifier, codeChallenge } = pkcePair();
   const state = crypto.randomBytes(24).toString("base64url");
   // Claude only accepts its official callback for this client id, so the login
-  // finishes when the user pastes the callback URL or code back.
+  // finishes when the user pastes the code back.
   const redirectUri = impl.redirectUri
     ? impl.redirectUri
     : impl.fixedPort

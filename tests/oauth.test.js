@@ -13,6 +13,7 @@ import {
   resetOAuthFlows,
 } from "../src/services/oauth/flows.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "../src/services/tokenRefresh.js";
+import { formatManualOAuthError } from "../src/ui/pages/providers.js";
 import { app } from "../src/index.js";
 
 const json = (data, status = 200) =>
@@ -642,3 +643,91 @@ test("cline manual paste - callback URL without state is accepted", async () => 
   const out = await completeManual(flowId, `http://localhost:20120/callback?code=${encodeURIComponent(code)}`);
   assert.strictEqual(out.ok, true);
 });
+
+test("dialog login claude - cabang manualOnly memakai istilah kode dan bukan URL, non-manualOnly tidak berubah", async () => {
+  initDb(":memory:");
+  const res = await app.request("/dashboard/providers/claude");
+  assert.strictEqual(res.status, 200);
+  const html = await res.text();
+
+  // Dialog Claude (manualOnly) harus menginstruksikan langkah salin dan tempel kode.
+  assert.ok(html.includes("Buka tautan login di tab yang terbuka."));
+  assert.ok(html.includes("Setujui akses, salin kode yang ditampilkan Claude, tempelkan kode itu di kolom di bawah, lalu tekan Kirim."));
+  assert.ok(html.includes("Tempel kode dari Claude di sini"));
+  assert.ok(!html.includes("https://platform.claude.com/oauth/code/callback?..."));
+
+  // Cabang non-manualOnly tidak berubah.
+  assert.ok(html.includes("Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual."));
+  assert.ok(html.includes("http://localhost:.../callback?code=... atau code#state"));
+});
+
+test("dialog login claude - pesan error UI manualOnly berbicara tentang kode bukan URL callback", () => {
+  // Claude (manualOnly = true)
+  assert.strictEqual(formatManualOAuthError("", true), "Masukkan kode dari Claude terlebih dahulu.");
+  assert.strictEqual(formatManualOAuthError("Tidak menemukan code di input.", true), "Masukkan kode dari Claude terlebih dahulu.");
+  assert.strictEqual(formatManualOAuthError("URL callback tidak valid.", true), "Kode tidak valid.");
+  assert.strictEqual(
+    formatManualOAuthError("State tidak cocok. Pastikan URL berasal dari login yang sama.", true),
+    "Kode tidak cocok. Pastikan kode berasal dari login yang sama."
+  );
+  assert.strictEqual(
+    formatManualOAuthError("Sesi login tidak ditemukan atau sudah selesai.", true),
+    "Sesi login kedaluwarsa atau sudah selesai. Ulangi login untuk mendapatkan kode baru."
+  );
+
+  // Provider lain (manualOnly = false) tidak berubah
+  assert.strictEqual(formatManualOAuthError("", false), "Gagal.");
+  assert.strictEqual(formatManualOAuthError("Tidak menemukan code di input.", false), "Tidak menemukan code di input.");
+  assert.strictEqual(formatManualOAuthError("URL callback tidak valid.", false), "URL callback tidak valid.");
+  assert.strictEqual(
+    formatManualOAuthError("State tidak cocok. Pastikan URL berasal dari login yang sama.", false),
+    "State tidak cocok. Pastikan URL berasal dari login yang sama."
+  );
+  assert.strictEqual(
+    formatManualOAuthError("Sesi login tidak ditemukan atau sudah selesai.", false),
+    "Sesi login tidak ditemukan atau sudah selesai."
+  );
+});
+
+test("claude login - completeManual menerima kode polos, code#state, dan callback URL lama", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const calls = mockFetch({
+    "api.anthropic.com/v1/oauth/token": json({
+      access_token: "sk-ant-test",
+      refresh_token: "rt-test",
+      expires_in: 3600,
+    }),
+  });
+
+  // 1. Kode polos (bare code)
+  const f1 = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const s1 = new URL(f1.authUrl).searchParams.get("state");
+  const r1 = await completeManual(f1.flowId, "cl-random-auth-code-12345");
+  assert.strictEqual(r1.ok, true);
+  const call1 = calls.filter((c) => c.url.includes("oauth/token")).pop();
+  assert.strictEqual(call1.body.code, "cl-random-auth-code-12345");
+  assert.strictEqual(call1.body.state, s1);
+
+  // 2. Format code#state
+  const f2 = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const s2 = new URL(f2.authUrl).searchParams.get("state");
+  const r2 = await completeManual(f2.flowId, `cl-code-part#${s2}`);
+  assert.strictEqual(r2.ok, true);
+  const call2 = calls.filter((c) => c.url.includes("oauth/token")).pop();
+  assert.strictEqual(call2.body.code, "cl-code-part");
+  assert.strictEqual(call2.body.state, s2);
+
+  // 3. Format lama callback URL
+  const f3 = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
+  const s3 = new URL(f3.authUrl).searchParams.get("state");
+  const r3 = await completeManual(
+    f3.flowId,
+    `https://platform.claude.com/oauth/code/callback?code=legacy-code&state=${encodeURIComponent(s3)}`
+  );
+  assert.strictEqual(r3.ok, true);
+  const call3 = calls.filter((c) => c.url.includes("oauth/token")).pop();
+  assert.strictEqual(call3.body.code, "legacy-code");
+  assert.strictEqual(call3.body.state, s3);
+});
+

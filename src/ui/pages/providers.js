@@ -364,10 +364,27 @@ function usesLogin(p) {
 }
 
 /** Inline script for the login buttons: start a flow, open the provider page, poll until saved. */
+export function formatManualOAuthError(msg, isManualOnly) {
+  if (!isManualOnly) return msg || "Gagal.";
+  if (!msg || /Tidak menemukan code/i.test(msg)) {
+    return "Masukkan kode dari Claude terlebih dahulu.";
+  }
+  if (/URL callback tidak valid/i.test(msg)) {
+    return "Kode tidak valid.";
+  }
+  if (/Pastikan URL/i.test(msg) || /State tidak cocok/i.test(msg)) {
+    return "Kode tidak cocok. Pastikan kode berasal dari login yang sama.";
+  }
+  if (/Sesi login/i.test(msg)) {
+    return "Sesi login kedaluwarsa atau sudah selesai. Ulangi login untuk mendapatkan kode baru.";
+  }
+  return msg;
+}
+
 const OAUTH_SCRIPT = `
 <script>
 (function () {
-  var flowId = null, timer = null, pollMs = 2000;
+  var flowId = null, timer = null, pollMs = 2000, isManualOnly = false;
   var statusEl = document.getElementById('oauth-status');
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); }
   function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
@@ -375,6 +392,14 @@ const OAUTH_SCRIPT = `
   function post(url, data) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.error) j.error = 'HTTP ' + r.status; return j; }); });
+  }
+  function formatManualError(msg, manual) {
+    if (!manual) return msg || 'Gagal.';
+    if (!msg || /Tidak menemukan code/i.test(msg)) return 'Masukkan kode dari Claude terlebih dahulu.';
+    if (/URL callback tidak valid/i.test(msg)) return 'Kode tidak valid.';
+    if (/Pastikan URL/i.test(msg) || /State tidak cocok/i.test(msg)) return 'Kode tidak cocok. Pastikan kode berasal dari login yang sama.';
+    if (/Sesi login/i.test(msg)) return 'Sesi login kedaluwarsa atau sudah selesai. Ulangi login untuk mendapatkan kode baru.';
+    return msg;
   }
   function done() { location.href = location.pathname + '?notice=account_added'; }
   function schedule() { clearTimeout(timer); timer = setTimeout(tick, pollMs); }
@@ -395,6 +420,7 @@ const OAUTH_SCRIPT = `
     post('/dashboard/oauth/start', { provider: provider, name: val('acct-name'), proxy_url: val('acct-proxy') }).then(function (r) {
       if (r.error) { if (popup) popup.close(); return show(esc(r.error), true); }
       flowId = r.flowId;
+      isManualOnly = r.manualOnly === true;
       var url = r.flowType === 'device_code' ? r.verificationUri : r.authUrl;
       if (popup) { popup.opener = null; popup.location.href = url; }
       var link = '<a href="' + esc(url) + '" target="_blank" rel="noopener">Buka halaman login</a>';
@@ -404,15 +430,14 @@ const OAUTH_SCRIPT = `
           '<p>' + link + '</p><p class="hint">Menunggu persetujuan...</p>');
       } else {
         pollMs = 2000;
-        var manualOnly = r.manualOnly === true;
-        show('<p>Selesaikan login di tab yang terbuka. ' + link + '</p>' +
-          (manualOnly
-            ? '<p>Setelah login selesai, salin callback URL atau kode yang ditampilkan lalu tempelkan di bawah.</p>'
-            : r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
-              : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke Zenith Router, tempel URL callback atau kode di bawah.</p>') +
+        show((isManualOnly
+            ? '<p>Buka tautan login di tab yang terbuka. ' + link + '</p><p>Setujui akses, salin kode yang ditampilkan Claude, tempelkan kode itu di kolom di bawah, lalu tekan Kirim.</p>'
+            : '<p>Selesaikan login di tab yang terbuka. ' + link + '</p>' +
+              (r.listening === false ? '<p>Port callback sedang dipakai aplikasi lain, jadi tempel URL callback secara manual.</p>'
+                : '<p class="hint">Menunggu callback. Kalau browser tidak kembali ke Zenith Router, tempel URL callback atau kode di bawah.</p>')) +
           '<div class="field"><input id="oauth-manual" placeholder="' +
-          (manualOnly
-            ? 'https://platform.claude.com/oauth/code/callback?... atau code#state'
+          (isManualOnly
+            ? 'Tempel kode dari Claude di sini'
             : 'http://localhost:.../callback?code=... atau code#state') +
           '" autocomplete="off" /></div>' +
           '<button type="button" class="btn btn-sm" onclick="zrOAuthManual()">Kirim</button>' +
@@ -423,14 +448,21 @@ const OAUTH_SCRIPT = `
   };
   window.zrOAuthManual = function () {
     if (!flowId) return;
-    post('/dashboard/oauth/manual', { flowId: flowId, input: val('oauth-manual') }).then(function (r) {
+    var errEl = document.getElementById('oauth-manual-error');
+    var raw = val('oauth-manual');
+    if (isManualOnly && !raw) {
+      errEl.textContent = formatManualError('', true);
+      return;
+    }
+    post('/dashboard/oauth/manual', { flowId: flowId, input: raw }).then(function (r) {
       if (r.status === 'done') return done();
-      document.getElementById('oauth-manual-error').textContent = r.error || 'Gagal.';
+      errEl.textContent = formatManualError(r.error, isManualOnly);
     });
   };
   window.zrOAuthCancel = function () {
     if (flowId) post('/dashboard/oauth/cancel', { flowId: flowId });
     flowId = null;
+    isManualOnly = false;
     clearTimeout(timer);
     statusEl.hidden = true;
   };

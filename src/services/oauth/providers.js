@@ -63,7 +63,7 @@ export const OAUTH_CONFIG = {
       "user:mcp_servers",
     ],
     // Anthropic only accepts the official Claude Code redirect for this client
-    // id, so the login finishes by pasting the callback URL or code back.
+    // id, so the login finishes by pasting the code back.
     redirectUri:
       process.env.CLAUDE_CODE_REDIRECT_URI || "https://platform.claude.com/oauth/code/callback",
     bootstrapUrl: "https://api.anthropic.com/api/claude_cli/bootstrap",
@@ -176,8 +176,8 @@ const AWS_REGION = /^[a-z]{2}-[a-z]+-\d{1,2}$/;
 const claude = {
   flowType: "authorization_code",
   pkce: true,
-  // Claude redirects to its own callback page, so the login is finished by
-  // pasting the callback URL or code back into the dashboard.
+  // Claude redirects to its own page, so the login is finished by
+  // pasting the code back into the dashboard.
   manualOnly: true,
   redirectUri: OAUTH_CONFIG.claude.redirectUri,
   buildAuthUrl({ redirectUri, state, codeChallenge }) {

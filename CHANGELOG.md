@@ -111,6 +111,7 @@ Ketahanan OpenCode free tier, kuota Antigravity per pool, integrasi kuota OpenRo
 - Pengambilan profil best-effort: kegagalan tidak membatalkan login. Bila berhasil, UUID akun, email, UUID dan nama organisasi, serta tier rate limit disimpan di kredensial; yang ditampilkan di baris akun adalah email, nama organisasi, dan tier rate limit.
 - Identitas klien Claude Code kini konsisten di login, bootstrap, dan runtime: User-Agent `claude-cli/... (external, cli)`, `X-App: cli`, dan `Anthropic-Dangerous-Direct-Browser-Access`.
 - `x-claude-code-session-id` diteruskan dari `metadata.user_id`, yang hanya boleh sampai ke Claude. Untuk provider lain, `metadata.user_id` dibuang tanpa merusak metadata lainnya.
+- Dialog login Claude di UI disesuaikan untuk alur salin dan tempel kode (bukan URL callback), dengan placeholder petunjuk kode dan pesan error yang spesifik.
 
 ### 404 Transien Upstream
 
@@ -126,7 +127,7 @@ Ketahanan OpenCode free tier, kuota Antigravity per pool, integrasi kuota OpenRo
 
 ### Pengujian
 
-- Seluruh test lulus (802 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, failover kuota/auth, refresh token OAuth, prioritas akun, proteksi token admin control plane, dashboard tanpa reload, autentikasi login dashboard, pool kuota Antigravity, kuota OpenRouter, kuota Ollama Cloud, reasoning content DeepSeek, login Claude, 404 transien, dan ketahanan stream.
+- Seluruh test lulus (805 test), mencakup parsing katalog, resolusi URL per lane, retry identitas, cooldown lokal, penolakan model pensiun, ketahanan transport, failover kuota/auth, refresh token OAuth, prioritas akun, proteksi token admin control plane, dashboard tanpa reload, autentikasi login dashboard, pool kuota Antigravity, kuota OpenRouter, kuota Ollama Cloud, reasoning content DeepSeek, login Claude dan dialog kode, 404 transien, dan ketahanan stream.
 
 ## [0.1.6] - 17-10-2026
 

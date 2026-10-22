@@ -3,6 +3,7 @@ import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
+import { guardStream } from "../services/streamGuard.js";
 
 const upstreamBaseUrl = (provider) =>
   provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
@@ -108,10 +109,17 @@ export async function handleChat(c) {
         streamHeaders["X-Zenith-Account"] = connection.name;
       }
 
-      return new Response(responseStream, {
-        status: 200,
-        headers: streamHeaders,
-      });
+      return guardStream(
+        new Response(responseStream, {
+          status: 200,
+          headers: streamHeaders,
+        }),
+        {
+          signal: c.req.raw.signal,
+          label: `${provider?.id || "upstream"} ${targetModel}`,
+          format: "openai",
+        }
+      );
     }
 
     const finalData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);

@@ -3,6 +3,7 @@ import { clientSessionKey } from "./session.js";
 import { translateResponse, createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
+import { guardStream } from "../services/streamGuard.js";
 
 /**
  * Non-streaming body for an Anthropic client. A native Anthropic message from a
@@ -236,10 +237,17 @@ export async function handleMessages(c) {
         streamHeaders["X-Zenith-Account"] = connection.name;
       }
 
-      return new Response(responseStream, {
-        status: 200,
-        headers: streamHeaders,
-      });
+      return guardStream(
+        new Response(responseStream, {
+          status: 200,
+          headers: streamHeaders,
+        }),
+        {
+          signal: c.req.raw.signal,
+          label: `${provider?.id || "upstream"} ${targetModel}`,
+          format: "claude",
+        }
+      );
     }
 
     const finalData = await upstreamResponseToClaude(upstreamRes, targetFormat, targetModel);

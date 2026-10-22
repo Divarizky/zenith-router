@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 // Versi tampilan (banner CLI, /health, sidebar) dibaca dari package.json agar tidak basi saat bump.
 import pkg from "../package.json" with { type: "json" };
 import { streamSSE } from "hono/streaming";
+import { HTTPException } from "hono/http-exception";
 import { handleListModels, handleGetModelOptions } from "./gateway/models.js";
 import { handleChat } from "./gateway/chat.js";
 import { handleMessages } from "./gateway/messages.js";
@@ -21,6 +22,7 @@ import {
   getConsoleLogs,
   clearConsoleLogs,
   getConsoleEmitter,
+  captureLine,
 } from "./services/logger.js";
 import { renderOverviewPage } from "./ui/pages/overview.js";
 import {
@@ -108,6 +110,24 @@ export const PORT = Number(process.env.PORT || 20120);
 
 // Initialize console capture eagerly so all gateway activity is captured from launch
 initConsoleLogCapture();
+
+// Unhandled handler errors go to the dashboard console only: Hono's default
+// handler prints a raw stack to the terminal, which polluted the CLI whenever
+// background polling hit a handler bug.
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
+  captureLine(`[zenith] Unhandled error on ${c.req.method} ${c.req.path}: ${err?.stack || err?.message || err}`, "error");
+  return c.json(
+    {
+      error: {
+        message: "Internal gateway error",
+        type: "gateway_error",
+        code: "internal_error",
+      },
+    },
+    500
+  );
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "../public");

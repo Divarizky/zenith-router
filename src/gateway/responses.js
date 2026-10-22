@@ -3,6 +3,7 @@ import { clientSessionKey } from "./session.js";
 import { createTransformStream, FORMATS } from "../translator/index.js";
 import { recordUsage, createUsageTapStream, estimateResponsesInputTokens } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
+import { guardStream } from "../services/streamGuard.js";
 import { openAIMessageToResponsesOutput, aggregateResponsesStream, customToolNamesFromBody } from "../translator/responses.js";
 
 const upstreamBaseUrl = (provider) =>
@@ -109,10 +110,17 @@ export async function handleResponses(c) {
         streamHeaders["X-Zenith-Account"] = connection.name;
       }
 
-      return new Response(responseStream, {
-        status: 200,
-        headers: streamHeaders,
-      });
+      return guardStream(
+        new Response(responseStream, {
+          status: 200,
+          headers: streamHeaders,
+        }),
+        {
+          signal: c.req.raw.signal,
+          label: `${provider?.id || "upstream"} ${targetModel}`,
+          format: "responses",
+        }
+      );
     }
 
     // Responses upstream answering a Responses client: the JSON body is the

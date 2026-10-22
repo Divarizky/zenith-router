@@ -449,7 +449,19 @@ test("tokenRefresh - a token endpoint that never answers times out and frees the
     if (calls === 1) {
       // Never answers; only the abort signal ends it.
       return new Promise((_, reject) => {
-        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+        // AbortSignal.timeout's own timer is unref'd, so nothing would keep the
+        // event loop alive here (Node 22 then resolves the loop and kills the
+        // still-pending promise). A referenced keep-alive timer stands in for the
+        // real TCP socket and is cleared as soon as the abort arrives.
+        const keepAlive = setTimeout(() => {}, 10000);
+        init.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(keepAlive);
+            reject(init.signal.reason);
+          },
+          { once: true }
+        );
       });
     }
     return new Response(JSON.stringify({ access_token: "after_timeout", expires_in: 3600 }), {

@@ -71,6 +71,18 @@ function payloadSaysFree(m) {
   return Boolean(p) && Number(p.prompt) === 0 && Number(p.completion) === 0;
 }
 
+function cleanClineDisplayName(rawName, id) {
+  let name = rawName || id || "";
+  if (!name.startsWith("cline-free/")) return name;
+  const stripped = name.slice("cline-free/".length);
+  return stripped
+    .split("-")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+    .join(" ")
+    .replace(/\bVl\b/i, "VL")
+    .trim() || stripped;
+}
+
 /**
  * Providers whose live model list can be imported.
  * `modes` lists the import choices the dashboard offers; `public` means the
@@ -90,7 +102,7 @@ const IMPORTERS = {
       for (const m of free) if (!all.some((r) => r.id === m.id)) all.push(m);
       return all.map((m) => ({
         id: m.id,
-        name: m.name || m.id,
+        name: cleanClineDisplayName(m.name, m.id),
         isFree: freeIds.has(m.id) || String(m.id).startsWith("cline-free/"),
       }));
     },

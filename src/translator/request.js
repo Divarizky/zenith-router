@@ -107,9 +107,11 @@ function claudeToolResultToOpenAI(content) {
   return texts.join("\n");
 }
 
-// A Claude assistant content array: thinking blocks are dropped, text becomes
-// the message content, and each tool_use becomes an OpenAI tool_call. Returns
-// null for a thinking-only turn (nothing representable in chat).
+// A Claude assistant content array: thinking blocks are kept as
+// reasoning_content (reasoning-replay models require it on every assistant
+// turn), text becomes the message content, and each tool_use becomes an
+// OpenAI tool_call. Returns null for a thinking-only turn (nothing
+// representable in chat other than the reasoning itself).
 function claudeAssistantToOpenAI(content) {
   if (typeof content === "string") return { role: "assistant", content };
   if (!Array.isArray(content)) {
@@ -118,11 +120,16 @@ function claudeAssistantToOpenAI(content) {
 
   const textParts = [];
   const toolCalls = [];
+  const thinkingParts = [];
 
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     if (block.type === "text" && typeof block.text === "string") {
       textParts.push(block.text);
+    } else if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
+      thinkingParts.push(block.thinking);
+    } else if (block.type === "reasoning" && typeof block.text === "string" && block.text) {
+      thinkingParts.push(block.text);
     } else if (block.type === "tool_use") {
       toolCalls.push({
         id: block.id || `call_${Math.random().toString(36).slice(2, 10)}`,
@@ -133,12 +140,13 @@ function claudeAssistantToOpenAI(content) {
         },
       });
     }
-    // thinking / redacted_thinking / server_tool_use have no chat analogue
+    // redacted_thinking / server_tool_use have no chat analogue
   }
 
-  if (textParts.length === 0 && toolCalls.length === 0) return null;
+  if (textParts.length === 0 && toolCalls.length === 0 && thinkingParts.length === 0) return null;
 
   const message = { role: "assistant", content: textParts.length > 0 ? textParts.join("\n") : null };
+  if (thinkingParts.length > 0) message.reasoning_content = thinkingParts.join("\n");
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
   return message;
 }

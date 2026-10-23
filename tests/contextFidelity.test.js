@@ -449,14 +449,16 @@ test("claude->openai: tool_use, gambar, urutan, dan parameter", () => {
   assert.strictEqual(out.user, undefined, "metadata.user_id tidak diteruskan ke pihak ketiga");
   assert.strictEqual(out.thinking, undefined, "thinking Claude tidak dikirim ke upstream chat");
 
-  // Assistant: teks + tool_calls terpisah, thinking dibuang dari content.
+  // Assistant: teks + tool_calls terpisah; thinking hidup di reasoning_content
+  // (dibutuhkan model reasoning-replay), bukan di content.
   const asst = messages.find((m) => m.role === "assistant");
   assert.strictEqual(asst.content, "membaca file");
+  assert.strictEqual(asst.reasoning_content, "user minta membaca file", "thinking Claude jadi reasoning_content");
   assert.strictEqual(asst.tool_calls.length, 1);
   assert.strictEqual(asst.tool_calls[0].id, "toolu_1");
   assert.strictEqual(asst.tool_calls[0].function.name, "Read");
   assert.deepStrictEqual(JSON.parse(asst.tool_calls[0].function.arguments), { file_path: "a.txt" });
-  assert.ok(!JSON.stringify(asst).includes("user minta membaca file"), "thinking tidak bocor");
+  assert.ok(!asst.content.includes("user minta membaca file"), "thinking tidak bocor ke content");
 
   // User: gambar -> image_url.
   const user1 = messages[1];

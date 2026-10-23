@@ -266,6 +266,14 @@ export function responsesToOpenAIRequest(body) {
     messages.push({ role: "system", content: body.instructions });
   }
 
+  let pendingReasoning = "";
+  const flushReasoningInto = (msg) => {
+    if (pendingReasoning && msg && typeof msg === "object" && msg.role === "assistant" && msg.reasoning_content === undefined) {
+      msg.reasoning_content = pendingReasoning;
+    }
+    pendingReasoning = "";
+  };
+
   const items = typeof body.input === "string" ? [body.input] : Array.isArray(body.input) ? body.input : [];
   for (const item of items) {
     if (!item) continue;
@@ -274,6 +282,18 @@ export function responsesToOpenAIRequest(body) {
       continue;
     }
     if (typeof item !== "object") continue;
+
+    // Reasoning items ride with the assistant turn that follows them;
+    // reasoning-replay models require reasoning_content on every assistant
+    // message, so the summary text is carried instead of dropped.
+    if (item.type === "reasoning") {
+      const parts = [];
+      if (Array.isArray(item.summary)) parts.push(...item.summary.map((s) => s?.text || ""));
+      if (Array.isArray(item.content)) parts.push(...item.content.map((c) => c?.text || ""));
+      const text = parts.filter(Boolean).join("\n");
+      if (text) pendingReasoning = pendingReasoning ? `${pendingReasoning}\n${text}` : text;
+      continue;
+    }
 
     if (item.type === "function_call") {
       const call = {
@@ -287,8 +307,15 @@ export function responsesToOpenAIRequest(body) {
       // Parallel calls arrive as consecutive items; they share one assistant turn.
       const last = messages[messages.length - 1];
       if (last?.role === "assistant" && Array.isArray(last.tool_calls)) last.tool_calls.push(call);
-      else if (last?.role === "assistant" && !last.tool_calls) last.tool_calls = [call];
-      else messages.push({ role: "assistant", content: null, tool_calls: [call] });
+      else if (last?.role === "assistant" && !last.tool_calls) {
+        flushReasoningInto(last);
+        last.tool_calls = [call];
+      }
+      else {
+        const turn = { role: "assistant", content: null, tool_calls: [call] };
+        flushReasoningInto(turn);
+        messages.push(turn);
+      }
       continue;
     }
 
@@ -310,7 +337,11 @@ export function responsesToOpenAIRequest(body) {
       };
       const last = messages[messages.length - 1];
       if (last?.role === "assistant" && Array.isArray(last.tool_calls)) last.tool_calls.push(call);
-      else messages.push({ role: "assistant", content: null, tool_calls: [call] });
+      else {
+        const turn = last?.role === "assistant" ? last : { role: "assistant", content: null, tool_calls: [call] };
+        flushReasoningInto(turn);
+        if (turn !== last) messages.push(turn);
+      }
       continue;
     }
 
@@ -323,13 +354,16 @@ export function responsesToOpenAIRequest(body) {
       continue;
     }
 
-    if (item.type && item.type !== "message") continue; // reasoning and other non-message items
+    if (item.type && item.type !== "message") continue; // non-message items (reasoning handled above)
 
     const role = item.role === "developer" ? "system" : item.role || "user";
     if (role === "user") {
+      pendingReasoning = ""; // reasoning milik turn lain tidak menempel ke user
       messages.push({ role, content: responsesUserContent(item.content) });
     } else {
-      messages.push({ role, content: responsesText(item.content) });
+      const msg = { role, content: responsesText(item.content) };
+      flushReasoningInto(msg);
+      messages.push(msg);
     }
   }
 

@@ -32,8 +32,5 @@ export default {
     { id: "openai/gpt-6-astra", name: "GPT-6 Astra" },
     { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol" },
     { id: "moonshotai/kimi-k3", name: "Kimi K3" },
-    { id: "cline-free/solar-mini4", name: "Solar Mini 4 (Free)" },
-    { id: "cline-free/mimo-v2.6-flash", name: "Mimo V2.6 Flash (Free)" },
-    { id: "cline-free/muse-spark-1.3-contributor", name: "Muse Spark 1.3 (Free)" },
   ],
 };

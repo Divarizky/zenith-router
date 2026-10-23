@@ -1,0 +1,7 @@
+# False positives: dummy values used as test fixtures, not real credentials.
+# tests/deepseekCdpLogin.test.js uses a syntactically valid but fake JWT to
+# exercise looksLikeSessionToken(); the signature is the literal "signature".
+tests/deepseekCdpLogin.test.js:jwt:56
+# tests/deepseekWebBrowserLogin.test.js asserts the synthetic cookie string
+# captured from a fake browser login: intercom-id=1; ds_session_id=2
+tests/deepseekWebBrowserLogin.test.js:generic-api-key:58

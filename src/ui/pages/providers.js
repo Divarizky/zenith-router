@@ -9,6 +9,9 @@ import {
 } from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionFullyCooledDown } from "../../services/auth.js";
+import { getProviderTraffic } from "../../services/trafficGuard.js";
+import { checkSessionHealth, forgetSessionHealth, getSessionHealth } from "../../services/deepseekWeb/health.js";
+import { findSessionAccount } from "../../services/deepseekWeb/browserLogin.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import {
   listCustomModels,
@@ -40,9 +43,11 @@ import {
   setProxyRotationStrategy,
 } from "../../services/proxyPools.js";
 import { escapeHtml } from "../html.js";
+import { getSetting, setSetting, deleteSetting } from "../../services/settings.js";
 import { getProviderIconPath } from "../assets.js";
 
 const SECTIONS = [
+  { category: "session", title: "Session Providers", hint: "Butuh token sesi dari browser yang sudah login, bukan API key. Pemakaian tidak resmi berisiko pembatasan atau pemblokiran akun." },
   { category: "oauth", title: "OAuth Providers", hint: "Login dengan akun langganan, lalu tempel token di sini." },
   { category: "free", title: "Free Tier Providers", hint: "Provider gratis. Yang berlabel Siap bisa dipakai tanpa akun." },
   { category: "apikey", title: "API Key Providers", hint: "Butuh API key dari vendor." },
@@ -76,6 +81,9 @@ const IMPORT_MODE_LABELS = {
 /** Fixed notice texts keyed by the result code in the redirect query; never echo raw input. */
 function importNotice(query = {}) {
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
+  if (query.notice === "account_exists") {
+    return { ok: true, text: "Sesi ini sudah terdaftar sebagai akun. Tidak ada akun baru yang ditambahkan." };
+  }
   if (query.notice === "account_deleted") return { ok: true, text: "Akun berhasil dihapus." };
   if (query.notice === "account_moved") return { ok: true, text: "Urutan akun diperbarui." };
   if (query.notice === "proxy_invalid") {
@@ -83,6 +91,21 @@ function importNotice(query = {}) {
   }
   if (query.notice === "proxy_updated") return { ok: true, text: "Proxy akun diperbarui." };
   if (query.notice === "rotation_updated") return { ok: true, text: "Strategi rotasi proxy diperbarui." };
+  if (query.notice === "concurrency_updated") return { ok: true, text: "Batas sesi paralel diperbarui." };
+  if (query.notice === "concurrency_invalid") {
+    return { ok: false, text: "Batas sesi paralel harus bilangan bulat 1 sampai 10. Kosongkan untuk memakai nilai bawaan." };
+  }
+  if (query.notice === "session_token_missing") {
+    return { ok: false, text: "User token wajib diisi. Ambil nilai userToken dari localStorage chat.deepseek.com setelah login." };
+  }
+  if (query.notice === "session_ok") return { ok: true, text: "Sesi masih aktif." };
+  if (query.notice === "session_expired") {
+    return { ok: false, text: "Sesi kedaluwarsa. Ambil user token baru dari chat.deepseek.com, lalu isi di form Perbarui sesi." };
+  }
+  if (query.notice === "session_error") {
+    return { ok: false, text: "Health check gagal menghubungi DeepSeek. Periksa koneksi atau proxy akun, lalu coba lagi." };
+  }
+  if (query.notice === "session_updated") return { ok: true, text: "Token sesi diperbarui." };
   if (query.notice === "rotation_invalid") {
     return { ok: false, text: "Strategi rotasi tidak dikenal. Pilih Tidak aktif, Bergiliran, atau Acak." };
   }
@@ -228,11 +251,37 @@ function providerIconHtml(p, size = 32) {
   return `<span class="provider-icon" style="--pi:${size}px">${img}${badge}</span>`;
 }
 
-function statusPill(p, stats) {
+function statusPill(p, stats, accounts = []) {
+  // A cached expired verdict outranks the account count: the card must not
+  // advertise "connected" while every web token is dead.
+  if (p.category === "session") {
+    const health = accounts.map((account) => getSessionHealth(account)).filter(Boolean);
+    if (health.some((entry) => entry.status === "expired")) {
+      return `<span class="pill pill-danger">Sesi kedaluwarsa</span>`;
+    }
+  }
   if (p.noAuth) return `<span class="pill pill-success">Siap</span>`;
   if (stats.healthy > 0) return `<span class="pill pill-success">${stats.healthy} Terhubung</span>`;
   if (stats.total > 0) return `<span class="pill pill-warning">${stats.total} tidak aktif</span>`;
   return `<span class="pill">Belum ada akun</span>`;
+}
+
+/** Live slot usage for one account, as captured when the page was rendered. */
+function slotCell(traffic) {
+  if (!traffic) return `<span class="hint">—</span>`;
+  const queue = traffic.queue > 0 ? ` <span class="pill pill-warning">+${traffic.queue}</span>` : "";
+  return `<span class="pill${traffic.inFlight >= traffic.cap ? " pill-warning" : ""}">${traffic.inFlight}/${traffic.cap}</span>${queue}`;
+}
+
+/** Badge for a browser-session account, from the cached health verdict. */
+function sessionHealthCell(connection) {
+  const entry = getSessionHealth(connection);
+  if (!entry) return `<span class="pill">Belum dicek</span>`;
+  if (entry.status === "ok") return `<span class="pill pill-success">Sesi OK</span>`;
+  if (entry.status === "expired") {
+    return `<span class="pill pill-danger" title="${escapeHtml(entry.message || "")}">Sesi kedaluwarsa</span>`;
+  }
+  return `<span class="pill pill-warning" title="${escapeHtml(entry.message || "")}">Gagal dicek</span>`;
 }
 
 /**
@@ -278,7 +327,7 @@ export function renderProvidersPage(port = 20120, query = {}) {
               )} model</p>
             </div>
           </div>
-          ${statusPill(p, stats)}
+          ${statusPill(p, stats, byProvider.get(p.id) || [])}
         </div>
         ${s.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       </a>`;
@@ -474,9 +523,129 @@ const OAUTH_SCRIPT = `
 })();
 </script>`;
 
+// One-click login for session providers: the server opens a browser, this page
+// polls until the token is captured, then reloads with the new account.
+const SESSION_LOGIN_SCRIPT = `
+<script>
+(function () {
+  var btn = document.getElementById('session-login-start');
+  var statusEl = document.getElementById('oauth-status');
+  if (!btn || !statusEl) return;
+  var flowId = null, timer = null;
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); }
+  function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+  function show(html, isError) { statusEl.hidden = false; statusEl.className = 'oauth-status' + (isError ? ' error' : ''); statusEl.innerHTML = html; }
+  function post(url, data) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.error) j.error = 'HTTP ' + r.status; return j; }); });
+  }
+  function done(existing) { location.href = location.pathname + '?notice=' + (existing ? 'account_exists' : 'account_added'); }
+  function stop() { clearTimeout(timer); timer = null; flowId = null; btn.disabled = false; }
+  var PHASES = {
+    launching: 'Membuka browser...',
+    profile: 'Memuat sesi dari profil browser Anda...',
+    attaching: 'Membuka tab di browser yang sudah berjalan...',
+    verifying: 'Memeriksa sesi login...',
+    waiting: 'Selesaikan login di jendela browser. Jendela ditutup otomatis setelah sesi terverifikasi.'
+  };
+  function tick() {
+    if (!flowId) return;
+    post('/dashboard/providers/accounts/login/poll', { flowId: flowId }).then(function (r) {
+      if (r.status === 'done') return done(r.existing);
+      if (r.status === 'error') { stop(); return show('Login gagal: ' + esc(r.error || 'tidak diketahui'), true); }
+      show('<p>' + esc(PHASES[r.phase] || PHASES.waiting) + '</p><p class="hint">Captcha dan OTP tetap Anda isi sendiri.</p>');
+      timer = setTimeout(tick, 2000);
+    }).catch(function () { timer = setTimeout(tick, 2500); });
+  }
+  function start() {
+    stop();
+    btn.disabled = true;
+    show('Memulai login...');
+    post('/dashboard/providers/accounts/login/start', {
+      provider: btn.getAttribute('data-provider'),
+      name: val('acct-name'),
+      proxy_url: val('acct-proxy')
+    }).then(function (r) {
+      if (r.error) { stop(); return show(esc(r.error), true); }
+      flowId = r.flowId;
+      show('<p>' + esc(PHASES.launching) + '</p>');
+      tick();
+    }).catch(function (err) { stop(); show('Gagal memulai login: ' + esc(err.message), true); });
+  }
+  window.zrCopyAccount = function (form) { form.name.value = val('acct-name'); form.proxy_url.value = val('acct-proxy'); return true; };
+  btn.addEventListener('click', start);
+  window.zrSessionLoginCancel = function () {
+    if (flowId) post('/dashboard/providers/accounts/login/cancel', { flowId: flowId });
+    stop();
+    statusEl.hidden = true;
+  };
+  // Same reason as the OAuth script: a swap replaces the dialog, so the poll goes too.
+  if (window.__zrSwapCleanups) {
+    window.__zrSwapCleanups.push(function () { if (flowId) window.zrSessionLoginCancel(); });
+  }
+})();
+</script>`;
+
 function renderAddAccountModal(p) {
   const id = escapeHtml(p.id);
   const title = `<h3>Add ${escapeHtml(p.name)} Account</h3>`;
+
+  // Session providers follow the same dialog shape as the OAuth ones: one primary
+  // login button, one status area that reports progress, and manual entry folded
+  // away underneath. Only the work behind the button differs.
+  if ((p.authMethods || []).includes("session")) {
+    return `
+    <div class="modal-backdrop" id="add-account-modal">
+      <div class="modal">
+        ${title}
+        <div class="field">
+          <label for="acct-name">Label Akun (Opsional)</label>
+          <input type="text" id="acct-name" placeholder="Default: email akun" />
+        </div>
+        <div class="field">
+          <label for="acct-proxy">URL Proxy (Opsional)</label>
+          <input type="text" id="acct-proxy" placeholder="http://127.0.0.1:7890" />
+        </div>
+        <div class="notice" style="background: var(--bg-hover, #1e2029); border-left: 3px solid var(--warning, #eab308); padding: 0.5rem 0.75rem; font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.4;">
+          <span style="color: var(--text-muted, #94a3b8);">Token ini setara akses penuh ke akun DeepSeek kamu dan tersimpan plaintext di database gateway. Gunakan akun khusus, jangan bagikan token, dan pahami risiko pemblokiran akun karena pemakaian di luar klien resmi.</span>
+        </div>
+        <div class="oauth-actions">
+          <button type="button" class="btn btn-primary" id="session-login-start" data-provider="${id}">Login di browser</button>
+        </div>
+        <div id="oauth-status" class="oauth-status" hidden></div>
+        <details class="manual">
+          <summary>Tempel token manual</summary>
+          <form action="/dashboard/providers/accounts/add" method="POST" onsubmit="return zrCopyAccount(this)">
+            <input type="hidden" name="provider" value="${id}" />
+            <input type="hidden" name="name" />
+            <input type="hidden" name="proxy_url" />
+            <div class="field">
+              <label for="token">User Token</label>
+              <input type="password" id="token" name="token" placeholder="token eyJ... (isi field value dari userToken)" required />
+              <p class="hint" style="margin-bottom: 4px;">Cara mengambil token (sekitar satu menit):</p>
+              <ol class="hint" style="margin: 0 0 10px 1.1rem; padding: 0; line-height: 1.55;">
+                <li>Buka <code>chat.deepseek.com</code> dan login seperti biasa.</li>
+                <li>Tekan <kbd>F12</kbd>, lalu pilih tab <strong>Application</strong> (Chrome/Edge) atau <strong>Storage</strong> (Firefox).</li>
+                <li>Buka <strong>Local Storage</strong> &rarr; <code>https://chat.deepseek.com</code>, cari baris <code>userToken</code>.</li>
+                <li>Salin nilainya. Kalau bentuknya <code>{"value":"...","__version":"0"}</code>, ambil bagian <code>value</code> saja.</li>
+                <li>Tempel di kolom di atas. Cookies hanya perlu diisi kalau sesi diminta verifikasi tambahan.</li>
+              </ol>
+              <p class="hint">Token berlaku selama sesi di browser itu hidup; logout atau ganti akun membuat token lama tidak berlaku lagi.</p>
+            </div>
+            <div class="field">
+              <label for="cookies">Cookies (opsional)</label>
+              <input type="text" id="cookies" name="cookies" placeholder="a=1; b=2" />
+            </div>
+            <button type="submit" class="btn btn-sm">Simpan Token</button>
+          </form>
+        </details>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrSessionLoginCancel()">Tutup</button>
+        </div>
+      </div>
+    </div>
+    ${SESSION_LOGIN_SCRIPT}`;
+  }
 
   if (!usesLogin(p)) {
     return `
@@ -670,9 +839,19 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const alias = primaryAlias(p);
   const accounts = getConnections(p.id);
   const stats = accountStats(accounts);
+  const isSession = p.category === "session";
+  // Snapshot at render time; the dashboard has no polling loop.
+  const traffic = getProviderTraffic(p.id);
+  const trafficByAccount = new Map(traffic.accounts.map((account) => [account.id, account]));
   const id = escapeHtml(p.id);
   const proxyPools = listProxyPools();
   const proxyRotationStrategy = getProxyRotationStrategy(p.id);
+  // Explicit setting first, then the provider's own default, then the global cap.
+  const concurrencySetting = getSetting(`provider_concurrency:${p.id}`, "");
+  const declaredConcurrency = Number(p.concurrency) > 0 ? Number(p.concurrency) : 0;
+  const globalConcurrency = Number(getSetting("max_account_concurrency", "2")) || 2;
+  const effectiveConcurrency = Number(concurrencySetting) || declaredConcurrency || globalConcurrency;
+  const concurrencyPlaceholder = declaredConcurrency || globalConcurrency;
 
   const accountRows = accounts
     .map((c, index) => {
@@ -680,6 +859,21 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       if (c.is_active !== 1) status = `<span class="pill">Nonaktif</span>`;
       else if (isConnectionFullyCooledDown(c)) status = `<span class="pill pill-warning">Cooldown</span>`;
       else if (isConnectionExhausted(c)) status = `<span class="pill pill-danger">Habis Kuota</span>`;
+      const hidden = `<input type="hidden" name="id" value="${escapeHtml(c.id)}" />
+              <input type="hidden" name="provider" value="${id}" />`;
+      const sessionForms =
+        c.auth_type === "session"
+          ? `<form action="/dashboard/providers/accounts/check-session" method="POST">
+              ${hidden}
+              <button type="submit" class="btn btn-sm">Periksa sesi</button>
+            </form>
+            <form action="/dashboard/providers/accounts/update-session" method="POST">
+              ${hidden}
+              <input type="password" name="token" placeholder="token baru" required autocomplete="off" style="min-width: 9rem;" />
+              <input type="text" name="cookies" placeholder="cookies (opsional)" autocomplete="off" style="min-width: 9rem;" />
+              <button type="submit" class="btn btn-sm">Perbarui sesi</button>
+            </form>`
+          : "";
       return `
         <tr>
           <td>${accountOrderCell(c, id, index, accounts.length)}</td>
@@ -687,10 +881,12 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           <td>${escapeHtml(c.auth_type)}</td>
           <td>${accountProxyCell(c, id, proxyPools)}</td>
           <td>${status}</td>
+          <td>${slotCell(trafficByAccount.get(c.id))}</td>
+          ${isSession ? `<td>${sessionHealthCell(c)}</td>` : ""}
           <td class="actions">
+            ${sessionForms}
             <form action="/dashboard/providers/accounts/delete" method="POST">
-              <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
-              <input type="hidden" name="provider" value="${id}" />
+              ${hidden}
               <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
             </form>
           </td>
@@ -705,9 +901,13 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     accountsBody = `<div class="empty"><p class="big">Belum ada akun</p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
     accountsBody = `<table>
-        <thead><tr><th title="Akun #1 dipakai duluan; akun berikutnya hanya saat akun di atasnya tidak tersedia">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th title="Akun #1 dipakai duluan; akun berikutnya hanya saat akun di atasnya tidak tersedia">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th title="Request berjalan / batas per akun. Angka diambil saat halaman dimuat.">Slot</th>${isSession ? "<th>Sesi</th>" : ""}<th></th></tr></thead>
         <tbody>${accountRows}</tbody>
-      </table>`;
+      </table>${
+        isSession
+          ? `<p class="hint" style="margin-top: 10px;">Status sesi berasal dari health check <code>create_pow_challenge</code> (tanpa memulai percakapan). Token diambil dari <code>localStorage.userToken</code> di chat.deepseek.com dan disimpan sebagai teks biasa di database lokal.</p>`
+          : ""
+      }`;
   }
 
   const builtInModels = getProviderModels(p);
@@ -821,14 +1021,22 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           ${providerIconHtml(p, 40)}
           <div class="provider-text">
             <h3 style="font-size: 1.1rem;">${escapeHtml(p.name)}</h3>
-            <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : "API Key"}</p>
+            <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : p.category === "session" ? "Sesi Browser" : "API Key"}</p>
           </div>
         </div>
-        ${statusPill(p, stats)}
+        ${statusPill(p, stats, accounts)}
       </div>
       ${p.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       ${p.keyUrl ? `<p class="hint" style="margin-top: 10px;">${keyLink(p, p.noAuth ? "Buat API key (opsional)" : "Buat API key")}</p>` : ""}
     </div>
+
+    ${
+      isSession
+        ? `<div class="card">
+      <p class="hint" style="margin: 0;">Akses ini memakai antarmuka web DeepSeek, bukan API resmi. Pemakaian di luar klien resmi bisa melanggar ketentuan layanan mereka dan berisiko pembatasan atau pemblokiran akun. Token setara akses penuh ke akun dan tersimpan sebagai teks biasa di database lokal. Gateway tidak menyediakan akun bersama: provider ini nonaktif sampai Anda menambahkan token sendiri, dan Anda memakai akun tersebut dengan risiko sendiri.</p>
+    </div>`
+        : ""
+    }
 
     <div class="card">
       <div class="card-head">
@@ -837,6 +1045,34 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       </div>
       ${accountsBody}
     </div>
+
+    ${
+      p.noAuth
+        ? ""
+        : `<div class="card">
+      <div class="card-head">
+        <h3>Batas Sesi Paralel</h3>
+        <span class="pill">${escapeHtml(String(effectiveConcurrency))} per akun</span>
+        ${
+          traffic.accounts.length > 0
+            ? `<span class="pill${traffic.inFlight >= traffic.cap ? " pill-warning" : ""}">${traffic.inFlight}/${traffic.cap} dipakai</span>
+        ${traffic.queue > 0 ? `<span class="pill pill-warning">${traffic.queue} antre</span>` : ""}`
+            : ""
+        }
+      </div>
+      <form action="/dashboard/providers/concurrency" method="POST">
+        <input type="hidden" name="provider" value="${id}" />
+        <div class="field">
+          <label for="provider-concurrency">Maksimal request serentak per akun</label>
+          <input id="provider-concurrency" name="concurrency" type="number" min="1" max="10" step="1" value="${escapeHtml(String(concurrencySetting))}" placeholder="${escapeHtml(String(concurrencyPlaceholder))}" />
+        </div>
+        <p class="hint">Batas dihitung per akun, jadi dua akun aktif berarti total dua kali lipat. Request di atas batas menunggu dalam antrean; lewat 30 detik klien menerima 429 dan gateway mencoba akun berikutnya. Panggilan bantu seperti judul sesi menyerah setelah 2 detik agar tidak menahan percakapan. Kosongkan untuk memakai nilai bawaan.</p>
+        <div class="modal-actions">
+          <button type="submit" class="btn btn-primary">Simpan Batas</button>
+        </div>
+      </form>
+    </div>`
+    }
 
     ${
       p.noAuth
@@ -954,6 +1190,23 @@ export async function handleAddAccount(c) {
 
   if (proxyError || poolMissing) return c.redirect(`${backTo(body.provider)}?notice=proxy_invalid`);
 
+  // Browser-session providers store the web token and cookies; they never get an
+  // api_key, and they have no OAuth refresh flow.
+  if (provider && (provider.authMethods || []).includes("session")) {
+    const token = String(body.token || "").trim();
+    if (!token) return c.redirect(`${backTo(body.provider)}?notice=session_token_missing`);
+    if (findSessionAccount(provider.id, token)) return c.redirect(`${backTo(body.provider)}?notice=account_exists`);
+    addConnection({
+      provider: provider.id,
+      name,
+      auth_type: "session",
+      credentials: { token, cookies: String(body.cookies || "").trim() },
+      proxy_url: manualUrl || null,
+      proxy_pool_id,
+    });
+    return c.redirect(`${backTo(body.provider)}?notice=account_added`);
+  }
+
   if (provider && !provider.noAuth && secret) {
     // Anthropic console keys are plain API keys (x-api-key), not OAuth tokens.
     const oauth = usesLogin(provider) && !(provider.id === "claude" && secret.startsWith("sk-ant-api"));
@@ -1015,6 +1268,26 @@ export async function handleSetProxyRotation(c) {
   return c.redirect(`${backTo(provider.id)}?notice=rotation_invalid`);
 }
 
+export async function handleSetProviderConcurrency(c) {
+  const body = await c.req.parseBody();
+  const provider = getProvider(String(body.provider || "").trim());
+  if (!provider || provider.noAuth) return c.redirect("/dashboard/providers");
+
+  const raw = String(body.concurrency ?? "").trim();
+  const key = `provider_concurrency:${provider.id}`;
+  if (!raw) {
+    deleteSetting(key);
+    return c.redirect(`${backTo(provider.id)}?notice=concurrency_updated`);
+  }
+
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 10) {
+    return c.redirect(`${backTo(provider.id)}?notice=concurrency_invalid`);
+  }
+  setSetting(key, String(value));
+  return c.redirect(`${backTo(provider.id)}?notice=concurrency_updated`);
+}
+
 export async function handleMoveAccount(c) {
   const body = await c.req.parseBody();
   const id = Number(body.id);
@@ -1030,8 +1303,45 @@ export async function handleMoveAccount(c) {
 export async function handleDeleteAccount(c) {
   const body = await c.req.parseBody();
   const id = Number(body.id);
-  if (id) deleteConnection(id);
+  if (id) {
+    const connection = getConnectionById(id);
+    if (connection) forgetSessionHealth(connection);
+    deleteConnection(id);
+  }
   return c.redirect(`${backTo(body.provider)}?notice=account_deleted`);
+}
+
+/** "Periksa sesi": probe the token now, ignoring the cached verdict. */
+export async function handleCheckSession(c) {
+  const body = await c.req.parseBody();
+  const connection = getConnectionById(Number(body.id));
+  const provider = getProvider(String(body.provider || "").trim());
+  if (!connection || !provider || connection.provider !== provider.id) return c.redirect("/dashboard/providers");
+
+  const result = await checkSessionHealth(connection);
+  return c.redirect(`${backTo(provider.id)}?notice=session_${result.status}`);
+}
+
+/** "Perbarui sesi": replace the web token and cookies without touching the proxy. */
+export async function handleUpdateSession(c) {
+  const body = await c.req.parseBody();
+  const connection = getConnectionById(Number(body.id));
+  const provider = getProvider(String(body.provider || "").trim());
+  if (!connection || !provider || connection.provider !== provider.id) return c.redirect("/dashboard/providers");
+
+  const token = String(body.token || "").trim();
+  if (!token) return c.redirect(`${backTo(provider.id)}?notice=session_token_missing`);
+
+  updateConnection(connection.id, {
+    credentials: {
+      ...(connection.credentials || {}),
+      token,
+      cookies: String(body.cookies || "").trim(),
+    },
+  });
+  // The old verdict was keyed on the old token and must not survive.
+  forgetSessionHealth(connection);
+  return c.redirect(`${backTo(provider.id)}?notice=session_updated`);
 }
 
 export async function handleAddCustomModel(c) {

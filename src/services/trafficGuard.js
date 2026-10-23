@@ -1,12 +1,57 @@
 import { randomInt } from "node:crypto";
 import { getSetting } from "./settings.js";
-import { getConnectionById } from "../db/index.js";
+import { getProvider } from "../providers/index.js";
+import { getConnectionById, getConnections } from "../db/index.js";
+
+// The queue holds a request for a whole turn of the agent loop. Main requests
+// get that long; auxiliary calls (session titles, memory jobs) give up early so
+// they can never occupy a slot a conversation is waiting for.
+const QUEUE_TIMEOUT_MS = 30000;
+const AUX_QUEUE_TIMEOUT_MS = 2000;
+const MIN_CONCURRENCY = 1;
+const MAX_CONCURRENCY = 10;
 
 // In-memory state tracking per connection ID
 const connectionState = new Map();
 // In-flight count per provider. Virtual (no-auth) connections carry no id, so they
 // never occupy a connection slot, but the topology still has to see their traffic.
 const providerState = new Map();
+
+function clampConcurrency(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < MIN_CONCURRENCY) return null;
+  return Math.min(n, MAX_CONCURRENCY);
+}
+
+/**
+ * Parallel cap for one account of a provider. Resolution order: the per-provider
+ * setting, the registry field, then the global cap. A provider without either
+ * keeps the old global behavior.
+ */
+export function resolveProviderConcurrency(providerId) {
+  const key = String(providerId || "").toLowerCase();
+  if (!key) return null;
+
+  const configured = clampConcurrency(getSetting(`provider_concurrency:${key}`, ""));
+  if (configured !== null) return configured;
+
+  const declared = clampConcurrency(getProvider(key)?.concurrency);
+  if (declared !== null) return declared;
+
+  return null;
+}
+
+/**
+ * Cap for one account, resolved once so the limiter and the dashboard agree.
+ * The registry/global value is clamped the same way acquireAccountSlot does it.
+ */
+export function effectiveAccountConcurrency(connection) {
+  const providerConcurrency = resolveProviderConcurrency(connection?.provider);
+  return Math.max(
+    MIN_CONCURRENCY,
+    providerConcurrency ?? (Number(getSetting("max_account_concurrency", connection?.auth_type === "oauth" ? "2" : "8")) || 2)
+  );
+}
 
 function enterProviderSlot(providerId) {
   const key = String(providerId || "").toLowerCase();
@@ -59,7 +104,7 @@ function delay(ms, signal) {
  * Respects max concurrency cap and applies human-like jitter pacing when needed.
  * Returns a release callback to be called when the request finishes.
  */
-export async function acquireAccountSlot(connection, signal = null) {
+export async function acquireAccountSlot(connection, signal = null, { purpose = "main" } = {}) {
   if (!connection) {
     return () => {};
   }
@@ -71,12 +116,12 @@ export async function acquireAccountSlot(connection, signal = null) {
     return enterProviderSlot(connection.provider);
   }
 
-  // API key connections typically have higher limits; traffic guard focuses primarily on OAuth connections
-  const maxConcurrency = Math.max(
-    1,
-    Number(getSetting("max_account_concurrency", connection.auth_type === "oauth" ? "2" : "8")) || 2
-  );
+  // API key connections typically have higher limits; traffic guard focuses primarily on OAuth connections.
+  // A provider that declares its own cap (DeepSeek web sessions, for example) overrides that global value.
+  const maxConcurrency = effectiveAccountConcurrency(connection);
   const isJitterEnabled = getSetting("request_jitter_enabled", "true") === "true";
+  const isAux = purpose === "aux";
+  const queueTimeoutMs = isAux ? AUX_QUEUE_TIMEOUT_MS : QUEUE_TIMEOUT_MS;
 
   const state = getState(connection.id);
 
@@ -93,6 +138,7 @@ export async function acquireAccountSlot(connection, signal = null) {
       let onAbort = null;
 
       const item = {
+        purpose,
         resolve: () => {
           if (timeoutTimer) clearTimeout(timeoutTimer);
           if (signal && onAbort) signal.removeEventListener("abort", onAbort);
@@ -111,18 +157,32 @@ export async function acquireAccountSlot(connection, signal = null) {
         item.reject(new Error("Request aborted while waiting in account queue"));
       };
 
-      // 30s timeout waiting in queue
+      // Aux waiters are dropped early instead of holding a conversation's place
+      // in line for the full turn of the agent loop.
       timeoutTimer = setTimeout(() => {
         const idx = state.queue.indexOf(item);
         if (idx !== -1) state.queue.splice(idx, 1);
-        item.reject(new Error(`Account concurrency queue timeout (30s) for connection ${connection.id}`));
-      }, 30000);
+        item.reject(
+          new Error(
+            isAux
+              ? `Auxiliary request gave up waiting for a free slot (${queueTimeoutMs / 1000}s) on connection ${connection.id}`
+              : `Account concurrency queue timeout (${queueTimeoutMs / 1000}s) for connection ${connection.id}`
+          )
+        );
+      }, queueTimeoutMs);
 
       if (signal) {
         signal.addEventListener("abort", onAbort, { once: true });
       }
 
-      state.queue.push(item);
+      if (isAux) {
+        state.queue.push(item);
+      } else {
+        // Main requests take the place of the first aux waiter, never the other way around.
+        const firstAux = state.queue.findIndex((waiter) => waiter.purpose === "aux");
+        if (firstAux === -1) state.queue.push(item);
+        else state.queue.splice(firstAux, 0, item);
+      }
     });
   } else {
     state.inFlight++;
@@ -207,4 +267,45 @@ export function getActiveProviders() {
   // Virtual connections never show up above, so count providers directly too.
   for (const providerId of providerState.keys()) active.add(providerId);
   return active;
+}
+
+/**
+ * Live traffic for one account. Reads the existing state without creating it, so
+ * a dashboard refresh cannot inflate the maps.
+ */
+export function getConnectionTraffic(connId) {
+  const state = connectionState.get(connId);
+  return { inFlight: state?.inFlight || 0, queue: state?.queue.length || 0 };
+}
+
+/**
+ * Live traffic for one provider: per-account slot usage, the aggregate, and the
+ * queue. `cap` is the provider-wide ceiling (per-account cap times the number of
+ * accounts); `perAccountCap` is what one conversation competes for.
+ */
+export function getProviderTraffic(providerId) {
+  const key = String(providerId || "").toLowerCase();
+  if (!key) return { provider: "", inFlight: 0, queue: 0, cap: 0, perAccountCap: 0, accounts: [] };
+
+  const accounts = getConnections(key).map((connection) => ({
+    id: connection.id,
+    name: connection.name,
+    ...getConnectionTraffic(connection.id),
+    cap: effectiveAccountConcurrency(connection),
+  }));
+
+  const inFlight = accounts.reduce((total, account) => total + account.inFlight, 0);
+  const queue = accounts.reduce((total, account) => total + account.queue, 0);
+  // Virtual (no-auth) connections have no account row; their traffic still counts.
+  const virtual = accounts.length === 0 ? providerState.get(key) || 0 : 0;
+  const perAccountCap = accounts.length > 0 ? accounts[0].cap : 0;
+
+  return {
+    provider: key,
+    inFlight: inFlight + virtual,
+    queue,
+    cap: perAccountCap * accounts.length,
+    perAccountCap,
+    accounts,
+  };
 }

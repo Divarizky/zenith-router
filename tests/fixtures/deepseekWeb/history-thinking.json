@@ -1,0 +1,90 @@
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "biz_code": 0,
+    "biz_msg": "",
+    "biz_data": {
+      "chat_session": {
+        "id": "sess-fixture",
+        "title": "Tiga buah kalimat",
+        "title_type": "SYSTEM",
+        "model_type": "default",
+        "pinned": false,
+        "updated_at": 1792703701.773,
+        "seq_id": 1,
+        "agent": "chat",
+        "version": 2,
+        "is_empty": false,
+        "current_message_id": 2,
+        "inserted_at": 1792703700.302
+      },
+      "chat_messages": [
+        {
+          "message_id": 1,
+          "parent_id": null,
+          "model": "",
+          "role": "USER",
+          "thinking_enabled": true,
+          "ban_edit": false,
+          "ban_regenerate": false,
+          "status": "FINISHED",
+          "incomplete_message": null,
+          "accumulated_token_usage": 70,
+          "feedback": null,
+          "inserted_at": 1792703701.33,
+          "search_enabled": false,
+          "fragments": [
+            {
+              "id": 1,
+              "type": "REQUEST",
+              "content": "Sebutkan tiga nama buah dalam satu kalimat pendek."
+            }
+          ],
+          "has_pending_fragment": false,
+          "auto_continue": false,
+          "search_triggered": false,
+          "extra_search_providers": []
+        },
+        {
+          "message_id": 2,
+          "parent_id": 1,
+          "model": "",
+          "role": "ASSISTANT",
+          "thinking_enabled": true,
+          "ban_edit": false,
+          "ban_regenerate": false,
+          "status": "FINISHED",
+          "incomplete_message": null,
+          "accumulated_token_usage": 84,
+          "feedback": null,
+          "inserted_at": 1792703701.3249998,
+          "search_enabled": false,
+          "fragments": [
+            {
+              "id": 2,
+              "type": "THINK",
+              "content": "We need answer Indonesian. User asks mention three fruit names in one short sentence. Need comply. Simple: \"Saya membeli apel, pisang, dan jeruk.\" That's one short sentence with three fruit names. Need answer only maybe.",
+              "elapsed_secs": 0.87285709,
+              "references": [],
+              "stage_id": 1
+            },
+            {
+              "id": 3,
+              "type": "RESPONSE",
+              "content": "Saya membeli apel, pisang, dan jeruk.",
+              "references": [],
+              "stage_id": 1
+            }
+          ],
+          "has_pending_fragment": false,
+          "auto_continue": false,
+          "search_triggered": false,
+          "extra_search_providers": []
+        }
+      ],
+      "cache_control": "REPLACE",
+      "cache_reset_at": 1792703701
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "_provenance": "vendor-readme-example",
+  "_note": "Contoh challenge dari README @rezaparsian/deepseek-pow-solver, bukan tangkapan API. Dipakai sebagai vektor uji yang jawabannya sudah dicocokkan dengan paket Python deepseek-pow (answer 32186). Ganti dengan hasil scripts/captureDeepSeekWebFixtures.js setelah akun tersedia.",
+  "_expiryNote": "expire_at sudah lewat; solver tidak memeriksa waktu, transport yang wajib menolak challenge kedaluwarsa.",
+  "algorithm": "DeepSeekHashV1",
+  "challenge": "17f75b5e0984f15fc0b8def0c77b48ee4b41b1865f5e8217971722f7870ad4cb",
+  "salt": "cba9b8a9bf8368b6341c",
+  "signature": "b9f07214b4519ac8a6b976e22a3c2228e30b0738009e21122135539e69862f6a",
+  "difficulty": 144000,
+  "expire_at": 1785354733914,
+  "expected_answer": 32186
+}

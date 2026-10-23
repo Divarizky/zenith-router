@@ -26,6 +26,25 @@ strategy ordering.
 
 ---
 
+@rezaparsian/deepseek-pow-solver (https://github.com/RezaParsian/DeepseekPowsolver)
+MIT License
+
+Adapted material: the DeepSeekHashV1 proof-of-work solver in
+`src/vendor/deepseekPow/` (ESM port of `pow-solver.js`) and its bundled
+`deepseek-pow.wasm`, both taken from version 1.0.1 of the package.
+
+---
+
+DeepSeek (https://www.deepseek.com)
+
+Trademark and logo: `public/providers/deepseek-web.png` is the DeepSeek mark,
+used only to identify the DeepSeek Web Chat provider in this dashboard. The
+vector path comes from Simple Icons (https://simpleicons.org, CC0) and was
+rasterised locally without adding a dependency. DeepSeek and the DeepSeek logo
+are trademarks of the DeepSeek owner; this project is not affiliated with them.
+
+---
+
 Both projects are distributed under the MIT License. The MIT License permits
 use, modification, and redistribution provided the copyright notice and
 permission notice are retained. See each project's repository for the full

@@ -34,6 +34,18 @@ export function setSetting(key, value) {
   }
 }
 
+/** Remove a setting so the resolver falls back to its declared default. */
+export function deleteSetting(key) {
+  try {
+    const db = getDb();
+    db.prepare(`DELETE FROM settings WHERE key = ?`).run(String(key));
+    return true;
+  } catch (err) {
+    console.error(`[zenith] Failed to delete setting '${key}':`, err.message);
+    return false;
+  }
+}
+
 const DEFAULT_SETTINGS = {
   require_api_key: "false",
   token_saver_rtk: "true",

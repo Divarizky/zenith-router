@@ -378,6 +378,7 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .btn-ghost { padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); font-size: 0.78rem; }
     .btn-ghost:hover { background: rgba(255,255,255,.05); color: var(--text); }
     code { background: var(--surface-2); padding: 0.15rem 0.4rem; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; color: var(--text); }
+    kbd { background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; padding: 0.05rem 0.35rem; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; color: var(--text); }
     table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
     /* Wide tables (accounts, models, keys) scroll inside their card instead of pushing the page sideways. */
     .card:has(> table) { overflow-x: auto; }
@@ -425,9 +426,11 @@ details.manual summary { cursor: pointer; font-size: 0.82rem; color: var(--text-
     .switch:hover .slider { border-color: var(--text-muted); }
     .switch input:focus-visible + .slider { outline: 2px solid var(--text-muted); outline-offset: 2px; }
     /* Modal */
-    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 50; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 50; padding: 1rem; overflow-y: auto; }
     .modal-backdrop.open { display: flex; }
-    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.5rem; width: 100%; max-width: 480px; box-shadow: var(--shadow); }
+    /* Tall dialogs (browser login + manual token) must scroll, or the submit
+       button ends up below the viewport on short screens. */
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.5rem; width: 100%; max-width: 480px; box-shadow: var(--shadow); max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
     .modal h3 { margin-bottom: 1rem; }
     /* Empty state */
     .empty { text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); }

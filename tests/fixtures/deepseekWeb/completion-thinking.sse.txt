@@ -1,0 +1,151 @@
+event: ready
+data: {"request_message_id":1,"response_message_id":2,"model_type":"default"}
+
+event: update_session
+data: {"updated_at":1792703701.338449}
+
+data: {"v":{"response":{"message_id":2,"parent_id":1,"model":"","role":"ASSISTANT","thinking_enabled":true,"ban_edit":false,"ban_regenerate":false,"status":"WIP","incomplete_message":null,"accumulated_token_usage":0,"feedback":null,"inserted_at":1792703701.3247359,"search_enabled":false,"fragments":[{"id":2,"type":"THINK","content":"We","elapsed_secs":null,"references":[],"stage_id":1}],"conversation_mode":"DEFAULT","has_pending_fragment":false,"auto_continue":false,"search_triggered":false,"extra_search_providers":[]}}}
+
+data: {"p":"response/fragments/-1/content","o":"APPEND","v":" need"}
+
+data: {"v":" answer"}
+
+data: {"v":" Indonesian"}
+
+data: {"v":"."}
+
+data: {"v":" User"}
+
+data: {"v":" asks"}
+
+data: {"v":" mention"}
+
+data: {"v":" three"}
+
+data: {"v":" fruit"}
+
+data: {"v":" names"}
+
+data: {"v":" in"}
+
+data: {"v":" one"}
+
+data: {"v":" short"}
+
+data: {"v":" sentence"}
+
+data: {"v":"."}
+
+data: {"v":" Need"}
+
+data: {"v":" comply"}
+
+data: {"v":"."}
+
+data: {"v":" Simple"}
+
+data: {"v":":"}
+
+data: {"v":" \""}
+
+data: {"v":"S"}
+
+data: {"v":"aya"}
+
+data: {"v":" memb"}
+
+data: {"v":"eli"}
+
+data: {"v":" ap"}
+
+data: {"v":"el"}
+
+data: {"v":","}
+
+data: {"v":" pis"}
+
+data: {"v":"ang"}
+
+data: {"v":","}
+
+data: {"v":" dan"}
+
+data: {"v":" jer"}
+
+data: {"v":"uk"}
+
+data: {"v":".\""}
+
+data: {"v":" That"}
+
+data: {"v":"'s"}
+
+data: {"v":" one"}
+
+data: {"v":" short"}
+
+data: {"v":" sentence"}
+
+data: {"v":" with"}
+
+data: {"v":" three"}
+
+data: {"v":" fruit"}
+
+data: {"v":" names"}
+
+data: {"v":"."}
+
+data: {"v":" Need"}
+
+data: {"v":" answer"}
+
+data: {"v":" only"}
+
+data: {"v":" maybe"}
+
+data: {"v":"."}
+
+data: {"p":"response/fragments/-1/elapsed_secs","o":"SET","v":0.87285709}
+
+data: {"p":"response/fragments","o":"APPEND","v":[{"id":3,"type":"RESPONSE","content":"S","references":[],"stage_id":1}]}
+
+data: {"p":"response/fragments/-1/content","v":"aya"}
+
+data: {"v":" memb"}
+
+data: {"v":"eli"}
+
+data: {"v":" ap"}
+
+data: {"v":"el"}
+
+data: {"v":","}
+
+data: {"v":" pis"}
+
+data: {"v":"ang"}
+
+data: {"v":","}
+
+data: {"v":" dan"}
+
+data: {"v":" jer"}
+
+data: {"v":"uk"}
+
+data: {"v":"."}
+
+data: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":84},{"p":"quasi_status","v":"FINISHED"}]}
+
+data: {"p":"response/status","o":"SET","v":"FINISHED"}
+
+event: update_session
+data: {"updated_at":1792703701.788223}
+
+event: title
+data: {"content":"Tiga buah kalimat"}
+
+event: close
+data: {"click_behavior":"none","auto_resume":false}
+

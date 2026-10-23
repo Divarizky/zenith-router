@@ -31,7 +31,10 @@ import {
   handleAddAccount,
   handleSetAccountProxy,
   handleSetProxyRotation,
+  handleSetProviderConcurrency,
   handleDeleteAccount,
+  handleCheckSession,
+  handleUpdateSession,
   handleMoveAccount,
   handleAddCustomModel,
   handleDeleteCustomModel,
@@ -62,6 +65,7 @@ import {
   handleOAuthCallback,
   handleImportLocalLogin,
 } from "./ui/pages/oauth.js";
+import { handleSessionLoginCancel, handleSessionLoginPoll, handleSessionLoginStart } from "./ui/pages/sessionLogin.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
 import {
   handleCreateCombo,
@@ -99,7 +103,8 @@ import {
 } from "./security.js";
 import { isAdminProtected } from "./services/adminAuth.js";
 import { getConnections } from "./db/index.js";
-import { getAllProviders } from "./providers/index.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
+import { ensureSessionHealth } from "./services/deepseekWeb/health.js";
 import { startModelSyncScheduler } from "./services/modelSync.js";
 import { startOpencodeCatalogRefresh } from "./services/opencodeCatalog.js";
 import { startQuotaSyncScheduler, syncAllQuotas } from "./services/quotaSync.js";
@@ -181,10 +186,17 @@ app.get("/dashboard/providers", (c) => {
 });
 app.post("/dashboard/providers/accounts/add", handleAddAccount);
 app.post("/dashboard/providers/accounts/delete", handleDeleteAccount);
+app.post("/dashboard/providers/accounts/check-session", handleCheckSession);
+app.post("/dashboard/providers/accounts/update-session", handleUpdateSession);
 app.post("/dashboard/providers/accounts/move", handleMoveAccount);
 app.post("/dashboard/providers/accounts/set-proxy", handleSetAccountProxy);
 app.post("/dashboard/providers/proxy-rotation", handleSetProxyRotation);
+app.post("/dashboard/providers/concurrency", handleSetProviderConcurrency);
 app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
+// One-click login: the server opens a browser and the page polls the capture.
+app.post("/dashboard/providers/accounts/login/start", handleSessionLoginStart);
+app.post("/dashboard/providers/accounts/login/poll", handleSessionLoginPoll);
+app.post("/dashboard/providers/accounts/login/cancel", handleSessionLoginCancel);
 
 // OAuth login flows: browser redirect to /callback, or device code polling
 app.post("/dashboard/oauth/start", handleOAuthStart);
@@ -200,7 +212,14 @@ app.post("/dashboard/providers/models/import", handleImportModels);
 app.post("/dashboard/providers/models/import/clear", handleClearImported);
 app.post("/dashboard/providers/models/import/delete", handleDeleteImported);
 app.post("/dashboard/providers/models/sync", handleSyncFreeModels);
-app.get("/dashboard/providers/:id", (c) => {
+app.get("/dashboard/providers/:id", async (c) => {
+  const provider = getProvider(c.req.param("id"));
+  // Session tokens cannot be refreshed by the gateway, so the detail page asks
+  // the upstream once (the result is cached) instead of showing a stale claim.
+  if (provider?.category === "session") {
+    const accounts = getConnections(provider.id).filter((connection) => connection.auth_type === "session");
+    await Promise.all(accounts.map((connection) => ensureSessionHealth(connection)));
+  }
   const html = renderProviderDetailPage(PORT, c.req.param("id"), c.req.query());
   return html ? c.html(html) : c.redirect("/dashboard/providers");
 });

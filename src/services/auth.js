@@ -8,6 +8,7 @@ import { getProvider } from "../providers/index.js";
 import { isConnectionExhausted } from "./quota.js";
 import { claudeUserAgent } from "./claudeIdentity.js";
 import pkg from "../../package.json" with { type: "json" };
+import { normalizeSessionToken } from "./deepseekWeb/token.js";
 
 /**
  * Check if a connection is currently locked under cooldown for a given model.
@@ -106,6 +107,26 @@ export function applyConnectionAuth(headers, connection, { claudeSessionId = nul
   if (!connection || !connection.credentials || connection.auth_type === "noauth") return headers;
 
   const creds = connection.credentials;
+
+  // Browser-session providers (DeepSeek web chat) reuse the web client's own
+  // headers: the account token is a bearer token and the login only works with
+  // the matching cookies. There is no refresh flow.
+  if (connection.auth_type === "session") {
+    const token = normalizeSessionToken(creds.token || creds.user_token);
+    if (!token) return headers;
+    headers["Authorization"] = `Bearer ${token}`;
+    const cookies = creds.cookies;
+    if (typeof cookies === "string" && cookies.trim()) {
+      headers["Cookie"] = cookies.trim();
+    } else if (Array.isArray(cookies)) {
+      const pairs = cookies.filter((c) => c && c.name).map((c) => `${c.name}=${c.value ?? ""}`);
+      if (pairs.length > 0) headers["Cookie"] = pairs.join("; ");
+    } else if (cookies && typeof cookies === "object") {
+      const pairs = Object.entries(cookies).map(([name, value]) => `${name}=${value ?? ""}`);
+      if (pairs.length > 0) headers["Cookie"] = pairs.join("; ");
+    }
+    return headers;
+  }
 
   if (connection.auth_type === "oauth") {
     let token = creds.access_token || creds.api_key;

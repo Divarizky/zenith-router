@@ -19,6 +19,7 @@ import ollama from "./registry/ollama.js";
 import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
+import deepseekWeb from "./registry/deepseek-web.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
 
@@ -97,6 +98,7 @@ const REGISTRY = [
   commandcode,
   ovhcloud,
   xkiro,
+  deepseekWeb,
 ];
 
 const providerMap = new Map();

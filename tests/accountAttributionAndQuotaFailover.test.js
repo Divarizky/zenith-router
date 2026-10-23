@@ -147,11 +147,23 @@ test("quota failover - account 1 exhausted 429 locks for full duration and immed
     // Check headers returned
     assert.strictEqual(res.headers.get("X-Zenith-Account"), "deepa.rizky@gmail.com");
 
-    // Account 1 model lock must be locked for ~138 hours, not just 60 seconds
+    // One 429 is not enough to park the account: the lock appears on the second
+    // manual attempt, and only then does the lock last the full quota window.
     const conns = getConnections("antigravity");
     const conn1 = conns.find((c) => c.name === "divarizky28@gmail.com");
+    assert.strictEqual(getModelLockUntil(conn1.id, MODEL_ID), null, "satu 429 belum mengunci model");
+
+    attemptedAccounts.length = 0;
+    const retry = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: PRIMARY_MODEL, messages: [{ role: "user", content: "test ulang" }] }),
+    });
+    assert.strictEqual(retry.status, 200);
+    assert.deepStrictEqual(attemptedAccounts, ["divarizky28@gmail.com", "deepa.rizky@gmail.com"], "percobaan kedua masih mencoba akun 1");
+
     const lockUntil = getModelLockUntil(conn1.id, MODEL_ID);
-    assert.ok(lockUntil, "lock per model harus ada");
+    assert.ok(lockUntil, "lock per model harus ada setelah kegagalan kedua");
     const diffHours = (lockUntil - Date.now()) / (3600 * 1000);
     assert.ok(diffHours > 135 && diffHours < 140, `harus sekitar 138 jam, dapat ${diffHours} jam`);
 

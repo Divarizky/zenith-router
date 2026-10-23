@@ -13,6 +13,10 @@ import { FORMATS } from "../translator/formats.js";
  */
 const comboCursors = new Map();
 
+// One id per client request: internal retries, account failover, and combo
+// members share it so the cooldown strike counter sees a single attempt.
+let routeRequestSeq = 0;
+
 /** Forget every rotation position (test hook and manual reset). */
 export function resetComboRotation() {
   comboCursors.clear();
@@ -147,6 +151,7 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     resolveUrl,
     sessionKey: endpoint.sessionKey,
     effort,
+    requestId: endpoint.requestId,
   });
 
   if (!result.ok) return { ok: false, response: result.response, status: result.response.status };
@@ -346,6 +351,10 @@ async function runDefaultFallback({ endpoint, attempted, failure, origin, fallba
  * request already called.
  */
 export async function routeRequest({ model, ...endpoint }) {
+  if (!endpoint.requestId) {
+    routeRequestSeq += 1;
+    endpoint.requestId = `route-${routeRequestSeq}`;
+  }
   const target = resolveTarget(model);
 
   if (!target) return { notFound: true };

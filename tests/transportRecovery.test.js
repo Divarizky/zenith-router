@@ -155,12 +155,17 @@ test("fallback - a 502 that is not a transport failure still cools the account d
       });
     },
   });
-  try {
-    await app.request("/v1/chat/completions", {
+  const chat = () =>
+    app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "mistral/mistral-large-latest", messages: [{ role: "user", content: "halo" }] }),
     });
+  try {
+    await chat();
+    assert.strictEqual(getConnections("mistral")[0].cooldown_until > Date.now(), false, "satu 502 belum memarkir akun");
+    // A second manual attempt is what parks the account.
+    await chat();
     const [conn] = getConnections("mistral");
     assert.strictEqual(isConnectionInCooldown(conn, MODEL_ID), true);
   } finally {

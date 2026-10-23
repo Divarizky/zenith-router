@@ -4,12 +4,18 @@ import { app } from "../src/index.js";
 import { initDb, getDb, addConnection, getConnections, getModelLockUntil, setConnectionCooldown } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 
-test("Failover - transparently retries on next account when first account returns 429", async () => {
+test("Failover - retries on next account, and parks the failing one only after two requests", async () => {
   initDb(":memory:");
   const c1 = addConnection({ provider: "glm", name: "GLM Acc 1", credentials: { api_key: "key-1" } });
   const c2 = addConnection({ provider: "glm", name: "GLM Acc 2", credentials: { api_key: "key-2" } });
 
   const attempts = [];
+  const chat = () =>
+    app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "glm/glm-4-flash", messages: [{ role: "user", content: "hi" }] }),
+    });
   setCustomExecutor({
     async execute({ headers }) {
       const auth = headers.Authorization || headers.authorization;
@@ -43,10 +49,19 @@ test("Failover - transparently retries on next account when first account return
   assert.strictEqual(attempts[0], "Bearer key-1");
   assert.strictEqual(attempts[1], "Bearer key-2");
 
-  // Verify that Acc 1 is locked out for the model it failed on
-  const updatedConns = getConnections("glm");
-  const acc1 = updatedConns.find((c) => c.id === c1.id);
-  assert.ok(getModelLockUntil(acc1.id, "glm-4-flash") > Date.now());
+  // One failure is not enough to park the account: the client should see the
+  // real upstream error and get another chance on the next manual attempt.
+  const acc1 = () => getConnections("glm").find((c) => c.id === c1.id);
+  assert.ok(!(getModelLockUntil(acc1().id, "glm-4-flash") > Date.now()), "belum dikunci setelah satu kegagalan");
+  assert.ok(!(acc1().cooldown_until > Date.now()), "akun belum di-cooling setelah satu kegagalan");
+
+  attempts.length = 0;
+  assert.strictEqual((await chat()).status, 200);
+  assert.deepStrictEqual(attempts, ["Bearer key-1", "Bearer key-2"], "percobaan manual kedua tetap mencoba acc 1");
+  assert.ok(
+    getModelLockUntil(acc1().id, "glm-4-flash") > Date.now(),
+    "kegagalan kedua pada request terpisah mengunci model untuk acc 1"
+  );
 
   setCustomExecutor(null);
 });
@@ -215,6 +230,10 @@ test("Account Priority - gateway answers from #2 on a 429 and returns to #1 afte
 
     attempts.length = 0;
     assert.strictEqual((await chat()).status, 200);
+    assert.deepStrictEqual(attempts, ["Bearer key-1", "Bearer key-2"], "kegagalan kedua barulah mengunci #1");
+
+    attempts.length = 0;
+    assert.strictEqual((await chat()).status, 200);
     assert.deepStrictEqual(attempts, ["Bearer key-2"], "selama #1 terkunci, request langsung ke #2");
 
     limited = false;
@@ -380,12 +399,19 @@ test("Mistral - 429 with a partly used token budget is still a normal rate limit
     },
   });
 
-  const res = await mistralChat("mis/magistral-small-latest");
-  assert.strictEqual(res.status, 429);
-  const acc = getConnections("mistral").find((c) => c.id === conn.id);
+  const first = await mistralChat("mis/magistral-small-latest");
+  assert.strictEqual(first.status, 429);
+  const acc = () => getConnections("mistral").find((c) => c.id === conn.id);
   assert.ok(
-    getModelLockUntil(acc.id, "magistral-small-latest") > Date.now(),
-    "a real rate limit still locks the account for that model"
+    !(getModelLockUntil(acc().id, "magistral-small-latest") > Date.now()),
+    "satu 429 belum mengunci model"
+  );
+
+  const second = await mistralChat("mis/magistral-small-latest");
+  assert.strictEqual(second.status, 429);
+  assert.ok(
+    getModelLockUntil(acc().id, "magistral-small-latest") > Date.now(),
+    "a real rate limit still locks the account for that model after two attempts"
   );
 
   setCustomExecutor(null);

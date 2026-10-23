@@ -13,11 +13,43 @@ import { isConnectionExhausted, syncProviderQuota } from "./quota.js";
 import { isAntigravityPoolExhausted } from "./antigravityPools.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { extractClaudeSessionId } from "./claudeIdentity.js";
+import { applyClaudeOAuthCloaking, isClaudeOAuthToken } from "./claudeCloaking.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
+import { clearCooldownStrike, cooldownStrikeReached } from "./cooldownStrikes.js";
+
+// Callers that run several attempts for one client request pass the same id, so
+// internal retries never count as separate user attempts.
+let fallbackRequestSeq = 0;
+function nextFallbackRequestId() {
+  fallbackRequestSeq += 1;
+  return `fallback-${fallbackRequestSeq}`;
+}
+
+/**
+ * Key for the strike counter. `model:<id>` follows the per-model rate limit
+ * lock; `account` follows the account-wide auth lock.
+ */
+function strikeKey(connection, scope) {
+  return `${connection.id}:${connection.provider || ""}:${scope}`;
+}
+
+/**
+ * Park the account only once this failure is the second one across separate
+ * client requests. The failure itself is still reported to the client, so the
+ * caller sees the real upstream error instead of a cooldown notice.
+ */
+function parkAfterRepeatedFailures(connection, scope, requestId) {
+  return cooldownStrikeReached(strikeKey(connection, scope), requestId);
+}
+
+function clearFailureStrikes(connection, modelId) {
+  clearCooldownStrike(strikeKey(connection, "account"));
+  if (modelId) clearCooldownStrike(strikeKey(connection, `model:${modelId}`));
+}
 
 export function listAvailableConnections(providerId, { model = null, effort = undefined } = {}) {
   if (!providerId) return [];
@@ -356,7 +388,7 @@ export function buildErrorResponse(res, bodyText, targetFormat) {
   }
   const headers = { "Content-Type": "application/json" };
   // Clients back off on Retry-After; the gate labels say why a route was refused.
-  for (const name of ["retry-after", "x-opencode-gate", "x-opencode-log-id"]) {
+  for (const name of ["retry-after", "x-opencode-gate", "x-opencode-log-id", "x-zenith-auth-expired"]) {
     const value = res.headers?.get?.(name);
     if (value) headers[name] = value;
   }
@@ -379,8 +411,11 @@ export async function executeWithFallback({
   targetModel = "",
   sessionKey = null,
   effort = undefined,
+  requestId = null,
 }) {
   const modelId = targetModel || upstreamPayload?.model || "";
+  // One client request = one attempt budget. Retries inside it reuse the id.
+  const attemptId = requestId || nextFallbackRequestId();
   const reasoningKey = `${provider.id}/${modelId}`;
   const withoutReasoning = (p) => {
     const { reasoning_effort, ...rest } = p;
@@ -391,6 +426,10 @@ export async function executeWithFallback({
     payload = withoutReasoning(payload);
   }
   let bodyText = JSON.stringify(payload);
+  // Requests carrying tools belong to the agent loop; everything else is an
+  // auxiliary call (session title, memory job) that must not take a slot a
+  // conversation is waiting for.
+  const purpose = Array.isArray(payload?.tools) && payload.tools.length > 0 ? "main" : "aux";
   let reasoningRetried = false;
   // Accounts that refused the model itself (tier), as opposed to other failures.
   let tierDenials = 0;
@@ -416,6 +455,9 @@ export async function executeWithFallback({
   }
 
   function bodyForConnection(connection) {
+    if (provider.id === "claude" && isClaudeOAuthToken(connection?.credentials?.access_token)) {
+      return JSON.stringify(applyClaudeOAuthCloaking(JSON.parse(bodyText)));
+    }
     const format = String(targetFormat || "").toLowerCase();
     if (format === "openai-responses" || format === "responses") {
       if (connection?.id) {
@@ -486,7 +528,7 @@ export async function executeWithFallback({
 
     let releaseSlot = null;
     try {
-      releaseSlot = await acquireAccountSlot(connection, signal);
+      releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
     } catch (err) {
       if (signal?.aborted) {
         throw err;
@@ -532,6 +574,7 @@ export async function executeWithFallback({
 
     // Success: this connection can serve the request
     if (res.ok) {
+      clearFailureStrikes(connection, modelId);
       return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
     }
 
@@ -620,7 +663,9 @@ export async function executeWithFallback({
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
       if (connection.id && !isTransportFailure(res, errText)) {
-        applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000 * attempt);
+        if (parkAfterRepeatedFailures(connection, `model:${modelId}`, attemptId)) {
+          applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000 * attempt);
+        }
       }
       await applyReactiveJitter(signal);
       continue;
@@ -631,7 +676,9 @@ export async function executeWithFallback({
       try {
         const refreshed = await refreshOAuthToken(connection, { force: true });
         if (!refreshed) {
-          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
+            setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          }
           if (attempt < maxAttempts) continue;
           return { ok: false, response: lastFailureResponse };
         }
@@ -639,7 +686,7 @@ export async function executeWithFallback({
         applyConnectionAuth(headers, connection);
 
         try {
-          releaseSlot = await acquireAccountSlot(connection, signal);
+          releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
         } catch (err) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
           lastFailureResponse = accountBusyResponse(targetFormat, connection);
@@ -677,13 +724,17 @@ export async function executeWithFallback({
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
           if (connection.id && !isTransportFailure(res, retryErrText)) {
-            applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
+            if (parkAfterRepeatedFailures(connection, `model:${modelId}`, attemptId)) {
+              applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
+            }
           }
           await applyReactiveJitter(signal);
           continue;
         }
         if (res.status === 401 || res.status === 402 || res.status === 403) {
-          if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
+            setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          }
           if (attempt < maxAttempts) continue;
         }
         return { ok: false, response: lastFailureResponse };
@@ -691,7 +742,9 @@ export async function executeWithFallback({
         if (releaseSlot) releaseSlot();
         if (signal?.aborted) return { ok: false, response: lastFailureResponse };
         console.error(`[zenith] Reactive refresh error for ${connection.id}:`, err.message);
-        if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+        if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
+          setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+        }
         if (attempt < maxAttempts) continue;
         return { ok: false, response: lastFailureResponse };
       }
@@ -699,7 +752,9 @@ export async function executeWithFallback({
 
     // Account-level failures can be isolated to this credential; try the next one.
     if (res.status === 401 || res.status === 402 || res.status === 403) {
-      if (connection.id) setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+      if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
+        setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+      }
       if (attempt < maxAttempts) continue;
     }
 

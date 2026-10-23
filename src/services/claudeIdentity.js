@@ -1,7 +1,7 @@
 // Single source for the Claude Code client identity. The upstream keys the
 // OAuth scope, the beta flags and the account tier on this client shape, so
 // the login flow and the runtime request must agree on it.
-const CLAUDE_CLI_VERSION = "2.1.280";
+export const CLAUDE_CLI_VERSION = "2.1.280";
 
 // The CLI identifies itself the same way in every request it makes, so the
 // login, the bootstrap lookup and the runtime call share one string.

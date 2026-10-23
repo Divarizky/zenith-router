@@ -215,13 +215,19 @@ test("default fallback - later requests skip a primary account that is still in 
   await first.json();
   const afterFirst = calls.length;
 
-  // Akun mistral sudah dikunci 60 detik oleh 429 di atas, jadi request kedua
-  // harus langsung ke fallback tanpa menembak upstream model utama lagi.
+  // Satu 429 belum memarkir akun utama, jadi request kedua masih menembak model
+  // utama lalu jatuh ke fallback; request ketiga barulah langsung ke fallback.
   calls.length = 0;
   const second = await chatRequest();
   assert.strictEqual(second.status, 200);
   await second.json();
   assert.strictEqual(afterFirst, 2);
+  assert.strictEqual(calls.length, 2, `percobaan kedua masih mencoba model utama, dapat ${JSON.stringify(calls)}`);
+
+  calls.length = 0;
+  const third = await chatRequest();
+  assert.strictEqual(third.status, 200);
+  await third.json();
   assert.strictEqual(calls.length, 1, `hanya fallback yang dipanggil, dapat ${JSON.stringify(calls)}`);
   assert.ok(calls[0].includes(GLM_URL));
   setCustomExecutor(null);

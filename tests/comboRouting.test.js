@@ -261,7 +261,24 @@ test("combo chain - a rate limit sent inside an HTTP 200 stream hands a streamin
   assert.strictEqual(calls.length, 2, "anggota kedua harus dicoba");
 
   const conn = getDb().prepare("SELECT id FROM connections WHERE provider = 'mistral'").get();
-  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "limit di dalam stream harus mengunci model");
+  assert.strictEqual(
+    getModelLockUntil(conn.id, "mistral-large-latest"),
+    null,
+    "satu limit dalam stream belum mengunci model"
+  );
+
+  // The park happens on the next manual attempt, and the member after it still
+  // answers that request.
+  calls.length = 0;
+  const retry = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }], stream: true }),
+  });
+  assert.strictEqual(retry.status, 200);
+  await retry.text();
+  assert.strictEqual(calls.length, 2, "percobaan kedua juga mencoba anggota pertama");
+  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "kegagalan kedua mengunci model");
   setCustomExecutor(null);
 });
 
@@ -451,8 +468,18 @@ test("combo chain - a rate limited member does not block the next member of the 
   assert.ok(seen[1].includes("small"));
 
   // The lock is remembered per (connection, model), so the account still serves
-  // other models right away while the rate limited one stays parked.
+  // other models right away while the rate limited one stays parked. It takes a
+  // second failed attempt before the model is parked at all.
   const conn = getDb().prepare("SELECT id FROM connections").get();
+  assert.strictEqual(getModelLockUntil(conn.id, "mistral-large-latest"), null, "satu 429 belum mengunci model");
+
+  const again = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "dua-mistral", messages: [{ role: "user", content: "halo" }] }),
+  });
+  assert.strictEqual(again.status, 200);
+  await again.json();
   assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "model yang kena 429 harus terkunci");
   assert.strictEqual(
     getModelLockUntil(conn.id, "mistral-small-latest"),
@@ -531,8 +558,18 @@ test("combo chain - a broken credential still parks the whole account", async ()
   });
 
   assert.strictEqual(res.status, 200);
-  const conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("mistral");
-  assert.ok(conn.cooldown_until > Date.now(), "401 tanpa model harus mengunci seluruh koneksi");
+  let conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("mistral");
+  assert.ok(!(conn.cooldown_until > Date.now()), "401 pertama belum mengunci akun");
+
+  const retry = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+  });
+  assert.strictEqual(retry.status, 200);
+  await retry.json();
+  conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("mistral");
+  assert.ok(conn.cooldown_until > Date.now(), "401 tanpa model harus mengunci seluruh koneksi setelah dua percobaan");
   assert.strictEqual(
     getModelLockUntil(conn.id, "mistral-large-latest"),
     null,

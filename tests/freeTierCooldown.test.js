@@ -65,6 +65,13 @@ test("Free tier - 429 scope free mengunci semua model gratis di akun, model berb
     assert.deepStrictEqual(attempts, ["Bearer key-1", "Bearer key-2"]);
 
     const acc1 = getConnections("xkiro").find((c) => c.id === c1.id);
+    assert.strictEqual(getModelLockUntil(acc1.id, FREE_BUILTIN), null, "satu 429 belum mengunci model");
+
+    attempts.length = 0;
+    const retry = await chat(FREE_BUILTIN);
+    assert.strictEqual(retry.status, 200);
+    assert.deepStrictEqual(attempts, ["Bearer key-1", "Bearer key-2"], "percobaan kedua masih mencoba akun 1");
+
     const until = getModelLockUntil(acc1.id, FREE_BUILTIN);
     assert.ok(until > Date.now() + 27_000_000, "model yang dipanggil dikunci sampai reset (retry-after)");
     assert.ok(getModelLockUntil(acc1.id, FREE_SYNCED) > Date.now(), "model gratis hasil sync ikut terkunci");
@@ -100,7 +107,11 @@ test("Free tier - 429 biasa tanpa scope free hanya mengunci model yang dipanggil
     const res = await chat(FREE_BUILTIN);
     assert.strictEqual(res.status, 200);
     const acc1 = getConnections("xkiro")[0];
-    assert.ok(getModelLockUntil(acc1.id, FREE_BUILTIN) > Date.now(), "model yang dipanggil dikunci");
+    assert.strictEqual(getModelLockUntil(acc1.id, FREE_BUILTIN), null, "satu 429 belum mengunci model");
+
+    const retry = await chat(FREE_BUILTIN);
+    assert.strictEqual(retry.status, 200);
+    assert.ok(getModelLockUntil(acc1.id, FREE_BUILTIN) > Date.now(), "model yang dipanggil dikunci setelah dua percobaan");
     assert.strictEqual(getModelLockUntil(acc1.id, FREE_SYNCED), null, "model gratis lain tidak ikut terkunci");
     await new Promise((r) => setTimeout(r, 20));
     assert.deepStrictEqual(synced, [], "tidak ada sync kuota tanpa 429 kuota gratis");

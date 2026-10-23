@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resetCooldownStrikes } from "../services/cooldownStrikes.js";
 
 let dbInstance = null;
 
@@ -184,6 +185,8 @@ CREATE TABLE IF NOT EXISTS model_sync_state (
  * Initialize SQLite database and create schema
  */
 export function initDb(dbPath = null) {
+  // Cooldown strikes are process memory; a new database must not inherit them.
+  resetCooldownStrikes();
   const effectivePath = dbPath || defaultDbPath();
 
   if (dbInstance) {

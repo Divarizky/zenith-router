@@ -116,7 +116,15 @@ test("health - a timeout becomes an error verdict", async () => {
   const slow = () => ({
     fetchChallenge(signal) {
       return new Promise((_, reject) => {
-        signal.addEventListener("abort", () => reject(new Error("The operation was aborted")));
+        const keepAlive = setTimeout(() => {}, 1000);
+        signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(keepAlive);
+            reject(new Error("The operation was aborted"));
+          },
+          { once: true }
+        );
       });
     },
   });

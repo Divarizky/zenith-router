@@ -142,7 +142,7 @@ async function startUpstream({ delayMs = 0 } = {}) {
 
 let upstream = null;
 
-async function boot({ tokens = ["good-token"], connections = null, delayMs = 0 } = {}) {
+async function boot({ tokens = ["good-token"], connections = null, delayMs = 0, settings = {} } = {}) {
   initDb(":memory:");
   resetTrafficGuardState();
   resetChainStore();
@@ -150,6 +150,7 @@ async function boot({ tokens = ["good-token"], connections = null, delayMs = 0 }
   resetDeepSeekTransportFactory();
   setSetting("traffic_guard_enabled", "true");
   setSetting("request_jitter_enabled", "false");
+  for (const [key, value] of Object.entries(settings)) setSetting(key, value);
 
   upstream = await startUpstream({ delayMs });
   process.env.ZENITH_DEEPSEEK_BASE_URL = upstream.url;
@@ -279,8 +280,8 @@ test("e2e - a tool call reaches OpenAI, Claude, and Responses clients", async ()
   assert.strictEqual(upstream.state.completions, 3, "one upstream turn per client request");
 });
 
-test("e2e - four parallel conversations never exceed three upstream completions", async () => {
-  await boot({ delayMs: 150 });
+test("e2e - four parallel conversations never exceed two upstream completions", async () => {
+  await boot({ delayMs: 150, settings: { "provider_throttle_ms:deepseek-web": "0" } });
 
   const responses = await Promise.all(
     ["a", "b", "c", "d"].map((session) =>
@@ -294,7 +295,7 @@ test("e2e - four parallel conversations never exceed three upstream completions"
 
   for (const res of responses) assert.strictEqual(res.status, 200);
   assert.strictEqual(upstream.state.completions, 4);
-  assert.strictEqual(upstream.state.maxActive, 3, "the fourth turn waited for a free slot");
+  assert.strictEqual(upstream.state.maxActive, 2, "the third turn waited for a free slot");
   assert.strictEqual(upstream.state.sessions, 4, "each conversation owns a chat session");
 });
 

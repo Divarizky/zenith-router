@@ -19,6 +19,7 @@ function setup(settings = {}) {
   setSetting("traffic_guard_enabled", "true");
   setSetting("request_jitter_enabled", "false");
   setSetting("max_account_concurrency", "8");
+  setSetting("provider_throttle_ms:deepseek-web", "0");
   for (const [key, value] of Object.entries(settings)) setSetting(key, value);
 }
 

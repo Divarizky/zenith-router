@@ -140,3 +140,25 @@ test("Traffic Guard - disabled state bypasses concurrency limiter", async () => 
   assert.strictEqual(typeof rel2, "function");
   assert.strictEqual(typeof rel3, "function");
 });
+
+test("Traffic Guard - enforces minimum throttle cool-off between requests on same session account", async () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  setSetting("traffic_guard_enabled", "true");
+  setSetting("max_account_concurrency", "2");
+  setSetting("request_jitter_enabled", "false");
+  setSetting("provider_throttle_ms:custom-session", "50");
+
+  const conn = { id: 105, provider: "custom-session", auth_type: "session" };
+
+  // Turn 1
+  const rel1 = await acquireAccountSlot(conn);
+  rel1(); // Finished turn 1
+
+  // Turn 2 immediately after Turn 1: should be delayed by throttle (50ms)
+  const start = Date.now();
+  const rel2 = await acquireAccountSlot(conn);
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed >= 35, `Turn 2 must respect minimum throttle cool-off (elapsed: ${elapsed}ms)`);
+  rel2();
+});

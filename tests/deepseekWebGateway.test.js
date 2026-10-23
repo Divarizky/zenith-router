@@ -59,12 +59,14 @@ function fakeUpstream() {
   return { calls, fetchFn };
 }
 
-function seed() {
+function seed(settings = {}) {
   initDb(":memory:");
   resetTrafficGuardState();
   resetChainStore();
   setSetting("request_jitter_enabled", "false");
   setSetting("traffic_guard_enabled", "true");
+  setSetting("provider_throttle_ms:deepseek-web", "0");
+  for (const [key, value] of Object.entries(settings)) setSetting(key, value);
   addConnection({
     provider: "deepseek-web",
     name: "Web",
@@ -146,7 +148,7 @@ test("gateway - a tools request carries the tool contract and streams OpenAI chu
   }
 });
 
-test("gateway - four parallel conversations run at most three turns and the fourth waits", async () => {
+test("gateway - four parallel conversations run at most two turns and the third waits", async () => {
   seed();
 
   let active = 0;
@@ -174,7 +176,7 @@ test("gateway - four parallel conversations run at most three turns and the four
     );
 
     for (const res of responses) assert.strictEqual(res.status, 200);
-    assert.strictEqual(maxActive, 3, "the fourth turn waits for a free slot");
+    assert.strictEqual(maxActive, 2, "the third turn waits for a free slot");
     assert.strictEqual(messages, 4);
   } finally {
     resetDeepSeekTransportFactory();

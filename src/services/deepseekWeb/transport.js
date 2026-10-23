@@ -496,7 +496,6 @@ export function parseHistoryPayload(text, { messageId = null } = {}) {
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
-    timer.unref?.();
     if (signal) {
       const onAbort = () => {
         clearTimeout(timer);

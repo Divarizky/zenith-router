@@ -54,7 +54,7 @@ test("chains - limits follow the provider cap, then the global cap", () => {
   assert.deepStrictEqual(limits, { main: 4, aux: MAX_AUX_CHAINS }, "provider tanpa cap sendiri memakai cap global");
 
   limits = resolveChainLimits(account());
-  assert.deepStrictEqual(limits, { main: 3, aux: MAX_AUX_CHAINS }, "deepseek-web memakai concurrency dari registry");
+  assert.deepStrictEqual(limits, { main: 2, aux: MAX_AUX_CHAINS }, "deepseek-web memakai concurrency dari registry");
 
   setSetting("provider_concurrency:deepseek-web", "5");
   limits = resolveChainLimits(account());
@@ -62,7 +62,7 @@ test("chains - limits follow the provider cap, then the global cap", () => {
 
   deleteSetting("provider_concurrency:deepseek-web");
   limits = resolveChainLimits(account());
-  assert.strictEqual(limits.main, 3);
+  assert.strictEqual(limits.main, 2);
 });
 
 test("chains - a fourth main chain drops auxiliary chains first, then the least recently used conversation", () => {

@@ -42,6 +42,34 @@ export function resolveProviderConcurrency(providerId) {
 }
 
 /**
+ * Minimum cool-off in ms between requests on one account of a provider.
+ */
+export function resolveProviderThrottle(providerId) {
+  const key = String(providerId || "").toLowerCase();
+  if (!key) return null;
+
+  const raw = getSetting(`provider_throttle_ms:${key}`, "");
+  if (raw !== "") {
+    const configured = Number(raw);
+    if (Number.isFinite(configured) && configured >= 0) return configured;
+  }
+
+  const declared = Number(getProvider(key)?.throttleMs);
+  if (Number.isFinite(declared) && declared >= 0) return declared;
+
+  return null;
+}
+
+/**
+ * Throttle interval in ms for one account before it can dispatch its next turn.
+ */
+export function effectiveAccountThrottle(connection) {
+  const providerThrottle = resolveProviderThrottle(connection?.provider);
+  if (providerThrottle !== null) return providerThrottle;
+  return 0;
+}
+
+/**
  * Cap for one account, resolved once so the limiter and the dashboard agree.
  * The registry/global value is clamped the same way acquireAccountSlot does it.
  */
@@ -119,9 +147,10 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
   // API key connections typically have higher limits; traffic guard focuses primarily on OAuth connections.
   // A provider that declares its own cap (DeepSeek web sessions, for example) overrides that global value.
   const maxConcurrency = effectiveAccountConcurrency(connection);
+  const minThrottleMs = effectiveAccountThrottle(connection);
   const isJitterEnabled = getSetting("request_jitter_enabled", "true") === "true";
   const isAux = purpose === "aux";
-  const queueTimeoutMs = isAux ? AUX_QUEUE_TIMEOUT_MS : QUEUE_TIMEOUT_MS;
+  const queueTimeoutMs = isAux ? Math.max(AUX_QUEUE_TIMEOUT_MS, minThrottleMs + 2000) : QUEUE_TIMEOUT_MS;
 
   const state = getState(connection.id);
 
@@ -190,8 +219,20 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
 
   const releaseProviderSlot = enterProviderSlot(connection.provider);
 
-  // Apply human-like proactive jitter pacing if previous request just finished (< 250ms ago)
-  if (isJitterEnabled && state.lastDispatchedAt > 0) {
+  // Apply provider-level throttle minimum (e.g. 3s for web session chats)
+  // or human-like proactive jitter pacing if previous request just finished (< 250ms ago).
+  if (minThrottleMs > 0 && state.lastDispatchedAt > 0) {
+    const elapsed = Date.now() - state.lastDispatchedAt;
+    if (elapsed < minThrottleMs) {
+      try {
+        await delay(minThrottleMs - elapsed, signal);
+      } catch (err) {
+        releaseAccountSlot(connection.id);
+        releaseProviderSlot();
+        throw err;
+      }
+    }
+  } else if (isJitterEnabled && state.lastDispatchedAt > 0) {
     const elapsedSinceLast = Date.now() - state.lastDispatchedAt;
     if (elapsedSinceLast < 250) {
       const jitterMs = randomInt(100, 300);

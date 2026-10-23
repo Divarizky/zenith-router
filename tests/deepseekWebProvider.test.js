@@ -7,7 +7,7 @@ import { addConnection } from "../src/db/index.js";
 import { applyConnectionAuth } from "../src/services/auth.js";
 import { resolveProviderConcurrency, resetTrafficGuardState } from "../src/services/trafficGuard.js";
 
-test("registry - deepseek-web is a session provider capped at three parallel turns", () => {
+test("registry - deepseek-web is a session provider capped at two parallel turns with throttle", () => {
   initDb(":memory:");
   resetTrafficGuardState();
 
@@ -17,13 +17,14 @@ test("registry - deepseek-web is a session provider capped at three parallel tur
   assert.deepStrictEqual(provider.authMethods, ["session"]);
   assert.strictEqual(provider.format, "openai");
   assert.strictEqual(provider.executor, "deepseek-web");
-  assert.strictEqual(provider.concurrency, 3);
+  assert.strictEqual(provider.concurrency, 2);
+  assert.strictEqual(provider.throttleMs, 3000);
   // One endpoint, two modes: chat and thinking (`thinking_enabled`).
   assert.deepStrictEqual(provider.models.map((model) => model.id), ["deepseek-chat", "deepseek-reasoner"]);
   assert.strictEqual(provider.alias[0], "dsw", "the model prefix is dsw");
   assert.strictEqual(getProvider("dsw").id, "deepseek-web");
   assert.strictEqual(getProvider("dweb").id, "deepseek-web", "the old prefix still routes");
-  assert.strictEqual(resolveProviderConcurrency("deepseek-web"), 3);
+  assert.strictEqual(resolveProviderConcurrency("deepseek-web"), 2);
 });
 
 test("catalog - models are published under dsw/ and the old prefix still resolves", () => {
@@ -88,7 +89,7 @@ test("dashboard - the detail page shows the cap and the session form", async () 
   initDb(":memory:");
   const html = await (await app.request("/dashboard/providers/deepseek-web")).text();
 
-  assert.ok(html.includes("3 per akun"), "the registry cap is visible before any setting exists");
+  assert.ok(html.includes("2 per akun"), "the registry cap is visible before any setting exists");
   assert.ok(html.includes('name="token"'), "the account form asks for the web token");
   assert.ok(html.includes('name="cookies"'), "cookies are optional but offered");
   assert.ok(html.includes("setara akses penuh"), "the account form warns about token scope");

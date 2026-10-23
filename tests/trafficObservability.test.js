@@ -46,8 +46,8 @@ test("traffic - a provider's cap follows the registry, not the global default", 
   setup({ provider: "deepseek-web", accounts: 1 });
   const traffic = getProviderTraffic("deepseek-web");
 
-  assert.strictEqual(traffic.perAccountCap, 3, "deepseek-web declares concurrency: 3");
-  assert.strictEqual(traffic.cap, 3);
+  assert.strictEqual(traffic.perAccountCap, 2, "deepseek-web declares concurrency: 2");
+  assert.strictEqual(traffic.cap, 2);
 });
 
 test("traffic - in-flight and queued requests are visible per account and per provider", async () => {

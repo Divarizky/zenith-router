@@ -103,7 +103,6 @@ async function probe(connection, { transportResolver = resolveDeepSeekTransport,
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  timer.unref?.();
 
   try {
     const transport = transportResolver(connection, { proxyUrl: resolvedProxy });

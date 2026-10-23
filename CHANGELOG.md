@@ -1,6 +1,6 @@
-## [Unreleased]
+## [0.1.8] - 23-10-2026
 
-Provider DeepSeek Web Chat lewat sesi browser, batas sesi paralel per akun, dan observability slot di dashboard.
+Provider DeepSeek Web Chat lewat sesi browser, batas sesi paralel per akun, observability slot di dashboard, serta perbaikan tool call stream Claude dan normalisasi reasoning Cline.
 
 ### Provider `dsw` (DeepSeek Web Chat)
 
@@ -10,11 +10,12 @@ Provider DeepSeek Web Chat lewat sesi browser, batas sesi paralel per akun, dan 
 - Tool call dari model (tag `<tool_call>` maupun dialek DSML) diparse menjadi `tool_calls` native, sehingga `/v1/chat/completions`, `/v1/messages` (blok `tool_use`, termasuk streaming `input_json_delta`), dan `/v1/responses` (`function_call`) bekerja tanpa format baru. Markup tidak pernah bocor ke `content`, dan blok kode panjang yang menempel dipangkas.
 - Karena upstream tidak melaporkan token, `usage` diisi estimasi dan ikut menghitung argumen tool.
 
-### Batas sesi paralel per akun
+### Batas sesi paralel dan pacing per akun
 
-- Traffic Guard kini memakai cap per akun lewat urutan setting `provider_concurrency:<id>` → field `concurrency` registry → `max_account_concurrency`. `dsw` menetapkan default 3 tanpa mengubah provider lain; kartu **Batas Sesi Paralel** bisa menimpanya 1–10.
-- Antrean utama menunggu maksimal 30 detik lalu menjadi 429 `account_busy` dengan `Retry-After: 5` dan failover ke akun berikutnya. Antrean bantu berhenti di 2 detik dan tidak pernah menyalip percakapan.
-- Sesi web per akun dibatasi 3 rantai utama + 2 bantu, dengan single-flight per rantai, TTL 6 jam, dan eviction aux-first.
+- Traffic Guard kini memakai cap per akun lewat urutan setting `provider_concurrency:<id>` → field `concurrency` registry → `max_account_concurrency`. `dsw` menetapkan default 2 tanpa mengubah provider lain; kartu **Batas Sesi Paralel** bisa menimpanya 1–10.
+- Pacing akun: provider dengan `throttleMs` (misal 3 detik pada `dsw`) menahan request berikutnya ke akun yang sama bila jeda sejak turn sebelumnya kurang dari batas tersebut, mencegah rate limit 429 upstream "Messages too frequent".
+- Antrean utama menunggu maksimal 30 detik lalu menjadi 429 `account_busy` dengan `Retry-After: 5` dan failover ke akun berikutnya. Antrean bantu menunggu maksimal hingga jendela throttle selesai dan tidak pernah menyalip percakapan.
+- Sesi web per akun dibatasi rantai utama sesuai cap concurrency + 2 bantu, dengan single-flight per rantai, TTL 6 jam, dan eviction aux-first.
 
 ### DeepSeek Web: agent tidak lagi mengulang jawaban lama
 
@@ -96,6 +97,26 @@ Provider DeepSeek Web Chat lewat sesi browser, batas sesi paralel per akun, dan 
 - README menambah bagian Provider DeepSeek Web: cara mengambil token, contoh `curl` non-stream/stream/tool, arti batas per akun, cara memperbarui sesi, dan peringatan ToS.
 - UI menampilkan peringatan risiko pemblokiran akun pada section Session Providers, modal tambah akun, dan detail provider. Provider tetap nonaktif sampai pengguna menambahkan akun sendiri.
 - ADR-5 mencatat keputusan D1–D10 implementasi provider ini.
+
+### Claude OAuth: header billing yang diminta upstream
+
+- Token `sk-ant-oat` hanya diterima upstream bila request membawa header billing Claude Code di `system[0]`. Tanpa header itu upstream membalas 429 `rate_limit_error` generik yang terbaca seperti kuota habis, padahal kuota masih ada. Zenith kini menyusun header tersebut untuk klien yang bukan CLI resmi, dan meneruskan body apa adanya bila header sudah ada.
+- Isi header diturunkan dari pesan user pertama dengan salt dan posisi karakter yang sama seperti CLI, sehingga `cc_version`, `cc_entrypoint`, dan `cch` tetap konsisten dengan request resmi.
+
+### Stream Claude: blok `tool_use` tidak lagi hilang
+
+- Terjemahan stream Claude → OpenAI hanya meneruskan `text_delta` dan `thinking_delta`. Blok `tool_use` beserta potongan `input_json_delta` dibuang, tetapi `finish_reason: tool_calls` tetap dikirim. Klien menerima sinyal "ada tool" tanpa tool apa pun sehingga agent berhenti di turn pertama, dan hanya teks yang tersisa di riwayat.
+- Setiap `content_block_start` bertipe `tool_use` kini memetakan index blok Claude ke posisi `tool_calls` OpenAI dan mengirim `id`, `type`, serta `name`; `input_json_delta` menyusul sebagai `function.arguments`. Input yang sudah terisi penuh di awal blok ikut terkirim. Jalur `/v1/responses` memakai transform yang sama sehingga ikut membaik.
+
+### Cline: reasoning-replay dan daftar model gratis
+
+- Riwayat multi-turn ke model reasoning-replay lewat Cline ditolak 400 bila assistant message tidak membawa `reasoning_content`, atau membawa `reasoning_details`/token kontrol Harmony (`<|...|>`) dari turn sebelumnya, atau mengutip header Harmony sebagai teks. Executor kini mengambil teks reasoning dari `reasoning_content`/`reasoning`/`reasoning_details`, membuang token kontrol, menghapus `reasoning_details`, memakai placeholder satu spasi bila tidak ada teks reasoning, dan menetralkan `<|...|>` di content dengan zero-width space.
+- Blok thinking Claude tidak lagi dibuang di jalur request; isinya dipindahkan ke `reasoning_content` pada assistant turn, dan reasoning item pada `/v1/responses` ikut menempel ke message assistant berikutnya.
+- Tiga model `cline-free/` bawaan dihapus dari registry supaya model gratis hanya berasal dari sync feed publik. Display name dari feed dinormalisasi (prefix `cline-free/` dibuang, title-case, `VL` uppercase) sementara ID model tetap utuh untuk routing.
+
+### Capability Claude 4.6
+
+- Opus 4.6 dan Sonnet 4.6 tercatat memakai context window 1M untuk kedua ejaan id (titik dan strip). Model lama tanpa angka pasti tidak diberi tebakan.
 
 ## [0.1.7] - 22-10-2026
 

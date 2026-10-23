@@ -222,6 +222,10 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
   const toolBlockIndexByOpenAI = new Map();
   const toolNamesByIndex = new Map();
   const toolArgBuffers = new Map();
+  // Claude -> OpenAI: content block index of each tool_use block mapped to its
+  // position in the OpenAI tool_calls array.
+  const openAIToolIndexByClaudeBlock = new Map();
+  let nextOpenAIToolIndex = 0;
 
   function claudeEvent(type, data) {
     return textEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -308,9 +312,56 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
                 const u = parsed.message?.usage;
                 if (typeof u?.input_tokens === "number") claudeInputTokens = u.input_tokens;
                 if (typeof u?.cache_read_input_tokens === "number") cachedInputTokens = u.cache_read_input_tokens;
+              } else if (currentEvent === "content_block_start") {
+                // A tool_use block opens a tool call: the first OpenAI delta
+                // carries id, type and name; arguments follow as input_json_delta.
+                const block = parsed.content_block;
+                if (block?.type === "tool_use") {
+                  const toolIndex = nextOpenAIToolIndex++;
+                  openAIToolIndexByClaudeBlock.set(parsed.index, toolIndex);
+                  const presetInput =
+                    block.input && typeof block.input === "object" && Object.keys(block.input).length > 0
+                      ? JSON.stringify(block.input)
+                      : "";
+                  const openAIChunk = {
+                    id: chunkId,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: model || "claude",
+                    choices: [{
+                      index: 0,
+                      delta: {
+                        tool_calls: [{
+                          index: toolIndex,
+                          id: block.id || `call_${toolIndex}`,
+                          type: "function",
+                          function: { name: block.name || "", arguments: presetInput },
+                        }],
+                      },
+                      finish_reason: null,
+                    }],
+                  };
+                  controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+                }
               } else if (currentEvent === "content_block_delta") {
                 const delta = parsed.delta || {};
-                if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+                if (delta.type === "input_json_delta") {
+                  const toolIndex = openAIToolIndexByClaudeBlock.get(parsed.index);
+                  if (toolIndex !== undefined && typeof delta.partial_json === "string" && delta.partial_json !== "") {
+                    const openAIChunk = {
+                      id: chunkId,
+                      object: "chat.completion.chunk",
+                      created: Math.floor(Date.now() / 1000),
+                      model: model || "claude",
+                      choices: [{
+                        index: 0,
+                        delta: { tool_calls: [{ index: toolIndex, function: { arguments: delta.partial_json } }] },
+                        finish_reason: null,
+                      }],
+                    };
+                    controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+                  }
+                } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
                   const openAIChunk = {
                     id: chunkId,
                     object: "chat.completion.chunk",

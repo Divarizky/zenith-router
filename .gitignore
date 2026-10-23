@@ -16,3 +16,6 @@ Thumbs.db
 # Agent profile (lokal saja, jangan di-commit)
 AGENTS.md
 CLAUDE.md
+
+# Tangkapan sesi DeepSeek Web asli (bisa memuat data akun)
+tests/fixtures/deepseekWeb/private/

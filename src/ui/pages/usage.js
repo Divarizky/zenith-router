@@ -747,6 +747,12 @@ function antigravityPoolRows(q) {
     remaining: pool.remainingPercentage,
     used: `${Math.round(100 - pool.remainingPercentage)}% terpakai`,
     reset: pool.resetAt || null,
+    // Weekly Argon decides whether the model can run at all, so it never hides
+    // behind "Tampilkan N baris lagi" even when the card lists many pools.
+    // Stored quotas from before the `window` field existed only carry the label.
+    pinned:
+      /argon/i.test(String(pool.group || pool.label || "")) &&
+      (pool.window === "weekly" || /mingguan|weekly/i.test(String(pool.label || ""))),
   }));
 }
 
@@ -798,8 +804,12 @@ function renderQuotaCard(s, antigravityInventory = null) {
         </div>`;
   };
 
-  const visible = rows.slice(0, MAX_VISIBLE_ROWS);
-  const hidden = rows.slice(MAX_VISIBLE_ROWS);
+  // Pinned rows are always shown in place; the rest fill the remaining slots.
+  const pinned = rows.filter((r) => r.pinned);
+  const rest = rows.filter((r) => !r.pinned);
+  const room = Math.max(0, MAX_VISIBLE_ROWS - pinned.length);
+  const visible = [...pinned, ...rest.slice(0, room)];
+  const hidden = rest.slice(room);
   const body =
     visible.map(rowHtml).join("") +
     (hidden.length
@@ -855,7 +865,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
     ${syncedNotice}
     <div class="card">
       <h3>Router Topology</h3>
-      <p class="hint">Zenith Router di tengah, provider tertaut di sekelilingnya. Layout tetap dan tidak bisa digeser.</p>
+      <p class="hint">Provider yang punya akun aktif tampil mengelilingi gateway, lengkap dengan jumlah akun dan pemakaiannya. Warna menandai trafik terakhir: request berjalan, terakhir dipakai, atau idle.</p>
       <div class="topo-split">
         <div class="topo-main">${renderTopologyPane(topology)}</div>
         ${renderRecentPanel(recent)}

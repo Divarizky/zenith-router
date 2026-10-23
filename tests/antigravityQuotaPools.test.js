@@ -144,6 +144,33 @@ test("Dashboard usage - kartu Antigravity menampilkan limit 5 jam dan mingguan d
   assert.ok(poolAt > -1 && familyAt > -1 && poolAt < familyAt, "pool tampil sebelum baris keluarga");
 });
 
+test("Dashboard usage - limit mingguan Argon tidak pernah masuk collapse", () => {
+  initDb(":memory:");
+  const resetAt = "2026-10-24T11:52:16.000Z";
+  // Six pools: Argon weekly lands on the fifth row, past the four visible slots.
+  const pools = [
+    { group: "Gemini Models", window: "weekly", label: "Gemini Models · Mingguan", remainingPercentage: 70, resetAt },
+    { group: "Gemini Models", window: "5h", label: "Gemini Models · 5 jam", remainingPercentage: 90, resetAt },
+    { group: "Claude and GPT models", window: "weekly", label: "Claude and GPT models · Mingguan", remainingPercentage: 35, resetAt },
+    { group: "Claude and GPT models", window: "5h", label: "Claude and GPT models · 5 jam", remainingPercentage: 55, resetAt },
+    { group: "Gemini 4 Argon", window: "weekly", label: "Gemini 4 Argon · Mingguan", remainingPercentage: 66.701853, resetAt },
+    { group: "Gemini 4 Argon", window: "5h", label: "Gemini 4 Argon · 5 jam", remainingPercentage: 12, resetAt },
+  ];
+  addConnection({
+    provider: "antigravity",
+    name: "pro-akun",
+    auth_type: "oauth",
+    credentials: { quota: { provider: "antigravity", unit: "tier", plan: "Google AI Pro", pools, quotas: {}, updated_at: Date.now() } },
+  });
+
+  const html = renderUsagePage(20120, {});
+  const argonAt = html.indexOf("Gemini 4 Argon · Mingguan");
+  const moreAt = html.indexOf('class="q-more"');
+  assert.ok(argonAt > -1, "baris Argon mingguan ada di kartu");
+  assert.ok(moreAt === -1 || argonAt < moreAt, "baris Argon mingguan tampil di depan, bukan di dalam collapse");
+  assert.ok(html.includes("33% terpakai"), "persen terpakai Argon ikut terlihat");
+});
+
 test("Antigravity pools - model dipetakan ke grup pool lewat id", () => {
   assert.strictEqual(poolGroupForModel("gemini-4-argon-medium"), "Gemini 4 Argon");
   assert.strictEqual(poolGroupForModel("gemini-3.8-flash"), "Gemini Models");

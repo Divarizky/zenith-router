@@ -1,3 +1,102 @@
+## [Unreleased]
+
+Provider DeepSeek Web Chat lewat sesi browser, batas sesi paralel per akun, dan observability slot di dashboard.
+
+### Provider `dsw` (DeepSeek Web Chat)
+
+- Provider baru berkategori `session` yang memakai user token dan cookies dari `chat.deepseek.com`, bukan API resmi. Token disimpan di kredensial koneksi dan dikirim apa adanya; gateway tidak pernah meneruskan header auth klien ke upstream.
+- Transport menangani PoW challenge (WASM di-vendor, MIT, tercatat di `NOTICE`), pembuatan chat session, `chat/completion` dengan header `x-ds-pow-response`, pembacaan history sebagai sumber teks otoritatif, dan fallback ke fragmen SSE bila history belum selesai. Proxy per akun tetap dihormati.
+- Token mati tidak di-refresh: 401/403 diteruskan dengan penanda `X-Zenith-Auth-Expired: 1`. Klien yang memutus koneksi dijawab 499.
+- Tool call dari model (tag `<tool_call>` maupun dialek DSML) diparse menjadi `tool_calls` native, sehingga `/v1/chat/completions`, `/v1/messages` (blok `tool_use`, termasuk streaming `input_json_delta`), dan `/v1/responses` (`function_call`) bekerja tanpa format baru. Markup tidak pernah bocor ke `content`, dan blok kode panjang yang menempel dipangkas.
+- Karena upstream tidak melaporkan token, `usage` diisi estimasi dan ikut menghitung argumen tool.
+
+### Batas sesi paralel per akun
+
+- Traffic Guard kini memakai cap per akun lewat urutan setting `provider_concurrency:<id>` → field `concurrency` registry → `max_account_concurrency`. `dsw` menetapkan default 3 tanpa mengubah provider lain; kartu **Batas Sesi Paralel** bisa menimpanya 1–10.
+- Antrean utama menunggu maksimal 30 detik lalu menjadi 429 `account_busy` dengan `Retry-After: 5` dan failover ke akun berikutnya. Antrean bantu berhenti di 2 detik dan tidak pernah menyalip percakapan.
+- Sesi web per akun dibatasi 3 rantai utama + 2 bantu, dengan single-flight per rantai, TTL 6 jam, dan eviction aux-first.
+
+### DeepSeek Web: agent tidak lagi mengulang jawaban lama
+
+- Turn yang ditolak upstream dulu dijawab dengan jawaban turn sebelumnya, karena DeepSeek membalas penolakan dengan HTTP 200 berisi JSON (`biz_code`) dan gateway langsung membaca pesan assistant terakhir di history. Agent lalu menjalankan tool call yang sama berulang-ulang (terlihat di `usage_history`: delapan respons berturut-turut dengan 186 token output identik). Sekarang body error dibaca sebagai error, jawaban dicocokkan dengan id dari `event: ready`, dan turn lanjutan yang ditolak diulang sekali di chat baru.
+- Token mati (`{"code":40003}` dengan HTTP 200) kini ditandai kedaluwarsa, bukan error sementara.
+- Parser stream mengikuti bentuk asli: path dan operasi patch terbawa ke frame berikutnya (`{"v":"..."}`), `APPEND` selalu menyambung, `BATCH` dan `event: ready` dibaca. Fixture tangkapan asli ada di `tests/fixtures/deepseekWeb/`.
+- Percakapan dengan session key yang sama (subagent, klien tanpa header sesi) kini punya chat web masing-masing dan berjalan paralel.
+- Hasil tool diberi nama tool dan id panggilannya, karena klien Claude, Codex, dan Responses tidak mengirim `name`. Batas hasil tool naik dari 4.000 ke 12.000 karakter dengan potongan awal dan akhir.
+- Reasoning `deepseek-reasoner` di-stream sambil berjalan, dan `usage` melaporkan `reasoning_tokens`.
+- Chat web yang tidak dipakai lagi dihapus dari sidebar (`ZENITH_DEEPSEEK_KEEP_SESSIONS=1` untuk menyimpan).
+- Login browser: menutup jendela langsung menghentikan proses, dan login ulang atau token tempelan yang sama tidak menambah akun kembar.
+
+### DeepSeek Web: tool call rusak tidak lagi tampil sebagai teks
+
+- Perintah bash yang muncul mentah di akhir jawaban berasal dari tool call yang gagal diparse, lalu dikirim sebagai `content` dengan `finish_reason: stop`. Parser kini menerima JSON dengan kutip tidak di-escape, invoke tanpa prefix DSML (`<function_calls><invoke>`), parameter tanpa tag penutup, DSML tanpa `</invoke>`, dan satu parameter `arguments` yang membungkus seluruh argumen. Markup di dalam code fence jawaban tidak lagi dijalankan.
+- Blok tool call yang tetap tidak terbaca dibuang, tidak ditampilkan, dan ditandai `malformed`. `turns.js` mengulang sekali di chat baru; kalau gagal lagi klien menerima 502 `malformed_tool_call`.
+
+### DeepSeek Web: penyebab turn kosong ikut dilaporkan
+
+- Turn yang selesai tanpa teks dulu selalu jadi 502 `history_incomplete` tanpa keterangan. Parser stream sekarang mencatat event non-`message` (`title`, `close`, `update_session`) beserta teks penjelasnya dan status akhir stream, lalu memasukkannya ke pesan error, mis. `status=CONTENT_FILTER; events=close; hint="..."; history=empty`.
+- Penyebab yang dikenal dipetakan ke kode sendiri: status filter → 400 `content_filtered`; penolakan karena percakapan terlalu panjang → 413 `conversation_limit` (diulang sekali di chat baru); upstream sibuk → 429 `rate_limit_exceeded`; status `INCOMPLETE` → 502 `upstream_incomplete`. 413 dan 400 tidak memarkir akun karena bukan masalah kredensial.
+
+### DeepSeek Web: mode thinking dan model `deepseek-reasoner`
+
+- Model kedua `deepseek-reasoner` mengirim `thinking_enabled: true`; `deepseek-chat` tetap default dengan thinking mati.
+- Reasoning kini benar-benar terbaca: upstream menamai fragmennya `THINK` (bukan `THINKING`), dan stream-nya berbentuk patch `{"p":"response/fragments/-1/content","v":"..."}`. Keduanya ditangani, sehingga `reasoning_content` terisi di respons non-stream maupun sebagai delta sebelum jawaban pada stream.
+- Verifikasi nyata: satu turn `deepseek-reasoner` mengembalikan 258 karakter `reasoning_content` untuk jawaban 52 karakter, dan token reasoning ikut dihitung di `usage`.
+
+### Dialog login DeepSeek mengikuti pola provider OAuth
+
+- Tombol `Login di browser` kini jadi satu aksi utama di dialog, statusnya memakai blok `#oauth-status.oauth-status` yang sama dengan Antigravity/Claude/OpenAI, dan tempel token manual dilipat di `<details class="manual">`.
+- Label akun dan proxy dibaca dari `acct-name`/`acct-proxy` seperti alur OAuth, dan dialog memakai `zrSessionLoginCancel()` untuk membatalkan flow.
+
+### Login browser mengikuti default browser dan memakai sesi profil Anda
+
+- Browser yang dibuka kini mengikuti default browser OS (Edge pada mesin ini), bukan selalu Chrome.
+- Jendela login menyalin sesi dari profil browser Anda (`Local State`, cookie, `Local Storage/leveldb`), sehingga login DeepSeek yang sudah ada langsung terpakai tanpa menyentuh profil asli dan tanpa menutup browser yang sedang berjalan.
+- Profil dipilih berdasarkan yang mengenal `deepseek.com` (`Default`/`Profile 1`/...), bukan hardcoded `Default`.
+- `ZENITH_LOGIN_PROFILE=isolated` mengembalikan perilaku profil kosong.
+
+### Login browser: verifikasi sesi dan pemakaian browser yang sudah terbuka
+
+- Login sekali klik tidak lagi menyimpan akun dari halaman yang belum selesai login. Token wajib berasal dari halaman di luar `/sign_in`, panjangnya wajar, dan lolos verifikasi ke endpoint PoW (`verifySessionToken`); placeholder SPA seperti `undefined`/`null` kini dinormalkan menjadi kosong sehingga jendela tidak tertutup sebelum Anda sempat login.
+- Kalau Chrome/Edge sudah berjalan dengan port debugging (default `http://127.0.0.1:9222`, bisa diubah lewat `ZENITH_CDP_ENDPOINT`), login membuka tab di browser itu dan memakai sesi yang sudah ada. Kalau tidak, gateway tetap membuka jendela profil sementara seperti sebelumnya.
+- Dialog menampilkan fase nyata dari server (`Membuka browser...`, `Membuka tab di browser yang sudah berjalan...`, `Memeriksa sesi login...`, `Menunggu login...`) lewat field `phase` pada poll.
+
+### Cooldown dua percobaan
+
+- Kegagalan upstream tidak lagi langsung memarkir akun. 429/5xx serta 401/403 tanpa refresh baru menulis cooldown setelah **dua request klien terpisah** gagal pada akun yang sama; retry internal dalam satu request (failover akun, same-account retry, anggota combo, fallback default) dihitung satu percobaan lewat `requestId` yang dibagi `routeRequest`.
+- Request pertama kini mengembalikan error upstream asli (mis. 500, 502, 429, atau 401) bukan pesan `All accounts are cooling down`, dan pesan itu baru muncul setelah akun benar-benar diparkir. Keberhasilan di antaranya mereset hitungan, dan `initDb` mengosongkan streak agar tes tidak saling mewarisi.
+
+### Dashboard kuota
+
+- Kartu Antigravity di halaman Kuota kini selalu menampilkan batas **Gemini 4 Argon mingguan** di depan, di luar collapse "Tampilkan N baris lagi". Baris ini menentukan apakah model Argon masih bisa dipanggil, jadi tidak boleh tersembunyi saat kartu memuat banyak pool. Urutan pool lain tidak berubah; hanya baris Argon mingguan yang dipin ke atas.
+
+### Prefix dan ikon provider
+
+- Prefix model provider web chat menjadi `dsw` (`dsw/deepseek-chat`). Alias lama `dweb` dan `chatbrain` tetap diterima sehingga klien yang sudah dikonfigurasi tidak putus.
+- Ikon provider diganti mark DeepSeek resmi (128×128 RGBA, path logo resmi tanpa dependensi baru; atribusi ditambahkan di `NOTICE`).
+
+### Login sekali klik (CDP)
+
+- Dialog **Tambah Akun** untuk provider sesi mendapat tombol **Login di browser** (kolom token manual tetap ada di bawahnya): server membuka Chrome/Edge yang sudah terpasang dengan profil sementara ke halaman login DeepSeek, pengguna login manual, lalu token dan cookies disimpan otomatis sebagai akun baru. Tidak ada dependensi npm baru; browser digerakkan lewat Chrome DevTools Protocol.
+- Flow berjalan di background dengan id acak dan TTL 5 menit, dipoll dashboard lewat `/dashboard/providers/accounts/login/{start,poll,cancel}`. Token tidak pernah dikirim ke halaman maupun log, profil sementara dihapus setelah selesai, dan proses browser dimatikan beserta anak-anaknya di Windows.
+- Token hasil tangkapan dinormalkan dari bentuk `localStorage.userToken` (`{"value":"...","__version":"0"}`), `Bearer ...`, atau nilai berkutip, sama seperti input manual.
+- Override `ZENITH_BROWSER_PATH` untuk menunjuk browser tertentu dan `ZENITH_LOGIN_TIMEOUT_MS` untuk mengubah batas tunggu. Alasan memilih CDP dibanding Selenium dicatat di ADR-6.
+
+### Health check sesi
+
+- Detail provider memeriksa token lewat `create_pow_challenge` (tanpa memulai percakapan), menampilkan badge `Sesi OK`, `Sesi kedaluwarsa`, atau `Gagal dicek`, dengan cache 5 menit (error 60 detik) dan dedupe probe bersamaan.
+- Aksi **Periksa sesi** memaksa probe baru; **Perbarui sesi** mengganti token dan cookies tanpa menyentuh proxy serta membuang verdict lama. Kartu provider di halaman daftar ikut memperingatkan sesi kedaluwarsa.
+
+### Observability
+
+- `getProviderTraffic()` melaporkan `inFlight`, `queue`, `cap`, `perAccountCap`, dan rincian per akun. Dashboard menampilkan `${inFlight}/${cap} dipakai` plus jumlah antrean di kartu batas, dan kolom **Slot** per akun dengan penanda `+n` untuk waiter.
+
+### Dokumentasi dan UI
+
+- README menambah bagian Provider DeepSeek Web: cara mengambil token, contoh `curl` non-stream/stream/tool, arti batas per akun, cara memperbarui sesi, dan peringatan ToS.
+- UI menampilkan peringatan risiko pemblokiran akun pada section Session Providers, modal tambah akun, dan detail provider. Provider tetap nonaktif sampai pengguna menambahkan akun sendiri.
+- ADR-5 mencatat keputusan D1–D10 implementasi provider ini.
+
 ## [0.1.7] - 22-10-2026
 
 Ketahanan OpenCode free tier, kuota Antigravity per pool, integrasi kuota OpenRouter dan Ollama Cloud, login Claude lewat redirect resmi, dan penanganan 404 transien upstream.

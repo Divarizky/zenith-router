@@ -72,3 +72,11 @@ test("capabilities - defaults are conservative", () => {
   assert.equal(DEFAULT_CAPABILITIES.vision, false);
   assert.equal(DEFAULT_CAPABILITIES.reasoning, false);
 });
+test("capabilities - Claude 1M windows match both id spellings, older Sonnet stays unset", () => {
+  assert.equal(resolveCapabilities("claude-sonnet-5-5").contextWindow, 1000000);
+  assert.equal(resolveCapabilities("claude-sonnet-4-6").contextWindow, 1000000);
+  assert.equal(resolveCapabilities("claude-sonnet-4.6").contextWindow, 1000000);
+  assert.equal(resolveCapabilities("claude-opus-4-6").contextWindow, 1000000);
+  // No verified API window for this model, so the table does not guess one.
+  assert.equal(resolveCapabilities("claude-sonnet-4-5-20250929").contextWindow, null);
+});

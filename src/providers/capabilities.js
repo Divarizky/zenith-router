@@ -29,10 +29,14 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*claude*sonnet-5*", caps: { vision: true, reasoning: true, contextWindow: 1000000, maxOutput: 128000 } },
   { pattern: "*claude*fable*", caps: { vision: true, reasoning: true, contextWindow: 1000000, maxOutput: 128000 } },
   { pattern: "*claude*mythos*", caps: { vision: true, reasoning: true, contextWindow: 1000000, maxOutput: 128000 } },
-  { pattern: "*claude*opus-4.6*", caps: { vision: true, reasoning: true } },
+  // Opus 4.6 and Sonnet 4.6 ship the full 1M window on the Claude Platform (GA notice).
+  // Both spellings are listed: gateways name these models with dots or hyphens.
+  { pattern: "*claude*opus-4.6*", caps: { vision: true, reasoning: true, contextWindow: 1000000 } },
+  { pattern: "*claude*opus-4-6*", caps: { vision: true, reasoning: true, contextWindow: 1000000 } },
   { pattern: "*claude*opus-4.7*", caps: { vision: true, reasoning: true } },
   { pattern: "*claude*opus-4.8*", caps: { vision: true, reasoning: true } },
-  { pattern: "*claude*sonnet-4.6*", caps: { vision: true, reasoning: true } },
+  { pattern: "*claude*sonnet-4.6*", caps: { vision: true, reasoning: true, contextWindow: 1000000 } },
+  { pattern: "*claude*sonnet-4-6*", caps: { vision: true, reasoning: true, contextWindow: 1000000 } },
   { pattern: "*claude*sonnet-4.7*", caps: { vision: true, reasoning: true } },
   { pattern: "*claude*haiku*", caps: { vision: true, reasoning: true } },
   { pattern: "*claude*opus*", caps: { vision: true, reasoning: true } },

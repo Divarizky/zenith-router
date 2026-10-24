@@ -91,42 +91,42 @@ export function renderDashboardLoginPage({
       padding: 1.5rem;
     }
     code {
-      background: var(--surface-2); padding: 0.15rem 0.4rem; border-radius: 6px;
+      background: var(--surface-2); padding: 0.15rem 0.4rem; border-radius: 0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.82rem; color: var(--text);
     }
     .login-card {
       width: 100%; max-width: 360px;
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow);
+      border: 2px solid var(--text);
+      border-radius: 0;
+      box-shadow: 5px 5px 0 #0a0a0a;
       padding: 1.5rem;
     }
     .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
-    .brand img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; display: block; }
+    .brand img { width: 36px; height: 36px; border-radius: 0; object-fit: cover; display: block; }
     .brand h1 { font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em; }
     .brand p { font-size: 0.78rem; color: var(--text-subtle); }
     .alert {
-      padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.82rem;
+      padding: 0.6rem 0.75rem; border-radius: 0; font-size: 0.82rem;
       border: 1px solid var(--border); margin-bottom: 1rem;
     }
-    .alert-info { color: var(--info); border-color: rgba(147, 197, 253, 0.3); background: rgba(147, 197, 253, 0.08); }
-    .alert-danger { color: var(--danger); border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
+    .alert-info { color: var(--text); border-left: 4px solid var(--info); background: var(--surface-2); }
+    .alert-danger { color: var(--text); border-left: 4px solid var(--danger); background: var(--surface-2); }
     .alert strong { font-weight: 600; }
     form { display: flex; flex-direction: column; gap: 0.9rem; }
     label { font-size: 0.78rem; font-weight: 500; color: var(--text-muted); margin-bottom: -0.4rem; }
     input[type="password"] {
-      width: 100%; background: #0d0d0d; border: 1px solid var(--border); color: var(--text);
-      padding: 0.55rem 0.75rem; border-radius: 8px; font-size: 0.88rem; font-family: inherit;
+      width: 100%; background: var(--surface); border: 2px solid var(--text); color: var(--text);
+      padding: 0.55rem 0.75rem; border-radius: 0; font-size: 0.88rem; font-family: inherit;
     }
     input[type="password"]:focus {
-      outline: none; border-color: var(--text-subtle); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+      outline: none; border-color: var(--text); box-shadow: 3px 3px 0 #0a0a0a;
     }
     input[type="password"]:disabled { opacity: 0.6; }
     button {
-      margin-top: 0.15rem; padding: 0.55rem 0.95rem; border-radius: 8px;
-      border: 1px solid var(--accent); background: var(--accent); color: #0a0a0a;
+      margin-top: 0.15rem; padding: 0.55rem 0.95rem; border-radius: 0;
+      border: 2px solid var(--accent); background: var(--accent); color: var(--bg);
       font-size: 0.85rem; font-weight: 500; font-family: inherit; cursor: pointer;
       transition: background 0.12s;
     }

@@ -293,7 +293,7 @@ export function renderProxyContent(query = {}) {
             ></textarea>
           </div>
 
-          <div style="padding: 0.6rem 0.75rem; border-radius: 6px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); font-size: 0.78rem; color: var(--text-muted); line-height: 1.55;">
+          <div style="padding: 0.6rem 0.75rem; border-radius: 0; background: var(--surface-2); border: 2px solid var(--border-subtle); font-size: 0.78rem; color: var(--text-muted); line-height: 1.55;">
             <strong style="color: var(--text); font-size: 0.78rem;">Format yang didukung:</strong><br />
             &bull; <code>http://user:pass@host:port</code> (atau tanpa auth <code>http://host:port</code>)<br />
             &bull; <code>host:port</code> (otomatis berskema <code>http://</code>)<br />

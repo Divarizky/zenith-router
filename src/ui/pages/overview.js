@@ -62,8 +62,8 @@ export function renderOverviewPage(port = 20120) {
       <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-wrap: wrap; gap: 0.5rem;">
         <div style="display: flex; align-items: center; gap: 0.65rem;">
           <h3 style="font-size: 0.95rem; margin: 0; font-weight: 600;">Console Log</h3>
-          <span id="log-status" class="badge" style="background: rgba(52,211,153,0.12); color: var(--success); font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.35rem;">
-            <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--success);"></span>
+          <span id="log-status" class="pill pill-success" style="font-size: 0.68rem;">
+            <span class="dot" style="width:6px;height:6px;"></span>
             Connecting...
           </span>
         </div>
@@ -73,7 +73,7 @@ export function renderOverviewPage(port = 20120) {
             type="text"
             id="log-filter"
             placeholder="Saring log..."
-            style="width: 160px; padding: 0.25rem 0.6rem; font-size: 0.78rem; border-radius: 6px; background: #0d0d0d;"
+            style="width: 160px; padding: 0.25rem 0.6rem; font-size: 0.78rem; border-radius: 0; background: var(--surface);"
             oninput="applyLogFilter()"
           />
           <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--text-muted); cursor: pointer; user-select: none;">
@@ -91,7 +91,7 @@ export function renderOverviewPage(port = 20120) {
         style="height: 380px; overflow-y: auto; background: #080808; padding: 0.85rem 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem; line-height: 1.5; color: #d4d4d4;"
       >
         <div id="log-entries" style="display: flex; flex-direction: column; gap: 2px;">
-          <div class="log-empty" style="color: var(--text-subtle); padding: 1rem 0; text-align: center;">Menunggu log aktivitas gateway...</div>
+          <div class="log-empty" style="color: #a3a3a3; padding: 1rem 0; text-align: center;">Menunggu log aktivitas gateway...</div>
         </div>
       </div>
     </div>
@@ -132,7 +132,7 @@ export function renderOverviewPage(port = 20120) {
           if (filtered.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'log-empty';
-            empty.style.color = 'var(--text-subtle)';
+            empty.style.color = '#a3a3a3';
             empty.style.padding = '1rem 0';
             empty.style.textAlign = 'center';
             empty.textContent = filter ? 'Tidak ada log yang cocok dengan filter.' : 'Menunggu log aktivitas gateway...';
@@ -168,9 +168,9 @@ export function renderOverviewPage(port = 20120) {
           es = new EventSource('/api/console-logs/stream');
 
           es.onopen = function() {
-            statusBadge.style.background = 'rgba(52,211,153,0.12)';
-            statusBadge.style.color = 'var(--success)';
-            statusBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--success);"></span> Live';
+            statusBadge.className = 'pill pill-success';
+            statusBadge.style.fontSize = '0.68rem';
+            statusBadge.innerHTML = '<span class="dot dot-success" style="width:6px;height:6px;"></span> Live';
           };
 
           es.onmessage = function(e) {
@@ -193,9 +193,9 @@ export function renderOverviewPage(port = 20120) {
           };
 
           es.onerror = function() {
-            statusBadge.style.background = 'rgba(248,113,113,0.12)';
-            statusBadge.style.color = 'var(--danger)';
-            statusBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--danger);"></span> Offline';
+            statusBadge.className = 'pill pill-danger';
+            statusBadge.style.fontSize = '0.68rem';
+            statusBadge.innerHTML = '<span class="dot dot-danger" style="width:6px;height:6px;"></span> Offline';
           };
         }
 

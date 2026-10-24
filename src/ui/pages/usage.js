@@ -93,20 +93,20 @@ function renderTopologyPane(topology) {
     </div>
     <style>
       .topology-wrap { position: relative; }
-      .topology-canvas { display: block; background: var(--bg-subtle, #0d1117); border: 1px solid var(--border, #21262d); border-radius: 10px; }
-      .topology-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted, #8b949e); }
+      .topology-canvas { display: block; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; }
+      .topology-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted, #2a2a2a); }
       .topology-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
-      .topology-legend .dot-router { background: #e6edf3; }
-      .topology-legend .dot-active { background: #22d3ee; }
-      .topology-legend .dot-last { background: #f59e0b; }
-      .topology-legend .dot-idle { background: #6e7681; }
+      .topology-legend .dot-router { background: var(--text); }
+      .topology-legend .dot-active { background: var(--success); }
+      .topology-legend .dot-last { background: var(--warning); }
+      .topology-legend .dot-idle { background: var(--text-subtle); }
       .topo-node text { font-family: inherit; }
       .topo-split { display: flex; gap: 16px; align-items: stretch; }
       .topo-main { flex: 1; min-width: 0; }
-      .recent-panel { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.85rem; }
-      .recent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-subtle); padding-bottom: 0.6rem; border-bottom: 1px solid var(--border-subtle); }
+      .recent-panel { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.85rem; }
+      .recent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-subtle); padding-bottom: 0.6rem; border-bottom: var(--bw) solid var(--border-subtle); }
       .recent-list { list-style: none; margin: 0; padding: 0.35rem 0 0; overflow-y: auto; max-height: 420px; }
-      .recent-item { padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+      .recent-item { padding: 0.5rem 0; border-bottom: var(--bw) solid var(--border-subtle); }
       .recent-item:last-child { border-bottom: none; }
       .recent-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
       .recent-model { font-size: 0.8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -114,13 +114,13 @@ function renderTopologyPane(topology) {
       .recent-io { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
       .recent-empty { font-size: 0.8rem; color: var(--text-muted); padding: 1rem 0; text-align: center; }
       .recent-item-new { animation: recent-flash 1.2s ease-out; }
-      @keyframes recent-flash { from { background: var(--accent-soft, #1f6feb22); } to { background: transparent; } }
+      @keyframes recent-flash { from { background: var(--accent-soft, rgba(10,10,10,0.06)); } to { background: transparent; } }
       @media (max-width: 1100px) { .topo-split { flex-direction: column; } .recent-panel { width: 100%; } }
       .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       @media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
-      .quota-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; }
+      .quota-card { background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 #0a0a0a; }
       .q-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--surface-3); border: 1px solid var(--border); font-size: 0.75rem; font-weight: 700; color: var(--text-muted); }
+      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: var(--bw) solid var(--text); font-size: 0.75rem; font-weight: 800; color: var(--text); }
       .q-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1; }
       .q-name strong { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .q-body { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -129,11 +129,11 @@ function renderTopologyPane(topology) {
       .q-label { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .q-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
       .q-pct { font-size: 0.78rem; font-weight: 600; }
-      .q-pct.q-ok { color: var(--success); }
-      .q-pct.q-warn { color: var(--warning); }
-      .q-pct.q-bad { color: var(--danger); }
-      .q-bar { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
-      .q-bar i { display: block; height: 100%; border-radius: 999px; transition: width 0.3s ease; }
+      .q-pct.q-ok { color: var(--text); }
+      .q-pct.q-warn { color: var(--text); }
+      .q-pct.q-bad { color: var(--text); }
+      .q-bar { height: 8px; border-radius: 0; background: var(--surface-2); border: var(--bw) solid var(--text); overflow: hidden; }
+      .q-bar i { display: block; height: 100%; border-radius: 0; transition: width 0.3s ease; }
       .q-bar i.q-ok { background: var(--success); }
       .q-bar i.q-warn { background: var(--warning); }
       .q-bar i.q-bad { background: var(--danger); }
@@ -147,7 +147,7 @@ function renderTopologyPane(topology) {
       .q-levels { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 0.7rem; color: var(--text-subtle); }
       .q-levels span { white-space: nowrap; }
       .q-levels b { font-weight: 600; color: var(--text-muted); }
-      .q-levels b.q-bad { color: var(--danger); }
+      .q-levels b.q-bad { color: var(--text); }
       .q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
       .q-updated { font-size: 0.7rem; color: var(--text-subtle); }
       @keyframes topo-ping { 0% { opacity: .8; r: 4; } 80%,100% { opacity: 0; r: 10; } }
@@ -158,8 +158,8 @@ function renderTopologyPane(topology) {
       .topo-node.is-active .topo-node-rect { animation: topo-node-breathe 1.3s ease-in-out infinite; }
       /* Router core: berdenyut saat ada request berjalan. */
       @keyframes topo-router-pulse {
-        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(230, 237, 243, .45)); }
-        50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(255, 255, 255, .95)); }
+        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(10, 10, 10, .18)); }
+        50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(10, 10, 10, .28)); }
       }
       @keyframes topo-router-icon {
         0%, 100% { transform: rotate(0deg) scale(1); }
@@ -167,15 +167,15 @@ function renderTopologyPane(topology) {
         75% { transform: rotate(5deg) scale(1.08); }
       }
       @keyframes topo-router-label {
-        0%, 100% { filter: drop-shadow(0 0 4px #e6edf3); }
-        50% { filter: drop-shadow(0 0 9px #ffffff) drop-shadow(0 0 3px #ffffff); }
+        0%, 100% { filter: drop-shadow(0 0 4px rgba(10,10,10,0.2)); }
+        50% { filter: drop-shadow(0 0 9px rgba(10,10,10,0.3)) drop-shadow(0 0 3px rgba(10,10,10,0.3)); }
       }
       .topo-router-rect-on { transform-box: fill-box; transform-origin: center; }
       .topo-router-icon { transform-box: fill-box; transform-origin: center; }
       .topo-router.is-powering .topo-router-rect-on { animation: topo-router-pulse .75s ease-in-out infinite; }
       .topo-router.is-powering .topo-router-icon { animation: topo-router-icon .45s ease-in-out infinite; }
       .topo-router.is-powering .topo-router-label { animation: topo-router-label .7s ease-in-out infinite; }
-      .topo-router-badge { filter: drop-shadow(0 0 6px #e6edf3); }
+      .topo-router-badge { filter: drop-shadow(0 0 6px rgba(10,10,10,0.25)); }
       /* Beam edge: core bergaris + halo berkedip, partikel mengalir di sepanjang path. */
       @keyframes topo-edge-dash { to { stroke-dashoffset: -36; } }
       @keyframes topo-edge-flicker { 0%, 100% { opacity: .85; } 40% { opacity: 1; } 55% { opacity: .55; } 70% { opacity: 1; } }
@@ -216,7 +216,9 @@ function renderTopologyPane(topology) {
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
 
       var NS = "http://www.w3.org/2000/svg";
-      var PALETTE = ["#6366f1", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#10b981", "#f97316"];
+      // Warna identitas provider memakai token tema existing; dekoratif saja (cincin & ping),
+  // teks tetap hitam karena teks berwarna di atas putih gagal WCAG.
+  var PALETTE = ["#34d399", "#fbbf24", "#f87171", "#93c5fd", "#737373", "#0a0a0a", "#34d399", "#fbbf24"];
       function nodePos(i) {
         if (count === 1) return { x: CX, y: CY - RY };
         var angle = -Math.PI / 2 + (2 * Math.PI * i) / count;
@@ -256,13 +258,13 @@ function renderTopologyPane(topology) {
       // Router core memakai dua rect yang ditampilkan bergantian lewat apply().
       var router = document.createElementNS(NS, "g");
       router.innerHTML =
-        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="12" fill="#161b22" stroke="#e6edf3" stroke-width="1.5"/>' +
-        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="12" fill="rgba(230,237,243,0.12)" stroke="#ffffff" stroke-width="2" style="display:none"/>' +
+        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="0" fill="#fafafa" stroke="#0a0a0a" stroke-width="2"/>' +
+        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="0" fill="rgba(10,10,10,0.06)" stroke="#0a0a0a" stroke-width="2" style="display:none"/>' +
         '<image class="topo-router-icon" x="' + (CX - 66) + '" y="' + (CY - 12) + '" width="24" height="24" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
-        '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" fill="#e6edf3">Zenith Router</text>' +
+        '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" fill="#0a0a0a">Zenith Router</text>' +
         '<g class="topo-router-badge" style="display:none">' +
-        '<circle cx="' + (CX + 64) + '" cy="' + (CY - 14) + '" r="10" fill="#e6edf3"/>' +
-        '<text class="topo-router-badge-n" x="' + (CX + 64) + '" y="' + (CY - 10) + '" text-anchor="middle" font-size="11" font-weight="bold" fill="#000">0</text>' +
+        '<circle cx="' + (CX + 64) + '" cy="' + (CY - 14) + '" r="10" fill="#0a0a0a"/>' +
+        '<text class="topo-router-badge-n" x="' + (CX + 64) + '" y="' + (CY - 10) + '" text-anchor="middle" font-size="11" font-weight="bold" fill="#fafafa">0</text>' +
         "</g>";
       nodesG.appendChild(router);
       var routerOff = router.querySelector(".topo-router-rect-off");
@@ -292,20 +294,20 @@ function renderTopologyPane(topology) {
         // Dua varian edge: beam listrik saat aktif, garis solid saat idle.
         var edges = document.createElementNS(NS, "g");
         var particles = [0, 1, 2, 3, 4].map(function (k) {
-          return '<circle r="' + (k % 2 === 0 ? 3.5 : 2.2) + '" fill="' + (k % 3 === 0 ? "#e6edf3" : k % 3 === 1 ? "#67e8f9" : "#fff") + '">' +
+          return '<circle r="' + (k % 2 === 0 ? 3.5 : 2.2) + '" fill="' + (k % 3 === 0 ? "#0a0a0a" : k % 3 === 1 ? "#2a2a2a" : "#0a0a0a") + '">' +
             '<animateMotion dur="' + (0.5 + k * 0.12) + 's" repeatCount="indefinite" path="' + path + '" begin="' + (k * 0.15) + 's"/></circle>';
         }).join("");
         var sparks = [0, 1, 2, 3].map(function (k) {
-          return '<circle r="1.8" fill="#e0f2fe" opacity="0">' +
+          return '<circle r="1.8" fill="#a3a3a3" opacity="0">' +
             '<animate attributeName="opacity" values="0;1;0;0;1;0" dur="' + (0.35 + (k % 3) * 0.1) + 's" begin="' + (k * 0.07) + 's" repeatCount="indefinite"/>' +
             '<animateMotion dur="' + (0.28 + k * 0.05) + 's" repeatCount="indefinite" path="' + path + '" begin="' + (k * 0.11) + 's"/></circle>';
         }).join("");
         edges.innerHTML =
-          '<path class="topo-edge-idle" d="' + path + '" fill="none" stroke="#30363d" stroke-width="1" opacity="0.45"/>' +
+          '<path class="topo-edge-idle" d="' + path + '" fill="none" stroke="#737373" stroke-width="2" opacity="0.5"/>' +
           '<g class="topo-edge-beam" style="display:none">' +
-          '<path class="topo-edge-halo" d="' + path + '" fill="none" stroke="#22d3ee" stroke-width="9" stroke-opacity="0.3" stroke-linecap="round"/>' +
-          '<path class="topo-edge-plasma" d="' + path + '" fill="none" stroke="#4ade80" stroke-width="4.5" stroke-opacity="0.85" stroke-linecap="round"/>' +
-          '<path class="topo-edge-kame" d="' + path + '" fill="none" stroke="#f8fafc" stroke-width="1.8" stroke-linecap="round"/>' +
+          '<path class="topo-edge-halo" d="' + path + '" fill="none" stroke="#a3a3a3" stroke-width="9" stroke-opacity="0.35" stroke-linecap="round"/>' +
+          '<path class="topo-edge-plasma" d="' + path + '" fill="none" stroke="#2a2a2a" stroke-width="4.5" stroke-opacity="0.85" stroke-linecap="round"/>' +
+          '<path class="topo-edge-kame" d="' + path + '" fill="none" stroke="#0a0a0a" stroke-width="1.8" stroke-linecap="round"/>' +
           particles + sparks +
           "</g>";
         edgesG.appendChild(edges);
@@ -320,14 +322,14 @@ function renderTopologyPane(topology) {
             '<animate attributeName="opacity" values="0.7;0" dur="1.4s" repeatCount="indefinite"/>' +
             '<animateTransform attributeName="transform" type="scale" values="1;1.05" dur="1.4s" repeatCount="indefinite" additive="sum"/>' +
           "</rect>" +
-          '<rect class="topo-node-rect" x="' + (-NW / 2) + '" y="' + (-NH / 2) + '" width="' + NW + '" height="' + NH + '" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>' +
-          '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="7" fill="#0d1117" stroke="#30363d" stroke-width="1"/>' +
+          '<rect class="topo-node-rect" x="' + (-NW / 2) + '" y="' + (-NH / 2) + '" width="' + NW + '" height="' + NH + '" rx="0" fill="#fafafa" stroke="#2a2a2a" stroke-width="2"/>' +
+          '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="0" fill="#d4d4d4" stroke="#2a2a2a" stroke-width="2"/>' +
           (n.icon
             ? '<image href="' + esc(n.icon) + '" x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" preserveAspectRatio="xMidYMid meet" clip-path="url(#topo-icon-clip)"/>'
             : '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="7" fill="' + color + '22"/>' +
-              '<text x="' + (-NW / 2 + 28) + '" y="5" text-anchor="middle" font-size="13" font-weight="bold" fill="' + color + '">' + esc(initials(n.name)) + "</text>") +
-          '<text class="topo-node-title" x="' + (-NW / 2 + 52) + '" y="-4" font-size="12" font-weight="bold" fill="#e6edf3">' + esc(shortName) + "</text>" +
-          '<text x="' + (-NW / 2 + 52) + '" y="13" font-size="11" fill="#8b949e">' + esc(sub) + "</text>" +
+              '<text x="' + (-NW / 2 + 28) + '" y="5" text-anchor="middle" font-size="13" font-weight="bold" fill="#0a0a0a">' + esc(initials(n.name)) + "</text>") +
+          '<text class="topo-node-title" x="' + (-NW / 2 + 52) + '" y="-4" font-size="12" font-weight="bold" fill="#0a0a0a">' + esc(shortName) + "</text>" +
+          '<text x="' + (-NW / 2 + 52) + '" y="13" font-size="11" fill="#737373">' + esc(sub) + "</text>" +
           '<g class="topo-node-ping" style="display:none">' +
             '<circle cx="' + (NW / 2 - 14) + '" cy="' + (-NH / 2 + 14) + '" r="4" fill="' + color + '"/>' +
             '<circle cx="' + (NW / 2 - 14) + '" cy="' + (-NH / 2 + 14) + '" r="4" fill="none" stroke="' + color + '" style="animation: topo-ping 1.2s ease-out infinite;"/>' +
@@ -368,17 +370,17 @@ function renderTopologyPane(topology) {
           var isLast = !isActive && r.key === lastProvider;
           var cls = isActive ? "topo-node is-active" : "topo-node";
           if (r.g.getAttribute("class") !== cls) r.g.setAttribute("class", cls);
-          r.rect.setAttribute("stroke", isActive ? r.color : "#30363d");
+          r.rect.setAttribute("stroke", isActive ? r.color : "#2a2a2a");
           r.rect.setAttribute("stroke-width", isActive ? 2 : 1);
           if (isActive) r.rect.setAttribute("filter", "url(#" + r.filterId + ")");
           else r.rect.removeAttribute("filter");
-          r.title.setAttribute("fill", isActive ? r.color : "#e6edf3");
+          r.title.setAttribute("fill", "#0a0a0a");
           r.halo.style.display = isActive ? "" : "none";
           r.ping.style.display = isActive ? "" : "none";
           r.beam.style.display = isActive ? "" : "none";
           r.idle.style.display = isActive ? "none" : "";
           if (!isActive) {
-            r.idle.setAttribute("stroke", isLast ? "#f59e0b" : "#30363d");
+            r.idle.setAttribute("stroke", isLast ? "#fbbf24" : "#2a2a2a");
             r.idle.setAttribute("stroke-width", isLast ? 2 : 1);
             r.idle.setAttribute("opacity", isLast ? 0.8 : 0.45);
           }

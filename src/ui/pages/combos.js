@@ -198,19 +198,19 @@ export function renderCombosContent(query = {}) {
       .combo-rename-form input[type="text"] { flex: 1; min-width: 12rem; max-width: 20rem; }
       .combo-edit-chain { margin-top: 0.5rem; }
       .combo-selected { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
-      .combo-selected li { display: flex; align-items: center; gap: 0.5rem; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.55rem; font-size: 0.85rem; background: var(--surface-2); }
+      .combo-selected li { display: flex; align-items: center; gap: 0.5rem; border: 2px solid var(--text); border-radius: 0; padding: 0.35rem 0.55rem; font-size: 0.85rem; background: var(--surface-2); }
       .combo-selected li.cs-empty { border: none; padding: 0.2rem 0; color: var(--text-subtle); background: transparent; }
-      .combo-selected .cs-order { color: var(--text-subtle); font-size: 0.75rem; min-width: 1.4em; text-align: center; }
+      .combo-selected .cs-order { color: var(--text-muted); font-size: 0.75rem; font-weight: 800; min-width: 1.4em; text-align: center; }
       .combo-selected code { font-size: 0.82rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .combo-selected-actions { display: flex; gap: 0.2rem; flex: none; }
       .combo-selected-actions .btn-ghost { padding: 0.15rem 0.4rem; min-height: auto; line-height: 1.1; font-size: 0.85rem; }
       .combo-picker { max-width: 640px; }
       .combo-picker input[type="search"] { width: 100%; box-sizing: border-box; }
       .combo-picker-list { margin-top: 0.75rem; max-height: 420px; overflow-y: auto; }
-      .picker-group-head { position: sticky; top: 0; z-index: 1; background: var(--surface); display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0; border-bottom: 1px solid var(--border-subtle); font-size: 0.8rem; font-weight: 600; color: var(--text-subtle); }
+      .picker-group-head { position: sticky; top: 0; z-index: 1; background: var(--surface); display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0; border-bottom: 2px solid var(--border-subtle); font-size: 0.8rem; font-weight: 800; color: var(--text-subtle); }
       .picker-group-head img { width: 14px; height: 14px; }
-      .picker-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.4rem 0.5rem; border: none; background: none; color: var(--text); text-align: left; font-size: 0.85rem; cursor: pointer; border-radius: 6px; }
-      .picker-row:hover { background: var(--border-subtle); }
+      .picker-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.4rem 0.5rem; border: 2px solid transparent; background: none; color: var(--text); text-align: left; font-size: 0.85rem; cursor: pointer; border-radius: 0; }
+      .picker-row:hover { background: var(--surface-2); border-color: var(--text); }
       .picker-check { width: 1em; text-align: center; color: var(--text-subtle); }
       .picker-caps { margin-left: auto; display: flex; gap: 0.5rem; font-size: 0.7rem; color: var(--text-subtle); flex-shrink: 0; }
     </style>

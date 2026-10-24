@@ -10,7 +10,7 @@ import {
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionFullyCooledDown } from "../../services/auth.js";
 import { getProviderTraffic } from "../../services/trafficGuard.js";
-import { checkSessionHealth, forgetSessionHealth, getSessionHealth } from "../../services/deepseekWeb/health.js";
+import { checkSessionHealth, forgetSessionHealth, getSessionHealth } from "../../services/deepseekWeb/turns.js";
 import { findSessionAccount } from "../../services/deepseekWeb/browserLogin.js";
 import { isConnectionExhausted } from "../../services/quota.js";
 import {
@@ -606,8 +606,8 @@ function renderAddAccountModal(p) {
           <label for="acct-proxy">URL Proxy (Opsional)</label>
           <input type="text" id="acct-proxy" placeholder="http://127.0.0.1:7890" />
         </div>
-        <div class="notice" style="background: var(--bg-hover, #1e2029); border-left: 3px solid var(--warning, #eab308); padding: 0.5rem 0.75rem; font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.4;">
-          <span style="color: var(--text-muted, #94a3b8);">Token ini setara akses penuh ke akun DeepSeek kamu dan tersimpan plaintext di database gateway. Gunakan akun khusus, jangan bagikan token, dan pahami risiko pemblokiran akun karena pemakaian di luar klien resmi.</span>
+        <div class="notice" style="background: var(--bg-hover, #d4d4d4); border-left: 3px solid var(--warning, #fbbf24); padding: 0.5rem 0.75rem; font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.4;">
+          <span style="color: var(--text-muted, #2a2a2a);">Token ini setara akses penuh ke akun DeepSeek kamu dan tersimpan plaintext di database gateway. Gunakan akun khusus, jangan bagikan token, dan pahami risiko pemblokiran akun karena pemakaian di luar klien resmi.</span>
         </div>
         <div class="oauth-actions">
           <button type="button" class="btn btn-primary" id="session-login-start" data-provider="${id}">Login di browser</button>
@@ -713,8 +713,8 @@ function renderAddAccountModal(p) {
         </div>
         ${
           OAUTH_SCOPE_NOTICES[p.id]
-            ? `<div class="notice" style="background: var(--bg-hover, #1e2029); border-left: 3px solid var(--warning, #eab308); padding: 0.5rem 0.75rem; font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.4;">
-                <span style="color: var(--text-muted, #94a3b8);">${OAUTH_SCOPE_NOTICES[p.id]}</span>
+            ? `<div class="notice" style="background: var(--bg-hover, #d4d4d4); border-left: 3px solid var(--warning, #fbbf24); padding: 0.5rem 0.75rem; font-size: 0.8rem; margin-bottom: 1rem; line-height: 1.4;">
+                <span style="color: var(--text-muted, #2a2a2a);">${OAUTH_SCOPE_NOTICES[p.id]}</span>
               </div>`
             : ""
         }

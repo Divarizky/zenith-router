@@ -192,6 +192,11 @@ export async function runUpgrade(tag, { backupDir } = {}) {
   return { ok: true, restarting: true, tag, backup };
 }
 
+/**
+ * HTTP handler for POST /api/version/upgrade — transport for this operation
+ * only. The reusable part is `runUpgrade` above, which takes no Hono context
+ * and is what the test suite drives directly.
+ */
 export async function handleUpgradeRequest(c) {
   const body = await c.req.parseBody();
   const tag = String(body.version || "").trim();

@@ -2,8 +2,22 @@ import { condenseMessages } from "./rtk.js";
 import { injectCaveman } from "./caveman.js";
 
 /**
- * Apply token saver pipeline (RTK + Caveman) with fail-open guarantee.
- * RTK runs unless `rtk: false`; Caveman changes the agent's system prompt, so it only runs with `caveman: true`.
+ * Token saver: the one place that shapes the text of a request.
+ *
+ * This module is the only production entry point. `rtk.js` and `caveman.js`
+ * are pure translation steps reached from here; their exports exist so their
+ * own unit tests can exercise them directly, and must not be called by
+ * anything else in src/.
+ *
+ * The order is fixed and the guarantee is fail-open: a step that throws leaves
+ * the request untouched rather than failing it.
+ */
+
+/**
+ * Apply the token saver pipeline (RTK, then Caveman).
+ *
+ * RTK runs unless disabled; Caveman changes the agent's own system prompt and
+ * therefore only runs when explicitly opted in.
  */
 export function applyTokenSaver(body, format = "openai", options = {}) {
   if (!body || typeof body !== "object") return body;

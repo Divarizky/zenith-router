@@ -1,9 +1,7 @@
-import { routeRequest } from "./route.js";
-import { clientSessionKey } from "./session.js";
-import { translateResponse, createTransformStream, FORMATS } from "../translator/index.js";
-import { recordUsage, createUsageTapStream, estimateTokens, normalizeUsage } from "../services/usage.js";
+import { claudeEnvelope, relayClientRequest } from "./relay.js";
+import { FORMATS, translateResponse } from "../translator/index.js";
+import { estimateTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
-import { guardStream } from "../services/streamGuard.js";
 
 /**
  * Non-streaming body for an Anthropic client. A native Anthropic message from a
@@ -112,175 +110,62 @@ function sanitizeClaudeMessages(messages) {
 }
 
 /**
- * Handle POST /v1/messages (Anthropic Claude format)
+ * Intercept explicit Claude Code warmup request ("Warmup") and repair tool names
+ * before the body is routed. Runs before routing, so it may rewrite the body.
  */
-export async function handleMessages(c) {
-  let body;
-  try {
-    body = await c.req.json();
-  } catch (err) {
-    return c.json(
-      {
-        type: "error",
-        error: {
-          type: "invalid_request_error",
-          message: "Invalid JSON in request body",
-        },
-      },
-      400
-    );
-  }
-
-  if (!body || !body.model || !Array.isArray(body.messages)) {
-    return c.json(
-      {
-        type: "error",
-        error: {
-          type: "invalid_request_error",
-          message: "Missing required 'model' or 'messages' field",
-        },
-      },
-      400
-    );
-  }
-
+function beforeRoute(body, c) {
   body.messages = sanitizeClaudeMessages(body.messages);
 
-  // Intercept explicit Claude Code warmup request ("Warmup")
-  if (isWarmupRequest(body)) {
-    if (body.stream) {
-      return new Response(createSyntheticWarmupStream(body.model), {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive",
-        },
-      });
-    }
+  if (!isWarmupRequest(body)) return null;
 
-    return c.json(
-      {
-        id: "msg_synthetic_warmup",
-        type: "message",
-        role: "assistant",
-        model: body.model,
-        content: [{ type: "text", text: "Warmup OK" }],
-        stop_reason: "end_turn",
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      200
-    );
-  }
-
-  try {
-    const routed = await routeRequest({
-      model: body.model,
-      body,
-      signal: c.req.raw.signal,
-      sourceFormat: FORMATS.CLAUDE,
-      defaultFormat: FORMATS.CLAUDE,
-      tokenSaverHeader: c.req.header("x-zenith-token-saver"),
-      extraHeaders: c.req.header("anthropic-beta") ? { "anthropic-beta": c.req.header("anthropic-beta") } : null,
-      baseUrlFor: upstreamBaseUrl,
-      sessionKey: clientSessionKey({ header: (n) => c.req.header(n), body, apiKeyId: c.get("apiKeyId") }),
-    });
-
-    if (routed.notFound) {
-      return c.json(
-        {
-          type: "error",
-          error: {
-            type: "not_found_error",
-            message: `Model '${body.model}' not found in registry`,
-          },
-        },
-        404
-      );
-    }
-
-    if (!routed.ok) {
-      return routed.response;
-    }
-
-    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName, fallbackFrom } = routed;
-    const apiKeyId = c.get("apiKeyId") || null;
-
-    if (body.stream) {
-      let responseStream = upstreamRes.body;
-      if (targetFormat !== FORMATS.CLAUDE) {
-        // Claude clients cannot declare Responses custom tools either.
-        responseStream = responseStream.pipeThrough(
-          createTransformStream(targetFormat, FORMATS.CLAUDE, targetModel, { customToolNames: new Set() })
-        );
-      }
-
-      responseStream = responseStream.pipeThrough(
-        createUsageTapStream({
-          connectionId: connection?.id,
-          apiKeyId,
-          provider: provider?.id,
-          comboName,
-          fallbackFrom,
-          model: targetModel,
-          startTime,
-          estimatedInputTokens: estimateTokens(body.messages),
-        })
-      );
-
-      const streamHeaders = {
+  if (body.stream) {
+    return new Response(createSyntheticWarmupStream(body.model), {
+      status: 200,
+      headers: {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
-      };
-      if (connection?.name) {
-        streamHeaders["X-Zenith-Account"] = connection.name;
-      }
-
-      return guardStream(
-        new Response(responseStream, {
-          status: 200,
-          headers: streamHeaders,
-        }),
-        {
-          signal: c.req.raw.signal,
-          label: `${provider?.id || "upstream"} ${targetModel}`,
-          format: "claude",
-        }
-      );
-    }
-
-    const finalData = await upstreamResponseToClaude(upstreamRes, targetFormat, targetModel);
-
-    const durationMs = Date.now() - startTime;
-    const usage = normalizeUsage(finalData.usage);
-    queueMicrotask(() => {
-      recordUsage({
-        connectionId: connection?.id,
-        apiKeyId,
-        provider: provider?.id,
-        comboName,
-        fallbackFrom,
-        model: targetModel,
-        ...usage,
-        durationMs,
-      });
-    });
-
-    if (connection?.name) {
-      c.header("X-Zenith-Account", connection.name);
-    }
-    return c.json(finalData, 200);
-  } catch (err) {
-    return c.json(
-      {
-        type: "error",
-        error: {
-          type: "api_error",
-          message: `Internal gateway error: ${err.message}`,
-        },
       },
-      500
-    );
+    });
   }
+
+  return c.json(
+    {
+      id: "msg_synthetic_warmup",
+      type: "message",
+      role: "assistant",
+      model: body.model,
+      content: [{ type: "text", text: "Warmup OK" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    200
+  );
+}
+
+/**
+ * Handle POST /v1/messages (Anthropic Claude format)
+ */
+export async function handleMessages(c) {
+  return relayClientRequest(c, {
+    sourceFormat: FORMATS.CLAUDE,
+    defaultFormat: FORMATS.CLAUDE,
+    baseUrlFor: upstreamBaseUrl,
+    extraHeaders: (ctx) => {
+      const beta = ctx.req.header("anthropic-beta");
+      return beta ? { "anthropic-beta": beta } : null;
+    },
+    validate: (body) => Boolean(body && body.model && Array.isArray(body.messages)),
+    missingFieldMessage: "Missing required 'model' or 'messages' field",
+    envelope: claudeEnvelope,
+    beforeRoute,
+    streamFormat: "claude",
+    // Claude clients cannot declare Responses custom tools either.
+    transformOptions: () => ({ customToolNames: new Set() }),
+    estimateInputTokens: (body) => estimateTokens(body.messages),
+    finalize: async ({ upstreamRes, targetFormat, targetModel }) => {
+      const data = await upstreamResponseToClaude(upstreamRes, targetFormat, targetModel);
+      return { data, usage: normalizeUsage(data.usage) };
+    },
+  });
 }

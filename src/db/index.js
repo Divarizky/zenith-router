@@ -2,11 +2,55 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resetCooldownStrikes } from "../services/cooldownStrikes.js";
+import { resetAccountStrikes } from "../services/accountCooldown.js";
 
 let dbInstance = null;
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+/**
+ * node:sqlite hands a bound string to SQLite as a C string, so every SQL
+ * function that inspects the value — length, substr, instr — stops at the first
+ * NUL byte. The bytes themselves survive a round trip, which makes this easy to
+ * miss: reading the column back gives the whole string, while the same row
+ * filtered or sliced by SQL behaves as if it ended early. A values-
+ * and-settings store can receive such a value from a pasted credential.
+ *
+ * The cleanup belongs at the boundary rather than at each call site, so
+ * prepared statements are wrapped once here instead of repeating a replace()
+ * in all three dozen places that bind parameters.
+ */
+function stripNul(value) {
+  return typeof value === "string" ? value.replace(/\u0000/g, "") : value;
+}
+
+function sanitizeParams(params) {
+  return Array.isArray(params) ? params.map(stripNul) : params;
+}
+
+function wrapStatement(stmt) {
+  return new Proxy(stmt, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      // Only the three binding methods take parameters; everything else
+      // (including any future method) is forwarded to the real statement.
+      if (prop !== "run" && prop !== "get" && prop !== "all") return value.bind(target);
+      return (...args) => value.call(target, ...sanitizeParams(args));
+    },
+  });
+}
+
+function wrapDatabase(db) {
+  return new Proxy(db, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      if (prop !== "prepare") return value.bind(target);
+      return (sql, ...rest) => wrapStatement(value.call(target, sql, ...rest));
+    },
+  });
+}
 
 // node --test sets NODE_TEST_CONTEXT in every test process; without this check,
 // tests that never call initDb(":memory:") would write into the real database.
@@ -185,8 +229,8 @@ CREATE TABLE IF NOT EXISTS model_sync_state (
  * Initialize SQLite database and create schema
  */
 export function initDb(dbPath = null) {
-  // Cooldown strikes are process memory; a new database must not inherit them.
-  resetCooldownStrikes();
+  // Account strikes are process memory; a new database must not inherit them.
+  resetAccountStrikes();
   const effectivePath = dbPath || defaultDbPath();
 
   if (dbInstance) {
@@ -203,7 +247,7 @@ export function initDb(dbPath = null) {
     } catch {}
   }
 
-  const db = new DatabaseSync(effectivePath);
+  const db = wrapDatabase(new DatabaseSync(effectivePath));
 
   if (effectivePath !== ":memory:") {
     try {

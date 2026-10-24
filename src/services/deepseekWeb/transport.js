@@ -16,6 +16,9 @@
  */
 import { proxyFetch } from "../../executors/proxy.js";
 import { encodePowHeader, isChallengeExpired, POW_TARGET_PATH, solvePowChallenge } from "./pow.js";
+// Imported from prompt.js, not turns.js: turns.js re-exports this module's
+// callers' boundary (health, whose transport resolver lives here), and importing
+// it back would form a three-module cycle with no load-order benefit.
 import { renderTurn } from "./prompt.js";
 import { normalizeSessionToken } from "./token.js";
 

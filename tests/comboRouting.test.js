@@ -98,6 +98,56 @@ test("combo chain - a bad request stops the chain instead of burning the next me
   assert.strictEqual(calls.length, 1);
   setCustomExecutor(null);
 });
+test("combo chain - a 400 that ran out of credit advances to the next member", async () => {
+  seedChain();
+  chainCombo();
+
+  const calls = [];
+  setCustomExecutor({
+    async execute({ url }) {
+      calls.push(url);
+      // The same 400 status a malformed prompt produces, but the body says the
+      // first account has no money left rather than that the request is wrong.
+      if (url.includes(MISTRAL_URL)) return upstreamError(400, "insufficient credits on this account");
+      return okOpenAI("dari anggota kedua");
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+  });
+
+  assert.strictEqual(res.status, 200, "anggota kedua melayani request");
+  const data = await res.json();
+  assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
+  assert.strictEqual(calls.length, 2, "rantai tidak berhenti pada 400 yang kehabisan kredit");
+  setCustomExecutor(null);
+});
+
+test("combo chain - every other 400 still stops the chain", async () => {
+  seedChain();
+  chainCombo();
+
+  const calls = [];
+  setCustomExecutor({
+    async execute({ url }) {
+      calls.push(url);
+      return upstreamError(400, "context length exceeded");
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+  });
+
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(calls.length, 1, "4xx lain tetap menghentikan rantai");
+  setCustomExecutor(null);
+});
 
 test("combo chain - an exhausted chain answers 503 with the last member's error", async () => {
   seedChain();

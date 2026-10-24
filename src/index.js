@@ -104,7 +104,7 @@ import {
 import { isAdminProtected } from "./services/adminAuth.js";
 import { getConnections } from "./db/index.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
-import { ensureSessionHealth } from "./services/deepseekWeb/health.js";
+import { ensureSessionHealth } from "./services/deepseekWeb/turns.js";
 import { startModelSyncScheduler } from "./services/modelSync.js";
 import { startOpencodeCatalogRefresh } from "./services/opencodeCatalog.js";
 import { startQuotaSyncScheduler, syncAllQuotas } from "./services/quotaSync.js";

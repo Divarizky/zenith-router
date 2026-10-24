@@ -7,6 +7,8 @@
  * other event is replayed untouched in front of the rest of the stream.
  */
 
+import { parseSSEBlocks } from "../utils/sse.js";
+
 // Enough for keep-alive comments and a large first chunk; past this the stream
 // is passed through as is rather than held back any longer.
 const MAX_PROBE_CHARS = 64 * 1024;
@@ -61,19 +63,7 @@ export function streamErrorStatus(event) {
  * arrived yet, otherwise `{ error: null }` or `{ error: { status, payload } }`.
  */
 function inspectEvents(text) {
-  const blocks = text.split(/\r?\n\r?\n/);
-  blocks.pop(); // the last block may still be incomplete
-  for (const block of blocks) {
-    let eventName = "";
-    const dataLines = [];
-    for (const line of block.split(/\r?\n/)) {
-      if (line.startsWith("event:")) eventName = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-    }
-    // Comments and keep-alive pings carry no data; keep waiting.
-    if (dataLines.length === 0) continue;
-
-    const data = dataLines.join("\n").trim();
+  for (const { event: eventName, data } of parseSSEBlocks(text, { dropIncompleteTail: true })) {
     if (!data || data === "[DONE]") return { error: null };
     let event = null;
     try {

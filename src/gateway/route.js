@@ -109,6 +109,35 @@ export function shouldTryNextMember(status) {
 }
 
 /**
+ * Upstream wordings that mean "this account is out of money" rather than "this
+ * request is wrong". They arrive on the same 400 as a malformed prompt, so the
+ * status cannot tell them apart and the body has to.
+ */
+const CREDIT_EXHAUSTED =
+  /insufficient\s*[-_ ]?(credit|balance|funds|quota)|balance\s+too\s+low|credit[s]?\s+exhausted|out\s+of\s+credit|quota\s+exhausted/i;
+
+/**
+ * Whether the next member gets a turn.
+ *
+ * The status decides for everything except one case: a 400 whose body says the
+ * account ran out of credit. Every other 4xx is the client's own error and would
+ * repeat identically on the next member, but an exhausted account is a billing
+ * state of this one member, and the next one may still have money.
+ */
+async function shouldAdvanceToNextMember({ status, response }) {
+  if (shouldTryNextMember(status)) return true;
+  if (Number(status) !== 400) return false;
+  try {
+    const text = await response?.clone().text();
+    return Boolean(text) && CREDIT_EXHAUSTED.test(text);
+  } catch {
+    // An unreadable body is not evidence of billing trouble; treat the 400 as
+    // the client's own error, which is what the status alone would say.
+    return false;
+  }
+}
+
+/**
  * A bare model string is looked up as a combo first: an explicitly created combo
  * must not lose to the provider guess built from a model-name prefix.
  */
@@ -271,7 +300,7 @@ async function runComboMembers(combo, endpoint, attempted) {
       if (attempt.ok) return { ...attempt, comboName: combo.name };
 
       lastFailure = attempt;
-      if (!shouldTryNextMember(attempt.status)) return attempt;
+      if (!(await shouldAdvanceToNextMember(attempt))) return attempt;
 
       captureLine(
         `[COMBO] name=${combo.name} member="${member}" gagal dengan HTTP ${attempt.status}, pindah ke anggota berikutnya`
@@ -370,13 +399,14 @@ export async function routeRequest({ model, ...endpoint }) {
     const attempt = await attemptMember(provider, targetModel, endpoint);
     attempted.add(identityOf({ provider, targetModel }));
     if (attempt.ok) return attempt;
-    // A payload the upstream itself rejects fails the same way everywhere.
-    if (!shouldTryNextMember(attempt.status)) return attempt;
+    // A payload the upstream itself rejects fails the same way everywhere,
+    // unless the next model has credit this one ran out of.
+    if (!(await shouldAdvanceToNextMember(attempt))) return attempt;
     return runDefaultFallback({ endpoint, attempted, failure: attempt, origin: model, fallbackId });
   }
 
   const attempt = await runComboMembers(target.combo, endpoint, attempted);
   if (attempt.ok) return attempt;
-  if (!shouldTryNextMember(attempt.status)) return attempt;
+  if (!(await shouldAdvanceToNextMember(attempt))) return attempt;
   return runDefaultFallback({ endpoint, attempted, failure: attempt, origin: model, fallbackId });
 }

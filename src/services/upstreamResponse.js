@@ -1,24 +1,8 @@
 import { createTransformStream, translateResponse, FORMATS, normalizeFormat } from "../translator/index.js";
-
-function decodeSSE(text) {
-  const events = [];
-  for (const part of text.split(/\r?\n\r?\n/)) {
-    let data = "";
-    for (const line of part.split(/\r?\n/)) {
-      const t = line.trim();
-      if (t.startsWith("data:")) data += t.slice(5).trim();
-    }
-    if (data && data !== "[DONE]") {
-      try {
-        events.push(JSON.parse(data));
-      } catch {}
-    }
-  }
-  return events;
-}
+import { parseSSEEvents } from "../utils/sse.js";
 
 function aggregateOpenAISSE(text, model) {
-  const events = decodeSSE(text);
+  const events = parseSSEEvents(text);
   let id = null;
   let created = Math.floor(Date.now() / 1000);
   let role = "assistant";

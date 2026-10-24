@@ -19,7 +19,7 @@ import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
-import { clearCooldownStrike, cooldownStrikeReached } from "./cooldownStrikes.js";
+import { ACCOUNT_PARK_MS, clearStrikes, parkThresholdReached } from "./accountCooldown.js";
 
 // Callers that run several attempts for one client request pass the same id, so
 // internal retries never count as separate user attempts.
@@ -29,28 +29,7 @@ function nextFallbackRequestId() {
   return `fallback-${fallbackRequestSeq}`;
 }
 
-/**
- * Key for the strike counter. `model:<id>` follows the per-model rate limit
- * lock; `account` follows the account-wide auth lock.
- */
-function strikeKey(connection, scope) {
-  return `${connection.id}:${connection.provider || ""}:${scope}`;
-}
-
-/**
- * Park the account only once this failure is the second one across separate
- * client requests. The failure itself is still reported to the client, so the
- * caller sees the real upstream error instead of a cooldown notice.
- */
-function parkAfterRepeatedFailures(connection, scope, requestId) {
-  return cooldownStrikeReached(strikeKey(connection, scope), requestId);
-}
-
-function clearFailureStrikes(connection, modelId) {
-  clearCooldownStrike(strikeKey(connection, "account"));
-  if (modelId) clearCooldownStrike(strikeKey(connection, `model:${modelId}`));
-}
-
+// Success clears both strikes: sporadic failures never accumulate into a park.
 export function listAvailableConnections(providerId, { model = null, effort = undefined } = {}) {
   if (!providerId) return [];
   const providerDef = getProvider(providerId);
@@ -128,14 +107,6 @@ export function getNextConnection(providerId, triedIds = [], model = null, effor
   return null;
 }
 
-export function markProviderCooldown(providerId, durationMs = 60000) {
-  if (!providerId) return;
-  const connections = getConnections(providerId);
-  const until = Date.now() + durationMs;
-  for (const c of connections) {
-    setConnectionCooldown(c.id, until);
-  }
-}
 
 function attachSlotRelease(res, releaseSlot) {
   if (!res || !releaseSlot) return res;
@@ -574,7 +545,7 @@ export async function executeWithFallback({
 
     // Success: this connection can serve the request
     if (res.ok) {
-      clearFailureStrikes(connection, modelId);
+      clearStrikes(connection, modelId);
       return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
     }
 
@@ -663,7 +634,7 @@ export async function executeWithFallback({
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
       if (connection.id && !isTransportFailure(res, errText)) {
-        if (parkAfterRepeatedFailures(connection, `model:${modelId}`, attemptId)) {
+        if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
           applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000 * attempt);
         }
       }
@@ -676,8 +647,8 @@ export async function executeWithFallback({
       try {
         const refreshed = await refreshOAuthToken(connection, { force: true });
         if (!refreshed) {
-          if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
-            setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          if (connection.id && parkThresholdReached(connection, { requestId: attemptId })) {
+            setConnectionCooldown(connection.id, Date.now() + ACCOUNT_PARK_MS);
           }
           if (attempt < maxAttempts) continue;
           return { ok: false, response: lastFailureResponse };
@@ -724,7 +695,7 @@ export async function executeWithFallback({
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
           if (connection.id && !isTransportFailure(res, retryErrText)) {
-            if (parkAfterRepeatedFailures(connection, `model:${modelId}`, attemptId)) {
+            if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
               applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
             }
           }
@@ -732,8 +703,8 @@ export async function executeWithFallback({
           continue;
         }
         if (res.status === 401 || res.status === 402 || res.status === 403) {
-          if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
-            setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+          if (connection.id && parkThresholdReached(connection, { requestId: attemptId })) {
+            setConnectionCooldown(connection.id, Date.now() + ACCOUNT_PARK_MS);
           }
           if (attempt < maxAttempts) continue;
         }
@@ -742,8 +713,8 @@ export async function executeWithFallback({
         if (releaseSlot) releaseSlot();
         if (signal?.aborted) return { ok: false, response: lastFailureResponse };
         console.error(`[zenith] Reactive refresh error for ${connection.id}:`, err.message);
-        if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
-          setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+        if (connection.id && parkThresholdReached(connection, { requestId: attemptId })) {
+          setConnectionCooldown(connection.id, Date.now() + ACCOUNT_PARK_MS);
         }
         if (attempt < maxAttempts) continue;
         return { ok: false, response: lastFailureResponse };
@@ -752,8 +723,8 @@ export async function executeWithFallback({
 
     // Account-level failures can be isolated to this credential; try the next one.
     if (res.status === 401 || res.status === 402 || res.status === 403) {
-      if (connection.id && parkAfterRepeatedFailures(connection, "account", attemptId)) {
-        setConnectionCooldown(connection.id, Date.now() + 10 * 60000);
+      if (connection.id && parkThresholdReached(connection, { requestId: attemptId })) {
+        setConnectionCooldown(connection.id, Date.now() + ACCOUNT_PARK_MS);
       }
       if (attempt < maxAttempts) continue;
     }

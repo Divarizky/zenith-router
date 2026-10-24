@@ -9,7 +9,11 @@
  * solving the proof-of-work stay behind the transport contract.
  */
 import { buildChainKey, conversationId, evaluateChain, resolveChainLimits } from "./chains.js";
+export { chainStore } from "./chains.js";
 import { parseReply } from "./parse.js";
+export { parseReply } from "./parse.js";
+export { checkSessionHealth, ensureSessionHealth, forgetSessionHealth, getSessionHealth } from "./health.js";
+export { renderMessage, renderToolCatalog, renderTurn, toolNamesById, toolResultLimit } from "./prompt.js";
 
 // Errors after which the chat itself is suspect (a refused parent, a reply that
 // never materialised, a chat upstream now reads as too long). A fresh chat with

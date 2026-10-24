@@ -1,5 +1,4 @@
 import { BaseExecutor, registerExecutor } from "./base.js";
-import { createResponsesToOpenAITransformStream, responsesToOpenAIResponse } from "../translator/responses.js";
 
 function extractAccountId(credentials) {
   if (!credentials) return null;

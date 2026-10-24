@@ -453,7 +453,8 @@ export function getLastProvider() {
 }
 
 /**
- * HTTP Handler for GET /api/usage
+ * HTTP Handler for GET /api/usage. Transport for this operation only; the
+ * reusable part is `getUsageStats` above, which takes no Hono context.
  */
 export function handleGetUsage(c) {
   const days = Number(c.req.query("days")) || 30;

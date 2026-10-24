@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseSSEEvents } from "../utils/sse.js";
 
 // Whether a tool call is a Responses custom tool is decided per request from
 // the client's own `tools` declarations (customToolNamesFromBody), threaded
@@ -927,22 +928,17 @@ function emptyResponsesAggregation(model) {
 export function aggregateResponsesStream(sseText, model = "codex") {
   const agg = emptyResponsesAggregation(model);
 
-  for (const line of String(sseText || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data:")) continue;
-    const payload = trimmed.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
-    let parsed;
-    try {
-      parsed = JSON.parse(payload);
-    } catch {
-      continue;
-    }
+  for (const parsed of parseSSEEvents(sseText)) {
     const type = parsed.type;
 
     if ((type === "response.created" || type === "response.in_progress") && parsed.response?.id) {
       if (!agg.id) agg.id = parsed.response.id;
     } else if (type === "response.output_text.delta" && typeof parsed.delta === "string") {
+      const idx = parsed.output_index ?? 0;
+      agg.texts.set(idx, (agg.texts.get(idx) || "") + parsed.delta);
+    } else if (type === "response.refusal.delta" && typeof parsed.delta === "string") {
+      // Refusal text is client-visible content; dropping it would silently
+      // lose the model's refusal.
       const idx = parsed.output_index ?? 0;
       agg.texts.set(idx, (agg.texts.get(idx) || "") + parsed.delta);
     } else if (type === "response.reasoning_summary_text.delta" && typeof parsed.delta === "string") {
@@ -1075,97 +1071,15 @@ export async function responsesToOpenAIResponse(streamOrData, model = "codex") {
     };
   }
 
-  const responseId = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-  let fullContent = "";
-  const toolCalls = [];
-  let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-  let finishReason = "stop";
-
-  const reader = streamOrData.getReader();
-  const textDecoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += textDecoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const dataStr = trimmed.slice(5).trim();
-      if (!dataStr || dataStr === "[DONE]") continue;
-
-      try {
-        const parsed = JSON.parse(dataStr);
-        if (parsed.type === "response.output_text.delta") {
-          fullContent += parsed.delta || "";
-        }
-        if (parsed.type === "response.output_item.added" &&
-            (parsed.item?.type === "function_call" || parsed.item?.type === "custom_tool_call")) {
-          const isCustom = parsed.item.type === "custom_tool_call";
-          toolCalls.push({
-            id: parsed.item.call_id || parsed.item.id || `call_${randomUUID().slice(0, 8)}`,
-            type: "function",
-            function: {
-              name: parsed.item.name || "",
-              arguments: "",
-            },
-            // Custom calls accumulate the raw input; the chat arguments must
-            // carry the {input: raw} wrapper, applied once at completion.
-            __custom: isCustom,
-          });
-        }
-        if ((parsed.type === "response.function_call_arguments.delta" || parsed.type === "response.custom_tool_call_input.delta") && toolCalls.length > 0) {
-          toolCalls[toolCalls.length - 1].function.arguments += parsed.delta || "";
-        }
-        // Refusal text is client-visible content; dropping it would silently
-        // lose the model's refusal.
-        if (parsed.type === "response.refusal.delta" && typeof parsed.delta === "string") {
-          fullContent += parsed.delta;
-        }
-        if (parsed.type === "response.completed") {
-          const resp = parsed.response || parsed;
-          if (resp.usage) {
-            const inTok = resp.usage.input_tokens || resp.usage.prompt_tokens || 0;
-            const outTok = resp.usage.output_tokens || resp.usage.completion_tokens || 0;
-            const cached = resp.usage.input_tokens_details?.cached_tokens;
-            usage = {
-              prompt_tokens: inTok,
-              completion_tokens: outTok,
-              total_tokens: inTok + outTok,
-              ...(typeof cached === "number" ? { prompt_tokens_details: { cached_tokens: cached } } : {}),
-            };
-          }
-          if (toolCalls.length > 0) finishReason = "tool_calls";
-        }
-      } catch {}
-    }
-  }
-
-  const message = {
-    role: "assistant",
-    content: fullContent || (toolCalls.length > 0 ? null : ""),
-  };
-  if (toolCalls.length > 0) {
-    message.tool_calls = toolCalls;
-  }
-
-  return {
-    id: responseId,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [
-      {
-        index: 0,
-        message,
-        finish_reason: finishReason,
-      },
-    ],
-    usage,
-  };
+  // A stream handed in directly: fold it with the same aggregation the
+  // non-streaming path uses, then reuse the object branch above. Keeping one
+  // interpretation of Responses events means a refusal or a custom tool call
+  // cannot be understood here and lost there.
+  const text = typeof streamOrData?.getReader === "function"
+    ? await new Response(streamOrData).text()
+    : String(streamOrData ?? "");
+  const aggregated = aggregateResponsesStream(text, model);
+  // The streamed shape has always answered with a chatcmpl id, not the
+  // upstream response id.
+  return responsesToOpenAIResponse({ ...aggregated, id: null }, model);
 }

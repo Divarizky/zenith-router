@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Perbaikan
+- Rantai combo tidak lagi berhenti pada HTTP 400 yang disebabkan kredit akun habis (`insufficient credits`, `balance too low`, dan sejenisnya). 4xx lain tetap menghentikan rantai karena akan gagal sama pada setiap anggota; yang kehabisan kredit adalah keadaan billing satu anggota, sehingga anggota berikutnya masih bisa melayani.
+- Byte NUL disaring sebelum menjadi parameter bind SQLite. Sebelumnya `length`, `substr`, dan `instr` memotong nilai pada byte NUL tersebut, sehingga sebuah kolom terbaca utuh saat dibaca tapi terpotong saat disaring atau dipotong oleh SQL. Pembersihan dilakukan sekali pada batas database (`src/db/index.js`), bukan di setiap call site.
+
 ## [0.1.8] - 23-10-2026
 
 Provider DeepSeek Web Chat lewat sesi browser, batas sesi paralel per akun, observability slot di dashboard, serta perbaikan tool call stream Claude dan normalisasi reasoning Cline.

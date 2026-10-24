@@ -120,6 +120,10 @@ export function getAllQuotaStatus() {
 
 /**
  * HTTP handler for POST /dashboard/quota/sync — refresh one account's quota.
+ *
+ * Registered directly on the route in src/index.js. It is the transport for this
+ * operation, not a general-purpose service API: keep it here so the form
+ * contract (multipart body, redirect target) stays next to the operation.
  */
 export async function handleSyncQuotaForm(c) {
   const body = await c.req.parseBody();
@@ -136,7 +140,8 @@ export async function handleSyncQuotaForm(c) {
 }
 
 /**
- * HTTP handler for GET /api/quota
+ * HTTP handler for GET /api/quota. Transport for this operation only; the
+ * reusable part is `getAllQuotaStatus` above, which takes no Hono context.
  */
 export function handleGetQuota(c) {
   const status = getAllQuotaStatus();

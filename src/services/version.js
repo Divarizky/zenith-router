@@ -83,6 +83,3 @@ export async function getVersionInfo() {
   }
 }
 
-export async function handleGetVersion(c) {
-  return c.json(await getVersionInfo());
-}

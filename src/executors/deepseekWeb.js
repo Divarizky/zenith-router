@@ -8,10 +8,8 @@
  * the chain store to it and shapes the response for the gateway.
  */
 import { registerExecutor } from "./base.js";
-import { chainStore } from "../services/deepseekWeb/chains.js";
+import { chainStore, parseReply, runChainTurn } from "../services/deepseekWeb/turns.js";
 import { resolveDeepSeekTransport } from "../services/deepseekWeb/transport.js";
-import { runChainTurn } from "../services/deepseekWeb/turns.js";
-import { parseReply } from "../services/deepseekWeb/parse.js";
 import { estimateTokens } from "../services/usage.js";
 import { resolveDeepSeekModel } from "../services/deepseekWeb/models.js";
 

@@ -23,7 +23,7 @@ export const DEFAULT_CAPABILITIES = {
   maxOutput: null,
 };
 
-export const PATTERN_CAPABILITIES = [
+const PATTERN_CAPABILITIES = [
   // ── Claude ────────────────────────────────────────────────────────
   { pattern: "*claude*opus-5*", caps: { vision: true, reasoning: true, contextWindow: 1000000, maxOutput: 128000 } },
   { pattern: "*claude*sonnet-5*", caps: { vision: true, reasoning: true, contextWindow: 1000000, maxOutput: 128000 } },
@@ -198,7 +198,7 @@ export function capabilitiesFromApi(model) {
 }
 
 /** Parse the JSON stored alongside a synced model; bad data is ignored. */
-export function parseStoredCapabilities(raw) {
+function parseStoredCapabilities(raw) {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
   try {

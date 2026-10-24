@@ -368,3 +368,42 @@ test("getAntigravityModelsByConnection - hanya koneksi antigravity yang masih ak
   assert.ok(!getAntigravityModelsByConnection().has(aktif.id), "koneksi terhapus tidak ikut");
 });
 
+
+test("Database - a bound text column never carries a NUL byte into SQLite", async () => {
+  const db = initDb(":memory:");
+  // node:sqlite hands a bound string to SQLite as a C string: the bytes survive
+  // a round trip, but every SQL function that inspects the value stops at the
+  // first NUL, so the same row reads back whole while still being sliced, counted,
+  // and filtered as if it ended early. A user-pasted name can carry one.
+  const added = addConnection({ provider: "glm", name: "Zenith\u0000 Router", auth_type: "apikey", credentials: { apiKey: "k" } });
+
+  assert.strictEqual(added.name, "Zenith Router", "NUL hilang sebelum bind");
+  // Prove it at the SQL level, not just on the object we happened to get back.
+  const raw = db.prepare("SELECT name, length(name) AS len FROM connections WHERE id = ?").get(added.id);
+  assert.strictEqual(raw.name, "Zenith Router");
+  assert.strictEqual(raw.len, 13, "length() melihat seluruh string, bukan terpotong di NUL");
+
+  // JSON columns are safe by construction: JSON.stringify escapes the byte as
+  // \u0000, so SQLite never sees a real NUL there in the first place.
+  const creds = db.prepare("SELECT credentials FROM connections WHERE id = ?").get(added.id);
+  assert.ok(!creds.credentials.includes("\u0000"), "tidak ada byte NUL pada kolom credentials");
+  assert.strictEqual(JSON.parse(creds.credentials).apiKey, "k");
+});
+
+test("Database - the wrapper leaves other statement behaviour untouched", () => {
+  const db = initDb(":memory:");
+  const stmt = db.prepare("SELECT ? AS value, ? AS n, ? AS nul");
+  // Types other than string pass through, and a string without a NUL is returned
+  // unchanged, so wrapping must not alter anything it was not meant to touch.
+  const row = stmt.get("hello", 42, null);
+  assert.strictEqual(row.value, "hello");
+  assert.strictEqual(row.n, 42);
+  assert.strictEqual(row.nul, null);
+
+  db.exec("CREATE TABLE probe (id INTEGER PRIMARY KEY, v TEXT)");
+  const insert = db.prepare("INSERT INTO probe (v) VALUES (?)");
+  const info = insert.run("first");
+  assert.strictEqual(info.changes, 1, "run tetap mengembalikan info perubahan");
+  assert.strictEqual(db.prepare("SELECT count(*) c FROM probe").get().c, 1);
+  assert.strictEqual(db.prepare("SELECT v FROM probe").all()[0].v, "first", "all tetap membaca baris");
+});

@@ -51,7 +51,9 @@ function deduplicateLines(text) {
 }
 
 /**
- * Condense text while safely preserving markdown code blocks
+ * Condense text while safely preserving markdown code blocks. Exported for the
+ * unit tests of this pure function; production reaches it through
+ * `condenseMessages`, and the pipeline entry point is `applyTokenSaver`.
  */
 export function condenseContent(text) {
   if (!text || typeof text !== "string") {
@@ -100,6 +102,9 @@ export function condenseContent(text) {
  * Condense an array of messages.
  * Only user-typed text is touched: tool results carry raw file contents that agents
  * later match exactly when editing, and assistant turns are the model's own output.
+ *
+ * Exported for the unit tests of this pure function; the pipeline entry point
+ * is `applyTokenSaver` in tokenSaver.js, not this file.
  */
 export function condenseMessages(messages) {
   if (!Array.isArray(messages)) {

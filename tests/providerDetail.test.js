@@ -32,7 +32,7 @@ test("GET /dashboard/providers/:id - selection is behind a toggle button and row
   const html = await res.text();
 
   assert.ok(html.includes('data-select-mode-toggle="models"'), "mode toggle button exists");
-  assert.ok(html.includes(">Pilih<"), "button reads Pilih while selection is off");
+  assert.ok(html.includes(">Pilih Model<"), "button reads Pilih Model while selection is off");
   assert.ok(html.includes('data-sync-row="models"'), "model table is select-mode aware");
   assert.ok(html.includes('class="model-row'), "model rows are clickable");
 });

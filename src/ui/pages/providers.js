@@ -159,6 +159,12 @@ function importNotice(query = {}) {
     default:
       return null;
   }
+  if (query.notice === "test_ok") return { ok: true, text: "Koneksi provider berhasil." };
+  if (query.notice === "test_fail") {
+    return { ok: false, text: "Koneksi provider gagal: " + escapeHtml(String(query.msg || "tidak diketahui")) };
+  }
+  if (query.notice === "test_no_base") return { ok: false, text: "Provider ini tidak memiliki endpoint untuk diuji." };
+  return null;
 }
 
 const WIB_FORMAT = new Intl.DateTimeFormat("en-GB", {
@@ -263,7 +269,7 @@ function statusPill(p, stats, accounts = []) {
   if (p.noAuth) return `<span class="pill pill-success">Siap</span>`;
   if (stats.healthy > 0) return `<span class="pill pill-success">${stats.healthy} Terhubung</span>`;
   if (stats.total > 0) return `<span class="pill pill-warning">${stats.total} tidak aktif</span>`;
-  return `<span class="pill">Belum ada akun</span>`;
+  return `<span class="pill pill-muted">Belum ada akun</span>`;
 }
 
 /** Live slot usage for one account, as captured when the page was rendered. */
@@ -276,7 +282,7 @@ function slotCell(traffic) {
 /** Badge for a browser-session account, from the cached health verdict. */
 function sessionHealthCell(connection) {
   const entry = getSessionHealth(connection);
-  if (!entry) return `<span class="pill">Belum dicek</span>`;
+  if (!entry) return `<span class="pill pill-info">Belum dicek</span>`;
   if (entry.status === "ok") return `<span class="pill pill-success">Sesi OK</span>`;
   if (entry.status === "expired") {
     return `<span class="pill pill-danger" title="${escapeHtml(entry.message || "")}">Sesi kedaluwarsa</span>`;
@@ -358,7 +364,7 @@ export function renderProvidersPage(port = 20120, query = {}) {
   return renderLayout({
     title:
       activeTab === "combos"
-        ? "Combos — Zenith Router"
+        ? "Combos"
         : activeTab === "proxy"
           ? "Proxy — Zenith Router"
           : "Providers",
@@ -758,17 +764,17 @@ function renderAddAccountModal(p) {
  * pattern as a combo chain. A lone account has nothing to reorder against.
  */
 function accountOrderCell(c, id, index, total) {
-  const badge = `<span class="combo-order" title="Prioritas #${index + 1}">${index + 1}</span>`;
-  if (total < 2) return badge;
-  return `<div class="combo-member">
+  const badge = `<span class="priority-badge" title="Prioritas #${index + 1}">${index + 1}</span>`;
+  if (total < 2) return `<div class="priority-stepper" style="box-shadow:none;">${badge}</div>`;
+  return `<div class="priority-stepper">
       ${badge}
-      <form action="/dashboard/providers/accounts/move" method="POST" class="combo-move">
+      <form action="/dashboard/providers/accounts/move" method="POST" class="priority-actions">
         <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
         <input type="hidden" name="provider" value="${id}" />
-        <button type="submit" name="direction" value="up" class="btn btn-ghost" title="Naikkan prioritas" ${
+        <button type="submit" name="direction" value="up" class="priority-btn" title="Naikkan prioritas" ${
           index === 0 ? "disabled" : ""
         }>&uarr;</button>
-        <button type="submit" name="direction" value="down" class="btn btn-ghost" title="Turunkan prioritas" ${
+        <button type="submit" name="direction" value="down" class="priority-btn" title="Turunkan prioritas" ${
           index === total - 1 ? "disabled" : ""
         }>&darr;</button>
       </form>
@@ -846,6 +852,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const id = escapeHtml(p.id);
   const proxyPools = listProxyPools();
   const proxyRotationStrategy = getProxyRotationStrategy(p.id);
+  const trafficUpdated = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
   // Explicit setting first, then the provider's own default, then the global cap.
   const concurrencySetting = getSetting(`provider_concurrency:${p.id}`, "");
   const declaredConcurrency = Number(p.concurrency) > 0 ? Number(p.concurrency) : 0;
@@ -898,7 +905,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   if (p.noAuth) {
     accountsBody = `<p class="hint">Provider ini tidak butuh akun. Zenith Router langsung meneruskan request ke endpoint publik.</p>`;
   } else if (accounts.length === 0) {
-    accountsBody = `<div class="empty"><p class="big">Belum ada akun</p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
+    accountsBody = `<div class="empty"><p class="big"><span class="pill pill-muted">Belum ada akun</span></p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
     accountsBody = `<table>
         <thead><tr><th title="Akun #1 dipakai duluan; akun berikutnya hanya saat akun di atasnya tidak tersedia">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th title="Request berjalan / batas per akun. Angka diambil saat halaman dimuat.">Slot</th>${isSession ? "<th>Sesi</th>" : ""}<th></th></tr></thead>
@@ -922,9 +929,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 
   const SOURCE_CELL = {
     builtin: `<span class="hint">Bawaan</span>`,
-    synced: `<span class="pill">Sinkron</span>`,
-    custom: `<span class="pill">Kustom</span>`,
-    imported: `<span class="pill">Impor</span>`,
+    synced: `<span class="pill pill-info">Sinkron</span>`,
+    custom: `<span class="pill pill-accent">Kustom</span>`,
+    imported: `<span class="pill pill-warning">Impor</span>`,
   };
 
   const modelRow = (modelId, name, source, customId, isFree = false, capabilities = null) => {
@@ -942,7 +949,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code>${capabilityIcons(capabilities)}</td>
           <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Gratis</span>` : ""}</td>
           <td>${SOURCE_CELL[source]}</td>
-          <td>${disabled ? `<span class="pill">Nonaktif</span>` : `<span class="pill pill-success">Aktif</span>`}</td>
+          <td>${disabled ? `<span class="pill pill-warning">Nonaktif</span>` : `<span class="pill pill-success">Aktif</span>`}</td>
           <td class="actions">
             <form action="/dashboard/providers/models/${toggleAction}" method="POST">
               <input type="hidden" name="provider" value="${id}" />
@@ -1027,7 +1034,16 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         ${statusPill(p, stats, accounts)}
       </div>
       ${p.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
+      ${
+        !p.noAuth
+          ? `<form action="/dashboard/providers/test-connection" method="POST" style="display:inline;">
+            <input type="hidden" name="provider" value="${id}" />
+            <button type="submit" class="btn btn-sm btn-ghost">Uji Koneksi</button>
+          </form>`
+          : ""
+      }
       ${p.keyUrl ? `<p class="hint" style="margin-top: 10px;">${keyLink(p, p.noAuth ? "Buat API key (opsional)" : "Buat API key")}</p>` : ""}
+      <p class="hint" style="margin-top: 6px; font-size: 0.75rem;">Data traffic & slot difetch pada ${trafficUpdated} WIB. Segarkan halaman untuk memperbarui.</p>
     </div>
 
     ${
@@ -1103,13 +1119,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       <div class="card-head">
         <h3>Model (${totalModels})</h3>
         <div class="btn-row">
-          <button type="button" class="btn btn-sm" data-select-mode-toggle="models">Pilih</button>
-          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
-          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Aktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
           ${
             hasImported
-              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled onclick="return confirmSelected(document.getElementById('models-bulk-form'), 'model_ids', 'model hasil import')">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>
-          <form action="/dashboard/providers/models/import/clear" method="POST" onsubmit="return confirm('Hapus semua model hasil import?')">
+              ? `<form action="/dashboard/providers/models/import/clear" method="POST" style="margin: 0;" onsubmit="return confirm('Hapus semua model hasil import?')">
             <input type="hidden" name="provider" value="${id}" />
             <button type="submit" class="btn btn-danger btn-sm">Bersihkan Impor</button>
           </form>`
@@ -1117,17 +1129,37 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           }
           ${
             p.freeModelSync
-              ? `<form action="/dashboard/providers/models/sync" method="POST">
+              ? `<form action="/dashboard/providers/models/sync" method="POST" style="margin: 0;">
             <input type="hidden" name="provider" value="${id}" />
             <button type="submit" class="btn btn-sm">Sinkron Sekarang</button>
           </form>`
               : ""
           }
           ${importModes.length > 0 ? `<button class="btn btn-sm" onclick="openModal('import-models-modal')">Import Models</button>` : ""}
-          <button class="btn btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
+          <button class="btn btn-primary btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
         </div>
       </div>
       ${p.freeModelSync ? syncSummary(p) : ""}
+      ${
+        p.freeModelSync && importModes.length > 0
+          ? `<p class="hint" style="margin-top: -0.25rem; margin-bottom: 0.85rem; font-size: 0.8rem;">Sinkron mengambil daftar model gratis resmi dari provider. Import menambahkan model live dari akun Anda.</p>`
+          : ""
+      }
+      <div class="model-toolbar" style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.85rem;">
+        <div style="flex: 1; min-width: 200px; max-width: 320px;">
+          <input type="text" id="model-search" placeholder="Cari model..." style="margin: 0; padding: 0.35rem 0.65rem; font-size: 0.82rem; height: 32px;" />
+        </div>
+        <div class="btn-row" style="margin: 0;">
+          <button type="button" class="btn btn-sm" data-select-mode-toggle="models">Pilih Model</button>
+          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Aktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
+          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
+          ${
+            hasImported
+              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled onclick="return confirmSelected(document.getElementById('models-bulk-form'), 'model_ids', 'model hasil import')">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>`
+              : ""
+          }
+        </div>
+      </div>
       <form id="models-bulk-form" method="POST">
         <input type="hidden" name="provider" value="${id}" />
       </form>
@@ -1135,6 +1167,20 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         <thead><tr><th class="select-cell"><input type="checkbox" data-select-all="models" autocomplete="off" aria-label="Pilih semua model" title="Pilih semua model" /></th><th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
         <tbody>${modelRows}</tbody>
       </table>
+      <script>
+        (function() {
+          var input = document.getElementById('model-search');
+          var rows = document.querySelectorAll('table[data-sync-row="models"] tbody tr.model-row');
+          if (!input || !rows.length) return;
+          input.addEventListener('input', function() {
+            var q = input.value.toLowerCase();
+            rows.forEach(function(row) {
+              var text = row.textContent.toLowerCase();
+              row.style.display = text.includes(q) ? '' : 'none';
+            });
+          });
+        })();
+      </script>
     </div>
 
     ${p.noAuth ? "" : renderAddAccountModal(p)}
@@ -1148,13 +1194,13 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           <input type="hidden" name="provider" value="${id}" />
           <div class="field">
             <label for="model_id">Model ID</label>
-            <input type="text" id="model_id" name="model_id" placeholder="ID upstream, tanpa prefix" required />
+            <input type="text" id="model_id" name="model_id" placeholder="contoh: deepseek-chat, claude-3-5-sonnet" required />
           </div>
           <div class="field">
             <label for="model_name">Display Name (Optional)</label>
             <input type="text" id="model_name" name="name" />
           </div>
-          <p class="hint">Dipanggil lewat <code>${escapeHtml(alias)}/&lt;model-id&gt;</code>.</p>
+          <p class="hint">Pastikan Model ID valid di upstream provider. Dipanggil lewat <code>${escapeHtml(alias)}/&lt;model-id&gt;</code>.</p>
           <div class="modal-actions">
             <button type="button" class="btn" data-close-modal="add-model-modal">Batal</button>
             <button type="submit" class="btn btn-primary">Add Model</button>
@@ -1360,6 +1406,33 @@ export async function handleDeleteCustomModel(c) {
   const id = Number(body.id);
   if (id) deleteCustomModel(id);
   return c.redirect(`${backTo(body.provider)}?notice=custom_deleted`);
+}
+
+export async function handleTestConnection(c) {
+  const body = await c.req.parseBody();
+  const provider = getProvider(String(body.provider || ""));
+  if (!provider) return c.redirect("/dashboard/providers");
+
+  const baseUrl = provider.transport?.baseUrl;
+  if (!baseUrl) return c.redirect(`${backTo(provider.id)}?notice=test_no_base`);
+
+  try {
+    const res = await fetch(`${baseUrl}/v1/models`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      return c.redirect(`${backTo(provider.id)}?notice=test_ok`);
+    }
+    return c.redirect(
+      `${backTo(provider.id)}?notice=test_fail&msg=${encodeURIComponent(`HTTP ${res.status}`)}`
+    );
+  } catch (err) {
+    return c.redirect(
+      `${backTo(provider.id)}?notice=test_fail&msg=${encodeURIComponent(err.message || "koneksi gagal")}`
+    );
+  }
 }
 
 export async function handleImportModels(c) {

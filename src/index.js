@@ -44,6 +44,7 @@ import {
   handleClearImported,
   handleDeleteImported,
   handleSyncFreeModels,
+  handleTestConnection,
 } from "./ui/pages/providers.js";
 import {
   renderProxiesPage,
@@ -192,6 +193,7 @@ app.post("/dashboard/providers/accounts/move", handleMoveAccount);
 app.post("/dashboard/providers/accounts/set-proxy", handleSetAccountProxy);
 app.post("/dashboard/providers/proxy-rotation", handleSetProxyRotation);
 app.post("/dashboard/providers/concurrency", handleSetProviderConcurrency);
+app.post("/dashboard/providers/test-connection", handleTestConnection);
 app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
 // One-click login: the server opens a browser and the page polls the capture.
 app.post("/dashboard/providers/accounts/login/start", handleSessionLoginStart);

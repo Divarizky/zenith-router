@@ -132,8 +132,8 @@ test("Provider detail - account table shows #n with up/down disabled at the ends
   assert.strictEqual((html.match(/action="\/dashboard\/providers\/accounts\/move"/g) || []).length, 2);
   assert.match(html, /title="Prioritas #1">1</);
   assert.match(html, /title="Prioritas #2">2</);
-  assert.match(html, /value="up" class="btn btn-ghost" title="Naikkan prioritas" disabled/, "#1 tidak bisa naik");
-  assert.match(html, /value="down" class="btn btn-ghost" title="Turunkan prioritas" disabled/, "#2 tidak bisa turun");
+  assert.match(html, /value="up" [^>]*title="Naikkan prioritas" disabled/, "#1 tidak bisa naik");
+  assert.match(html, /value="down" [^>]*title="Turunkan prioritas" disabled/, "#2 tidak bisa turun");
 });
 
 test("Provider detail - a lone account shows its number without move controls", async () => {

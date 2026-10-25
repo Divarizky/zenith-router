@@ -463,6 +463,22 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
 
             try {
               const parsed = JSON.parse(dataStr);
+              if (parsed?.error && typeof parsed.error === "object" && !parsed.choices?.some((c) => c?.delta?.content)) {
+                ensureClaudeStart(controller);
+                closeTextBlock(controller);
+                closeThinkingBlock(controller);
+                closeToolBlocks(controller);
+                const errMsg = parsed.error.message || "Upstream stream interrupted";
+                controller.enqueue(
+                  claudeEvent("error", {
+                    type: "error",
+                    error: { type: parsed.error.type || "api_error", message: errMsg },
+                  })
+                );
+                doneSent = true;
+                continue;
+              }
+
               const choice = parsed.choices?.[0] || {};
               const delta = choice.delta || {};
               if (parsed.usage) claudeUsage = openAIUsageToClaude(parsed.usage);
@@ -531,10 +547,21 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
                 closeTextBlock(controller);
                 closeThinkingBlock(controller);
                 closeToolBlocks(controller);
-                const stop = choice.finish_reason === "tool_calls" ? "tool_use" : (choice.finish_reason === "stop" ? "end_turn" : (choice.finish_reason === "length" ? "max_tokens" : "end_turn"));
-                controller.enqueue(claudeEvent("message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, ...(claudeUsage ? { usage: claudeUsage } : {}) }));
-                controller.enqueue(claudeEvent("message_stop", { type: "message_stop" }));
-                doneSent = true;
+                if (choice.finish_reason === "error") {
+                  const errMsg = parsed?.error?.message || "Upstream returned error finish_reason";
+                  controller.enqueue(
+                    claudeEvent("error", {
+                      type: "error",
+                      error: { type: "api_error", message: errMsg },
+                    })
+                  );
+                  doneSent = true;
+                } else {
+                  const stop = choice.finish_reason === "tool_calls" ? "tool_use" : (choice.finish_reason === "stop" ? "end_turn" : (choice.finish_reason === "length" ? "max_tokens" : "end_turn"));
+                  controller.enqueue(claudeEvent("message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, ...(claudeUsage ? { usage: claudeUsage } : {}) }));
+                  controller.enqueue(claudeEvent("message_stop", { type: "message_stop" }));
+                  doneSent = true;
+                }
               }
             } catch {}
           }

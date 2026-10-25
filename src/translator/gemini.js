@@ -448,7 +448,19 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = 
   const stopSequences = stop.filter((s) => typeof s === "string" && s).slice(0, 5);
   if (stopSequences.length > 0) generationConfig.stopSequences = stopSequences;
   const thinkingConfig = claudeThinkingToGemini(opts.thinking);
-  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
+  if (thinkingConfig) {
+    generationConfig.thinkingConfig = thinkingConfig;
+  } else {
+    const reasoningEffort = body.reasoning_effort || body.reasoning?.effort;
+    if (typeof reasoningEffort === "string") {
+      const lower = reasoningEffort.toLowerCase();
+      if (lower === "none" || lower === "off") {
+        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      } else {
+        generationConfig.thinkingConfig = { includeThoughts: true };
+      }
+    }
+  }
 
   const innerRequest = {
     contents,

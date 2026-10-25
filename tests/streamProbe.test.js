@@ -18,9 +18,52 @@ test("streamProbe - error event shapes", () => {
   assert.ok(isStreamErrorEvent("", { type: "error", error: { type: "overloaded_error" } }));
   assert.ok(isStreamErrorEvent("", { success: false }));
   assert.ok(isStreamErrorEvent("error", { message: "x" }));
+  assert.ok(isStreamErrorEvent("", { error: { message: "rate limit" }, choices: [] }));
+  assert.ok(isStreamErrorEvent("", { error: { message: "rate limit" }, choices: [{ finish_reason: "error" }] }));
+  assert.ok(isStreamErrorEvent("", { error: { message: "rate limit" }, choices: [{ delta: {} }] }));
+
   assert.ok(!isStreamErrorEvent("", { choices: [{ delta: { content: "hi" } }] }));
+  assert.ok(!isStreamErrorEvent("", { choices: [{ delta: { reasoning_content: "mikir" } }] }));
+  assert.ok(!isStreamErrorEvent("", { choices: [{ delta: { reasoning: "mikir" } }] }));
+  assert.ok(!isStreamErrorEvent("", { choices: [{ delta: {}, finish_reason: "stop" }] }));
   assert.ok(!isStreamErrorEvent("", { error: null, choices: [] }));
   assert.ok(!isStreamErrorEvent("", { type: "message_start", message: {} }));
+});
+
+test("streamProbe - skips role-only initial chunk and catches following error", async () => {
+  const enc = new TextEncoder();
+  const sse = [
+    'data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}\n\n',
+    'data: {"error":{"code":"rate_limit_exceeded","message":"Rate limit reached"}}\n\n',
+  ].join("");
+
+  const res = new Response(enc.encode(sse), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+
+  const probed = await probeStreamError(res);
+  assert.strictEqual(probed.status, 429);
+  const data = await probed.json();
+  assert.strictEqual(data.error.code, "rate_limit_exceeded");
+  assert.match(data.error.message, /Rate limit reached/);
+});
+
+test("streamProbe - detects error event carrying finish_reason error with empty delta", async () => {
+  const enc = new TextEncoder();
+  const sse = [
+    'data: {"error":{"message":"Model unavailable"},"choices":[{"delta":{},"finish_reason":"error"}]}\n\n',
+  ].join("");
+
+  const res = new Response(enc.encode(sse), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+
+  const probed = await probeStreamError(res);
+  assert.strictEqual(probed.status, 502);
+  const data = await probed.json();
+  assert.match(data.error.message, /Model unavailable/);
 });
 
 test("streamProbe - status mapping", () => {

@@ -769,6 +769,59 @@ export function createOpenAIToResponsesTransformStream(model = "codex", opts = {
           continue;
         }
 
+        const isErrorEvent =
+          parsed?.error &&
+          typeof parsed.error === "object" &&
+          (!parsed.choices?.length || !parsed.choices.some((c) => c?.delta?.content));
+
+        if (isErrorEvent) {
+          if (!state.started) {
+            state.started = true;
+            state.responseId = parsed.id ? `resp_${parsed.id}` : state.responseId;
+            emit(controller, "response.created", {
+              type: "response.created",
+              response: {
+                id: state.responseId,
+                object: "response",
+                model,
+                created_at: state.created,
+                status: "in_progress",
+                background: false,
+                error: null,
+                output: [],
+              },
+            });
+          }
+          for (const i in state.msgItemAdded) closeMessage(controller, i);
+          for (const i in state.funcCallIds) closeToolCall(controller, i);
+
+          const errMsg = parsed.error.message || "Upstream stream interrupted";
+          emit(controller, "response.failed", {
+            type: "response.failed",
+            response: {
+              id: state.responseId,
+              object: "response",
+              model,
+              created_at: state.created,
+              status: "failed",
+              background: false,
+              error: {
+                code: typeof parsed.error.code === "string" ? parsed.error.code : "upstream_stream_error",
+                message: errMsg,
+              },
+            },
+          });
+          emit(controller, "error", {
+            type: "error",
+            code: typeof parsed.error.code === "string" ? parsed.error.code : "upstream_stream_error",
+            message: errMsg,
+            param: null,
+            sequence_number: 0,
+          });
+          state.completedSent = true;
+          continue;
+        }
+
         if (!parsed.choices?.length) continue;
 
         const choice = parsed.choices[0];
@@ -891,15 +944,41 @@ export function createOpenAIToResponsesTransformStream(model = "codex", opts = {
         if (choice.finish_reason) {
           for (const i in state.msgItemAdded) closeMessage(controller, i);
           for (const i in state.funcCallIds) closeToolCall(controller, i);
-          sendCompleted(controller);
+          if (choice.finish_reason === "error") {
+            const errMsg = parsed?.error?.message || "Upstream returned error finish_reason";
+            emit(controller, "response.failed", {
+              type: "response.failed",
+              response: {
+                id: state.responseId,
+                object: "response",
+                model,
+                created_at: state.created,
+                status: "failed",
+                background: false,
+                error: { code: "upstream_stream_error", message: errMsg },
+              },
+            });
+            emit(controller, "error", {
+              type: "error",
+              code: "upstream_stream_error",
+              message: errMsg,
+              param: null,
+              sequence_number: 0,
+            });
+            state.completedSent = true;
+          } else {
+            sendCompleted(controller);
+          }
         }
       }
     },
 
     flush(controller) {
-      for (const i in state.msgItemAdded) closeMessage(controller, i);
-      for (const i in state.funcCallIds) closeToolCall(controller, i);
-      sendCompleted(controller);
+      if (!state.completedSent) {
+        for (const i in state.msgItemAdded) closeMessage(controller, i);
+        for (const i in state.funcCallIds) closeToolCall(controller, i);
+        sendCompleted(controller);
+      }
       controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
     },
   });

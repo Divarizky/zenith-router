@@ -101,6 +101,69 @@ function ensureAssistantReasoningContent(body) {
   }
 }
 
+function normalizeStreamReasoning(node) {
+  if (Array.isArray(node)) {
+    for (const item of node) normalizeStreamReasoning(item);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  if (node.delta && typeof node.delta === "object") {
+    if (node.delta.reasoning && !node.delta.reasoning_content) {
+      node.delta.reasoning_content = node.delta.reasoning;
+    }
+  }
+  if (node.message && typeof node.message === "object") {
+    if (node.message.reasoning && !node.message.reasoning_content) {
+      node.message.reasoning_content = node.message.reasoning;
+    }
+  }
+  for (const value of Object.values(node)) {
+    if (value && typeof value === "object") normalizeStreamReasoning(value);
+  }
+}
+
+function normalizeSSELine(line) {
+  const match = /^(\s*data:\s?)(.*)$/.exec(line);
+  if (!match) return line;
+  const payload = match[2].replace(/\r$/, "");
+  if (!payload || payload === "[DONE]") return line;
+  try {
+    const parsed = JSON.parse(payload);
+    normalizeStreamReasoning(parsed);
+    return `${match[1]}${JSON.stringify(parsed)}${line.endsWith("\r") ? "\r" : ""}`;
+  } catch {
+    return line;
+  }
+}
+
+export function normalizeClineStream(res) {
+  if (!res || !res.body) return res;
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("text/event-stream")) return res;
+
+  const headers = new Headers(res.headers);
+  headers.delete("content-length");
+
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  const transformed = res.body.pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) controller.enqueue(encoder.encode(`${normalizeSSELine(line)}\n`));
+      },
+      flush(controller) {
+        buffer += decoder.decode();
+        if (buffer) controller.enqueue(encoder.encode(normalizeSSELine(buffer)));
+      },
+    })
+  );
+  return new Response(transformed, { status: res.status, statusText: res.statusText, headers });
+}
+
 export class ClineExecutor extends BaseExecutor {
   async execute(args) {
     try {
@@ -112,6 +175,11 @@ export class ClineExecutor extends BaseExecutor {
     }
     const res = await super.execute(args);
     const contentType = res.headers.get("content-type") || "";
+
+    if (contentType.includes("text/event-stream")) {
+      return normalizeClineStream(res);
+    }
+
     if (!res.ok || !contentType.includes("application/json")) return res;
 
     const text = await res.text();

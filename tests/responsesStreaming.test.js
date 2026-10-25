@@ -58,3 +58,53 @@ test("POST /v1/responses - streams Responses API events from OpenAI upstream SSE
     setCustomExecutor(null);
   }
 });
+
+test("POST /v1/responses - mid-stream error event emits response.failed and error event", async () => {
+  initDb(":memory:");
+  addConnection({
+    provider: "glm",
+    name: "GLM account",
+    credentials: { api_key: "test-key" },
+  });
+
+  setCustomExecutor({
+    async execute() {
+      const chunks = [
+        'data: {"id":"chatcmpl-2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Awal teks "},"finish_reason":null}]}\n\n',
+        'data: {"error":{"code":"context_length_exceeded","message":"Context limit reached"}}\n\n',
+      ];
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(new TextEncoder().encode(chunk));
+            }
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
+      );
+    },
+  });
+
+  try {
+    const res = await app.request("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "glm/glm-4-flash",
+        input: "hi",
+        stream: true,
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    const text = await res.text();
+    assert.ok(text.includes("event: response.failed"), "Must emit response.failed");
+    assert.ok(text.includes("event: error"), "Must emit error event");
+    assert.ok(text.includes("Context limit reached"), "Carries error message");
+    assert.ok(!text.includes("event: response.completed"), "Must not emit response.completed on error");
+  } finally {
+    setCustomExecutor(null);
+  }
+});

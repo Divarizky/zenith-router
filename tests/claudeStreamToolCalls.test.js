@@ -141,3 +141,25 @@ test("POST /v1/chat/completions stream ke provider claude - klien OpenAI menerim
   assert.deepStrictEqual(JSON.parse(calls[0].arguments), { path: "src/a.js" });
   assert.ok(chunks.some((c) => c.choices?.[0]?.finish_reason === "tool_calls"));
 });
+
+test("stream openai->claude - mid-stream error event translates to claude error event", async () => {
+  const enc = new TextEncoder();
+  const rawChunks = [
+    'data: {"choices":[{"index":0,"delta":{"content":"Sebagian jawaban "}}]}\n\n',
+    'data: {"error":{"type":"rate_limit_error","message":"Mid-stream rate limit exceeded"}}\n\n',
+  ];
+
+  const rs = new ReadableStream({
+    start(c) {
+      for (const ch of rawChunks) c.enqueue(enc.encode(ch));
+      c.close();
+    }
+  });
+
+  const stream = rs.pipeThrough(createTransformStream("openai", "claude", "test-model"));
+  const text = await readAll(stream);
+
+  assert.ok(text.includes("event: error"), "Must emit claude error event");
+  assert.ok(text.includes("Mid-stream rate limit exceeded"), "Must carry error message");
+  assert.ok(!text.includes("end_turn"), "Must not complete with end_turn on error");
+});

@@ -233,3 +233,39 @@ test("executor cline - token Harmony literal di content assistant dinetralkan", 
   assert.strictEqual(asstString.content.replace(/\u200b/g, ""), quoted, "teks tetap sama selain zero-width space");
   assert.ok(!/<\|[^|>]+\|>/.test(asstParts.content[0].text), "tidak ada token <|...|> utuh di text part");
 });
+
+test("executor cline - normalisasi delta.reasoning ke reasoning_content pada stream SSE", async () => {
+  const enc = new TextEncoder();
+  const rawStream = [
+    'data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"index":0,"delta":{"reasoning":"mikir langkah 1"}}]}\n\n',
+    'data: {"choices":[{"index":0,"delta":{"content":"jawab"}}]}\n\n',
+    'data: [DONE]\n\n',
+  ].join("");
+
+  const fetchFn = async () =>
+    new Response(enc.encode(rawStream), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+  const executor = new ClineExecutor({ fetchFn });
+  const res = await executor.execute({
+    url: "https://api.cline.bot/api/v1/chat/completions",
+    method: "POST",
+    headers: {},
+    body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+    stream: true,
+  });
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += dec.decode(value);
+  }
+
+  assert.ok(text.includes('"reasoning_content":"mikir langkah 1"'), "delta.reasoning berubah menjadi reasoning_content");
+});

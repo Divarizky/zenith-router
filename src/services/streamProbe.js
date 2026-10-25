@@ -28,12 +28,45 @@ function errorMessage(event) {
   return errorObject(event).message || event?.message || "Upstream stream returned an error";
 }
 
-/** Is this first SSE event an error rather than the start of an answer? */
+function isChoiceMeaningful(choice) {
+  if (!choice || typeof choice !== "object") return false;
+  if (choice.finish_reason && choice.finish_reason !== "error") return true;
+  const delta = choice.delta;
+  if (!delta || typeof delta !== "object") return false;
+  if (typeof delta.content === "string" && delta.content.length > 0) return true;
+  if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) return true;
+  if (typeof delta.reasoning === "string" && delta.reasoning.length > 0) return true;
+  if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) return true;
+  return false;
+}
+
+/** Is this SSE event an error rather than the start of an answer? */
 export function isStreamErrorEvent(eventName, event) {
   if (eventName === "error") return true;
   if (!event || typeof event !== "object") return false;
   if (event.type === "error" || event.success === false) return true;
-  return event.error != null && event.choices == null;
+  if (event.error != null) {
+    if (event.choices == null) return true;
+    if (Array.isArray(event.choices)) {
+      const anyMeaningful = event.choices.some(isChoiceMeaningful);
+      if (!anyMeaningful) return true;
+      const anyErrorFinish = event.choices.some((c) => c?.finish_reason === "error");
+      if (anyErrorFinish) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Does this event carry meaningful content or completion signal, meaning the stream
+ * has definitely started answering successfully?
+ */
+function isMeaningfulEvent(eventName, event) {
+  if (!event || typeof event !== "object") return true;
+  if (Array.isArray(event.choices)) {
+    return event.choices.some(isChoiceMeaningful);
+  }
+  return true;
 }
 
 /**
@@ -71,21 +104,27 @@ function inspectEvents(text) {
     } catch {
       return { error: null };
     }
-    if (!isStreamErrorEvent(eventName, event)) return { error: null };
-
-    const err = errorObject(event);
-    return {
-      error: {
-        status: streamErrorStatus(event),
-        payload: {
-          error: {
-            message: errorMessage(event),
-            type: err.type || "upstream_error",
-            code: typeof err.code === "string" ? err.code : "upstream_stream_error",
+    if (isStreamErrorEvent(eventName, event)) {
+      const err = errorObject(event);
+      return {
+        error: {
+          status: streamErrorStatus(event),
+          payload: {
+            error: {
+              message: errorMessage(event),
+              type: err.type || "upstream_error",
+              code: typeof err.code === "string" ? err.code : "upstream_stream_error",
+            },
           },
         },
-      },
-    };
+      };
+    }
+
+    if (isMeaningfulEvent(eventName, event)) {
+      return { error: null };
+    }
+    // Chunk seperti `choices:[{delta:{role:"assistant"}}]` tanpa konten/reasoning/finish
+    // dilewati agar jika event persis setelahnya membawa pesan error, probe dapat menangkapnya.
   }
   return null;
 }

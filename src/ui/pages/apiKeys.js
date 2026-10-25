@@ -17,8 +17,8 @@ function renderNewKeyNotice(newKey, port) {
   if (!newKey) return "";
   const baseUrl = escapeHtml(getLocalBaseUrl(port));
   return `
-    <div class="card" style="margin-bottom: 1.5rem; border-color: var(--warning);">
-      <h3 style="color: var(--warning);">New key: copy it now</h3>
+    <div class="card" style="margin-bottom: 1.5rem; border-color: var(--outline-green);">
+      <h3 style="color: var(--outline-green);">New key: copy it now</h3>
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
         Ini satu-satunya waktu kunci penuh ditampilkan. Zenith Router hanya menyimpan hash SHA-256.
       </p>

@@ -87,7 +87,7 @@ function renderTopologyPane(topology) {
     </div>
     <style>
 
-      .topology-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted, #2a2a2a); }
+      .topology-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
       .topology-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
       .topology-legend .dot-router { background: var(--text); }
       .topology-legend .dot-active { background: var(--success); }
@@ -129,9 +129,9 @@ function renderTopologyPane(topology) {
       }
       .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       @media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
-      .quota-card { background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 #0a0a0a; }
+      .quota-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 var(--shadow-ink); }
       .q-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: var(--bw) solid var(--text); font-size: 0.75rem; font-weight: 800; color: var(--text); }
+      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--logo-tile); border: var(--bw) solid var(--line); font-size: 0.75rem; font-weight: 800; color: var(--text); }
       .q-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1; }
       .q-name strong { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .q-body { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -215,7 +215,14 @@ function renderTopologyPane(topology) {
       var POLL_MS = 1000;
       var refs = [];
 
-      var NW = 200, NH = 58, GAP = 28;
+      var NH = 58, GAP = 28;
+      // Lebar kartu mengikuti teks terpanjang supaya nama dan subteks tampil utuh.
+      function subText(n) {
+        return n.noAuth && !n.accounts ? "no-auth · ready" : n.accounts + " akun · " + fmt(n.requests) + " req · " + fmt(n.tokens) + " tok";
+      }
+      var NW = Math.max(200, Math.ceil(Math.max.apply(null, (nodes.length ? nodes : [{ name: "" }]).map(function (n) {
+        return Math.max(String(n.name || "").length * 7.6, subText(n).length * 6.6);
+      })) + 52 + 28));
       var count = nodes.length;
       var minRx = ((NW + GAP) * count) / (2 * Math.PI);
       var RX = Math.max(330, minRx);
@@ -261,7 +268,7 @@ function renderTopologyPane(topology) {
       var edgesG = document.createElementNS(NS, "g");
       var nodesG = document.createElementNS(NS, "g");
       var defs = document.createElementNS(NS, "defs");
-      defs.innerHTML = '<clipPath id="topo-icon-clip"><rect x="-88" y="-16" width="32" height="32" rx="7"/></clipPath>';
+      // Clip ikon dibuat per node (lihat iconClipId) agar ikut posisi kartu yang lebarnya dinamis.
       svg.appendChild(defs);
       svg.appendChild(edgesG);
       svg.appendChild(nodesG);
@@ -269,13 +276,13 @@ function renderTopologyPane(topology) {
       // Router core memakai dua rect yang ditampilkan bergantian lewat apply().
       var router = document.createElementNS(NS, "g");
       router.innerHTML =
-        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="0" fill="#ffffff" stroke="#0a0a0a" stroke-width="2"/>' +
-        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="0" fill="#ffffff" stroke="#0a0a0a" stroke-width="2" style="display:none"/>' +
+        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="0" style="fill:var(--surface);stroke:var(--line)" stroke-width="2"/>' +
+        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="0" style="fill:var(--surface);stroke:var(--line);display:none" stroke-width="2"/>' +
         '<image class="topo-router-icon" x="' + (CX - 66) + '" y="' + (CY - 12) + '" width="24" height="24" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
-        '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" fill="#0a0a0a">Zenith Router</text>' +
+        '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" style="fill:var(--text)">Zenith Router</text>' +
         '<g class="topo-router-badge" style="display:none">' +
-        '<circle cx="' + (CX + 64) + '" cy="' + (CY - 14) + '" r="10" fill="#0a0a0a"/>' +
-        '<text class="topo-router-badge-n" x="' + (CX + 64) + '" y="' + (CY - 10) + '" text-anchor="middle" font-size="11" font-weight="bold" fill="#fafafa">0</text>' +
+        '<circle cx="' + (CX + 64) + '" cy="' + (CY - 14) + '" r="10" style="fill:var(--text)"/>' +
+        '<text class="topo-router-badge-n" x="' + (CX + 64) + '" y="' + (CY - 10) + '" text-anchor="middle" font-size="11" font-weight="bold" style="fill:var(--surface)">0</text>' +
         "</g>";
       nodesG.appendChild(router);
       var routerOff = router.querySelector(".topo-router-rect-off");
@@ -305,20 +312,20 @@ function renderTopologyPane(topology) {
         // Dua varian edge: beam listrik saat aktif, garis solid saat idle.
         var edges = document.createElementNS(NS, "g");
         var particles = [0, 1, 2, 3, 4].map(function (k) {
-          return '<circle r="' + (k % 2 === 0 ? 3.5 : 2.2) + '" fill="' + (k % 3 === 0 ? "#0a0a0a" : k % 3 === 1 ? "#2a2a2a" : "#0a0a0a") + '">' +
+          return '<circle r="' + (k % 2 === 0 ? 3.5 : 2.2) + '" style="fill:' + (k % 3 === 1 ? "var(--traffic-soft)" : "var(--traffic)") + '">' +
             '<animateMotion dur="' + (0.5 + k * 0.12) + 's" repeatCount="indefinite" path="' + path + '" begin="' + (k * 0.15) + 's"/></circle>';
         }).join("");
         var sparks = [0, 1, 2, 3].map(function (k) {
-          return '<circle r="1.8" fill="#a3a3a3" opacity="0">' +
+          return '<circle r="1.8" style="fill:var(--traffic)" opacity="0">' +
             '<animate attributeName="opacity" values="0;1;0;0;1;0" dur="' + (0.35 + (k % 3) * 0.1) + 's" begin="' + (k * 0.07) + 's" repeatCount="indefinite"/>' +
             '<animateMotion dur="' + (0.28 + k * 0.05) + 's" repeatCount="indefinite" path="' + path + '" begin="' + (k * 0.11) + 's"/></circle>';
         }).join("");
         edges.innerHTML =
-          '<path class="topo-edge-idle" d="' + path + '" fill="none" stroke="#737373" stroke-width="2" opacity="0.5"/>' +
+          '<path class="topo-edge-idle" d="' + path + '" fill="none" style="stroke:var(--text-subtle)" stroke-width="2" opacity="0.5"/>' +
           '<g class="topo-edge-beam" style="display:none">' +
-          '<path class="topo-edge-halo" d="' + path + '" fill="none" stroke="#a3a3a3" stroke-width="9" stroke-opacity="0.35" stroke-linecap="round"/>' +
-          '<path class="topo-edge-plasma" d="' + path + '" fill="none" stroke="#2a2a2a" stroke-width="4.5" stroke-opacity="0.85" stroke-linecap="round"/>' +
-          '<path class="topo-edge-kame" d="' + path + '" fill="none" stroke="#0a0a0a" stroke-width="1.8" stroke-linecap="round"/>' +
+          '<path class="topo-edge-halo" d="' + path + '" fill="none" style="stroke:var(--traffic-soft)" stroke-width="9" stroke-linecap="round"/>' +
+          '<path class="topo-edge-plasma" d="' + path + '" fill="none" style="stroke:var(--traffic)" stroke-width="4.5" stroke-opacity="0.85" stroke-linecap="round"/>' +
+          '<path class="topo-edge-kame" d="' + path + '" fill="none" style="stroke:var(--traffic-core)" stroke-width="1.8" stroke-linecap="round"/>' +
           particles + sparks +
           "</g>";
         edgesG.appendChild(edges);
@@ -326,21 +333,26 @@ function renderTopologyPane(topology) {
         var g = document.createElementNS(NS, "g");
         g.setAttribute("class", "topo-node");
         g.setAttribute("transform", "translate(" + p.x.toFixed(1) + "," + p.y.toFixed(1) + ")");
-        var shortName = n.name.length > 20 ? n.name.slice(0, 19) + "…" : n.name;
-        var sub = n.noAuth && !n.accounts ? "no-auth · ready" : n.accounts + " akun · " + fmt(n.requests) + " req · " + fmt(n.tokens) + " tok";
+        var shortName = n.name;
+        var iconClipId = "topo-icon-clip-" + i;
+        var iconClip = document.createElementNS(NS, "clipPath");
+        iconClip.setAttribute("id", iconClipId);
+        iconClip.innerHTML = '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="7"/>';
+        defs.appendChild(iconClip);
+        var sub = subText(n);
         g.innerHTML =
           '<rect class="topo-node-halo" x="' + (-NW / 2) + '" y="' + (-NH / 2) + '" width="' + NW + '" height="' + NH + '" rx="10" fill="none" stroke="' + color + '" stroke-width="2" style="display:none">' +
             '<animate attributeName="opacity" values="0.7;0" dur="1.4s" repeatCount="indefinite"/>' +
             '<animateTransform attributeName="transform" type="scale" values="1;1.05" dur="1.4s" repeatCount="indefinite" additive="sum"/>' +
           "</rect>" +
-          '<rect class="topo-node-rect" x="' + (-NW / 2) + '" y="' + (-NH / 2) + '" width="' + NW + '" height="' + NH + '" rx="0" fill="#fafafa" stroke="#2a2a2a" stroke-width="2"/>' +
-          '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="0" fill="#d4d4d4" stroke="#2a2a2a" stroke-width="2"/>' +
+          '<rect class="topo-node-rect" x="' + (-NW / 2) + '" y="' + (-NH / 2) + '" width="' + NW + '" height="' + NH + '" rx="0" style="fill:var(--surface);stroke:var(--line)" stroke-width="2"/>' +
+          '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="0" style="fill:var(--logo-tile);stroke:var(--logo-tile-line)" stroke-width="2"/>' +
           (n.icon
-            ? '<image href="' + esc(n.icon) + '" x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" preserveAspectRatio="xMidYMid meet" clip-path="url(#topo-icon-clip)"/>'
+            ? '<image href="' + esc(n.icon) + '" x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" preserveAspectRatio="xMidYMid meet" clip-path="url(#' + iconClipId + ')"/>'
             : '<rect x="' + (-NW / 2 + 12) + '" y="-16" width="32" height="32" rx="7" fill="' + color + '22"/>' +
-              '<text x="' + (-NW / 2 + 28) + '" y="5" text-anchor="middle" font-size="13" font-weight="bold" fill="#0a0a0a">' + esc(initials(n.name)) + "</text>") +
-          '<text class="topo-node-title" x="' + (-NW / 2 + 52) + '" y="-4" font-size="12" font-weight="bold" fill="#0a0a0a">' + esc(shortName) + "</text>" +
-          '<text x="' + (-NW / 2 + 52) + '" y="13" font-size="11" fill="#737373">' + esc(sub) + "</text>" +
+              '<text x="' + (-NW / 2 + 28) + '" y="5" text-anchor="middle" font-size="13" font-weight="bold" style="fill:var(--text)">' + esc(initials(n.name)) + "</text>") +
+          '<text class="topo-node-title" x="' + (-NW / 2 + 52) + '" y="-4" font-size="12" font-weight="bold" style="fill:var(--text)">' + esc(shortName) + "</text>" +
+          '<text x="' + (-NW / 2 + 52) + '" y="13" font-size="11" style="fill:var(--text-subtle)">' + esc(sub) + "</text>" +
           '<g class="topo-node-ping" style="display:none">' +
             '<circle cx="' + (NW / 2 - 14) + '" cy="' + (-NH / 2 + 14) + '" r="4" fill="' + color + '"/>' +
             '<circle cx="' + (NW / 2 - 14) + '" cy="' + (-NH / 2 + 14) + '" r="4" fill="none" stroke="' + color + '" style="animation: topo-ping 1.2s ease-out infinite;"/>' +
@@ -381,17 +393,17 @@ function renderTopologyPane(topology) {
           var isLast = !isActive && r.key === lastProvider;
           var cls = isActive ? "topo-node is-active" : "topo-node";
           if (r.g.getAttribute("class") !== cls) r.g.setAttribute("class", cls);
-          r.rect.setAttribute("stroke", isActive ? r.color : "#2a2a2a");
+          r.rect.style.stroke = isActive ? r.color : "var(--line)";
           r.rect.setAttribute("stroke-width", isActive ? 2 : 1);
           if (isActive) r.rect.setAttribute("filter", "url(#" + r.filterId + ")");
           else r.rect.removeAttribute("filter");
-          r.title.setAttribute("fill", "#0a0a0a");
+          r.title.style.fill = "var(--text)";
           r.halo.style.display = isActive ? "" : "none";
           r.ping.style.display = isActive ? "" : "none";
           r.beam.style.display = isActive ? "" : "none";
           r.idle.style.display = isActive ? "none" : "";
           if (!isActive) {
-            r.idle.setAttribute("stroke", isLast ? "#fbbf24" : "#2a2a2a");
+            r.idle.style.stroke = isLast ? "var(--warning)" : "var(--line)";
             r.idle.setAttribute("stroke-width", isLast ? 2 : 1);
             r.idle.setAttribute("opacity", isLast ? 0.8 : 0.45);
           }

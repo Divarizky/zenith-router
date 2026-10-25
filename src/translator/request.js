@@ -47,6 +47,23 @@ function openaiImagePartToClaude(part) {
   return { type: "image", source: { type: "url", url } };
 }
 
+// cache_control set by the client on a text part. Pi marks the last text part of
+// the system, user, assistant and tool messages; the marker is kept so Claude
+// sees the same breakpoints.
+function cacheMarkerIn(content) {
+  if (!Array.isArray(content)) return undefined;
+  for (let i = content.length - 1; i >= 0; i--) {
+    if (content[i]?.cache_control) return content[i].cache_control;
+  }
+  return undefined;
+}
+
+function claudeTextBlock(part) {
+  const block = { type: "text", text: part.text };
+  if (part.cache_control) block.cache_control = part.cache_control;
+  return block;
+}
+
 function openaiToolResultContentToClaude(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return typeof content === "object" ? JSON.stringify(content) : String(content ?? "");
@@ -71,6 +88,7 @@ function openaiToolToClaude(tool) {
     name: fn.name,
     description: fn.description,
     input_schema: fn.parameters || { type: "object", properties: {} },
+    ...(tool.cache_control ? { cache_control: tool.cache_control } : {}),
   };
 }
 
@@ -196,22 +214,24 @@ function claudeContentToOpenAI(content) {
 
 function openaiMessageToClaude(msg) {
   if (msg.role === "tool") {
-    return {
-      role: "user",
-      content: [{
-        type: "tool_result",
-        tool_use_id: msg.tool_call_id,
-        content: openaiToolResultContentToClaude(msg.content),
-      }],
+    const block = {
+      type: "tool_result",
+      tool_use_id: msg.tool_call_id,
+      content: openaiToolResultContentToClaude(msg.content),
     };
+    const marker = cacheMarkerIn(msg.content);
+    if (marker) block.cache_control = marker;
+    return { role: "user", content: [block] };
   }
 
   if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
     const content = [];
-    if (msg.content) {
-      content.push(typeof msg.content === "string"
-        ? { type: "text", text: msg.content }
-        : { type: "text", text: JSON.stringify(msg.content) });
+    if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part?.type === "text" && typeof part.text === "string" && part.text) content.push(claudeTextBlock(part));
+      }
+    } else if (msg.content) {
+      content.push({ type: "text", text: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content) });
     }
     for (const tc of msg.tool_calls) {
       content.push({
@@ -231,14 +251,14 @@ function openaiMessageToClaude(msg) {
     const blocks = [];
     for (const part of msg.content) {
       if (!part || typeof part !== "object") continue;
-      if (part.type === "text" && typeof part.text === "string") blocks.push({ type: "text", text: part.text });
+      if (part.type === "text" && typeof part.text === "string") blocks.push(claudeTextBlock(part));
       else if (part.type === "image_url" && msg.role !== "assistant") {
         const img = openaiImagePartToClaude(part);
         if (img) blocks.push(img);
       }
     }
     const role = msg.role === "assistant" ? "assistant" : "user";
-    if (blocks.length === 1 && blocks[0].type === "text") return { role, content: blocks[0].text };
+    if (blocks.length === 1 && blocks[0].type === "text" && !blocks[0].cache_control) return { role, content: blocks[0].text };
     if (blocks.length > 0) return { role, content: blocks };
   }
 
@@ -297,7 +317,10 @@ export function openaiToClaude(body, targetModel) {
     result.tool_choice = { type: "auto", disable_parallel_tool_use: true };
   }
 
-  const systemParts = [];
+  // One entry per system message, with the same text the plain-string form sends:
+  // array parts join with "\n", messages join with "\n\n". Both forms are built
+  // from these entries, so the text cannot drift apart.
+  const systemEntries = [];
 
   if (Array.isArray(body.messages)) {
     for (const msg of body.messages) {
@@ -305,7 +328,13 @@ export function openaiToClaude(body, targetModel) {
         const text = typeof msg.content === "string"
           ? msg.content
           : (Array.isArray(msg.content) ? msg.content.map((c) => c.text || "").join("\n") : "");
-        if (text) systemParts.push(text);
+        // Whitespace-only system text is skipped: Anthropic rejects blank text blocks,
+        // and the string form drops it the same way, so both paths stay equal.
+        if (!text || text.trim() === "") continue;
+        const marker = Array.isArray(msg.content)
+          ? msg.content.slice().reverse().find((c) => c?.cache_control)?.cache_control
+          : undefined;
+        systemEntries.push({ text, marker });
       } else {
         const converted = openaiMessageToClaude(msg);
         result.messages.push(converted);
@@ -313,8 +342,17 @@ export function openaiToClaude(body, targetModel) {
     }
   }
 
-  if (systemParts.length > 0) {
-    result.system = systemParts.join("\n\n");
+  if (systemEntries.length > 0) {
+    const hasMarker = systemEntries.some((e) => e.marker);
+    // Messages are separated by "\n\n" inside the block text, the same as the
+    // string form. A separate whitespace-only block is never created.
+    result.system = hasMarker
+      ? systemEntries.map((e, i) => ({
+          type: "text",
+          text: (i > 0 ? "\n\n" : "") + e.text,
+          ...(e.marker ? { cache_control: e.marker } : {}),
+        }))
+      : systemEntries.map((e) => e.text).join("\n\n");
   }
 
   // Claude Code sends metadata.user_id as the account/session identity. The

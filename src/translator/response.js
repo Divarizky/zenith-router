@@ -33,6 +33,15 @@ function claudeContentToOpenAIFinish(content, stopReason) {
   };
 }
 
+// prompt_tokens already counts both cache buckets. cache_write_tokens is a Zenith
+// extension next to cached_tokens, so usage recording can tell reads from writes.
+function promptTokenDetails(cacheRead, cacheWrite) {
+  const details = {};
+  if (cacheRead > 0) details.cached_tokens = cacheRead;
+  if (cacheWrite > 0) details.cache_write_tokens = cacheWrite;
+  return Object.keys(details).length > 0 ? { prompt_tokens_details: details } : {};
+}
+
 /**
  * Convert Claude message JSON to OpenAI chat.completion JSON
  */
@@ -63,7 +72,7 @@ export function claudeToOpenAIResponse(data, defaultModel = "claude") {
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
       total_tokens: promptTokens + completionTokens,
-      ...(cacheRead > 0 ? { prompt_tokens_details: { cached_tokens: cacheRead } } : {}),
+      ...promptTokenDetails(cacheRead, cacheCreation),
     },
   };
 }
@@ -312,6 +321,9 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
                 const u = parsed.message?.usage;
                 if (typeof u?.input_tokens === "number") claudeInputTokens = u.input_tokens;
                 if (typeof u?.cache_read_input_tokens === "number") cachedInputTokens = u.cache_read_input_tokens;
+                if (typeof u?.cache_creation_input_tokens === "number") {
+                  cacheCreationTokens = Math.max(cacheCreationTokens, u.cache_creation_input_tokens);
+                }
               } else if (currentEvent === "content_block_start") {
                 // A tool_use block opens a tool call: the first OpenAI delta
                 // carries id, type and name; arguments follow as input_json_delta.
@@ -402,7 +414,7 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
                 const stopReason = parsed.delta?.stop_reason;
                 if (typeof parsed.usage?.output_tokens === "number") claudeUsage = parsed.usage;
                 if (typeof parsed.usage?.cache_creation_input_tokens === "number") {
-                  cacheCreationTokens = parsed.usage.cache_creation_input_tokens;
+                  cacheCreationTokens = Math.max(cacheCreationTokens, parsed.usage.cache_creation_input_tokens);
                 }
                 if (stopReason) {
                   // OpenAI ordering: finish_reason chunk first (with the real
@@ -431,7 +443,7 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
                         prompt_tokens: promptTokens,
                         completion_tokens: completionTokens,
                         total_tokens: promptTokens + completionTokens,
-                        ...(cachedInputTokens > 0 ? { prompt_tokens_details: { cached_tokens: cachedInputTokens } } : {}),
+                        ...promptTokenDetails(cachedInputTokens, cacheCreationTokens),
                       },
                     };
                     controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(usageChunk)}\n\n`));

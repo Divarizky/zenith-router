@@ -112,7 +112,7 @@ test("gateway menambahkan billing header hanya untuk koneksi Claude OAuth", asyn
   }
 });
 
-test("gateway tidak mengubah body untuk koneksi Claude API key", async () => {
+test("gateway tidak menambah billing header untuk koneksi Claude API key", async () => {
   const captured = [];
   initDb(":memory:");
   addConnection({
@@ -151,7 +151,8 @@ test("gateway tidak mengubah body untuk koneksi Claude API key", async () => {
         messages: [{ role: "user", content: "hi" }],
       }),
     });
-    assert.strictEqual(captured[0].system, "Kamu asisten.");
+    assert.doesNotMatch(captured[0].system[0].text, BILLING_RE);
+    assert.strictEqual(captured[0].system[0].text, "Kamu asisten.");
   } finally {
     setCustomExecutor(null);
   }

@@ -14,6 +14,7 @@ import { isAntigravityPoolExhausted } from "./antigravityPools.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { extractClaudeSessionId } from "./claudeIdentity.js";
 import { applyClaudeOAuthCloaking, isClaudeOAuthToken } from "./claudeCloaking.js";
+import { applyClaudePromptCache } from "./claudePromptCache.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
@@ -393,6 +394,8 @@ export async function executeWithFallback({
     return rest;
   };
   let payload = adaptPayloadForProvider(provider, upstreamPayload);
+  // Breakpoints go on before serialization so the cloaking header lands in front of them.
+  if (provider.id === "claude") payload = applyClaudePromptCache(payload);
   if (reasoningUnsupported.has(reasoningKey) && payload && "reasoning_effort" in payload) {
     payload = withoutReasoning(payload);
   }

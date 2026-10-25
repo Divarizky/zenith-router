@@ -17,6 +17,7 @@ export function normalizeUsage(usage) {
     out.inputTokens = positive(usage.prompt_tokens);
     out.outputTokens = positive(usage.completion_tokens);
     out.cacheReadTokens = positive(usage.prompt_tokens_details?.cached_tokens);
+    out.cacheWriteTokens = positive(usage.prompt_tokens_details?.cache_write_tokens);
     out.reasoningTokens = positive(usage.completion_tokens_details?.reasoning_tokens);
     return out;
   }

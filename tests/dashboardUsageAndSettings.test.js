@@ -325,14 +325,13 @@ test("Dashboard usage - kartu kuota Antigravity menampilkan satu baris per kelua
   assert.ok(html.includes(">Gemini 4 Argon<"), "label memakai nama katalog keluarga");
   assert.ok(html.includes(">Claude Opus 5.5<"), "keluarga Claude juga memakai nama katalog");
   assert.ok(!html.includes("Gemini 4 Argon (Medium)"), "nama per tingkat tidak lagi jadi label");
-  assert.ok(html.includes("high <b"), "tingkat tampil sebagai rincian di baris keluarga");
   assert.ok(html.includes("Kuota habis"), "tingkat dengan kuota 0 dan reset di masa depan ditandai");
   assert.ok(!html.includes("model langganan"), "bagian terpisah sudah dihapus");
   assert.ok(html.includes("Google AI Pro"), "nama langganan tetap tampil");
   assert.ok(!html.includes("chat_20706"), "model internal tidak ditampilkan");
 });
 
-test("Dashboard usage - satu keluarga ditampilkan sekali dengan rincian kuota tiap tingkat", async () => {
+test("Dashboard usage - satu keluarga ditampilkan sekali dengan kuota terlipat", async () => {
   const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
   const { renderUsagePage } = await import("../src/ui/pages/usage.js");
   initDb(":memory:");
@@ -362,10 +361,7 @@ test("Dashboard usage - satu keluarga ditampilkan sekali dengan rincian kuota ti
   ]);
   const html = renderUsagePage(20120, {});
   assert.strictEqual((html.match(/>Gemini 4 Argon</g) || []).length, 1, "keluarga muncul satu kali");
-  assert.ok(html.includes("low <b>100%</b>"), "kuota tingkat low");
-  assert.ok(html.includes("medium <b>100%</b>"), "kuota tingkat medium");
-  assert.ok(html.includes("high <b class=\"q-bad\">Kuota habis</b>"), "tingkat habis ditandai");
-  assert.ok(html.includes("3 tingkat · 1 habis"), "ringkasan tingkat di baris keluarga");
+  assert.ok(html.includes("<b>100%</b>"), "kuota sisa terbanyak ditampilkan");
 });
 
 test("Dashboard usage - keluarga yang runtime-nya hanya bucket -tiered tetap tampil dengan kuotanya", async () => {
@@ -411,10 +407,10 @@ test("Dashboard usage - tingkat habis dari inventaris tanpa bucket kuota tetap d
   });
   replaceAntigravityAccountModels(c.id, "Google AI Pro", [
     { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
-    { modelId: "gemini-4-argon-high", displayName: "Gemini 4 Argon (High)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000 },
+    { modelId: "gemini-3.5-flash-extra-low", displayName: "Gemini 3.5 Flash (Extra Low)", recommended: true, quotaRemaining: 0, quotaResetAt: Date.now() + 3600_000 },
   ]);
   const html = renderUsagePage(20120, {});
-  assert.ok(html.includes("high <b class=\"q-bad\">Kuota habis</b>"), "tingkat habis dari inventaris ditandai tanpa bucket kuota");
+  assert.ok(html.includes("Kuota habis"), "tingkat habis dari inventaris ditandai tanpa bucket kuota");
 });
 
 test("Dashboard usage - kartu kuota menampilkan pill 'Kuota Habis' saat limit habis", async () => {

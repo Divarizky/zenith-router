@@ -235,10 +235,10 @@ export function renderCombosContent(query = {}) {
         renderSelected(ta);
       }
 
-      function mkBtn(text, title, disabled, onClick) {
+      function mkBtn(text, title, disabled, onClick, extraClass) {
         var b = document.createElement("button");
         b.type = "button";
-        b.className = "btn btn-ghost";
+        b.className = "btn " + (extraClass || "btn-ghost");
         b.textContent = text;
         b.title = title;
         b.disabled = disabled;
@@ -281,7 +281,7 @@ export function renderCombosContent(query = {}) {
           actions.appendChild(mkBtn("×", "Hapus", false, function () {
             mutate(ta, function (a) { a.splice(i, 1); });
             renderList();
-          }));
+          }, "btn-danger"));
           li.appendChild(order);
           li.appendChild(code);
           li.appendChild(actions);

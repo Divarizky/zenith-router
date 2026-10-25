@@ -180,7 +180,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
               </div>
             </div>
             <div style="margin-top: 0.35rem; display: flex; justify-content: flex-end;">
-              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-ghost btn-sm" onclick="return confirm('Kembalikan password dashboard ke default (123456)?');">Reset ke Default (123456)</button>
+              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-danger btn-sm" onclick="return confirm('Kembalikan password dashboard ke default (123456)?');">Reset ke Default (123456)</button>
             </div>
           </div>
         </div>`,

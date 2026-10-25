@@ -84,16 +84,9 @@ function renderTopologyPane(topology) {
   return `
     <div class="topology-wrap" data-topology='${dataJson}' data-logo="${escapeHtml(logoUri)}">
       <svg class="topology-canvas" width="100%" role="img" aria-label="Router topology"></svg>
-      <div class="topology-legend">
-        <span><i class="dot dot-router"></i>Zenith Router</span>
-        <span><i class="dot dot-active"></i>Request berjalan</span>
-        <span><i class="dot dot-last"></i>Terakhir dipakai</span>
-        <span><i class="dot dot-idle"></i>Idle</span>
-      </div>
     </div>
     <style>
-      .topology-wrap { position: relative; }
-      .topology-canvas { display: block; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; }
+
       .topology-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted, #2a2a2a); }
       .topology-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
       .topology-legend .dot-router { background: var(--text); }
@@ -101,11 +94,24 @@ function renderTopologyPane(topology) {
       .topology-legend .dot-last { background: var(--warning); }
       .topology-legend .dot-idle { background: var(--text-subtle); }
       .topo-node text { font-family: inherit; }
-      .topo-split { display: flex; gap: 16px; align-items: stretch; }
-      .topo-main { flex: 1; min-width: 0; }
-      .recent-panel { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.85rem; }
-      .recent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-subtle); padding-bottom: 0.6rem; border-bottom: var(--bw) solid var(--border-subtle); }
-      .recent-list { list-style: none; margin: 0; padding: 0.35rem 0 0; overflow-y: auto; max-height: 420px; }
+      /* Canvas topologi dan panel request harus berada pada baris grid yang sama.
+         Legenda berada di baris terpisah agar tidak menambah tinggi canvas. */
+      .topo-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        grid-template-rows: auto auto;
+        column-gap: 16px;
+        row-gap: 8px;
+        align-items: stretch;
+      }
+      .topo-main { grid-column: 1; grid-row: 1; min-width: 0; display: flex; flex-direction: column; }
+      .topology-wrap { flex: 1; display: flex; flex-direction: column; }
+      .topology-canvas { display: block; width: 100%; flex: 1; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; }
+      .recent-panel { grid-column: 2; grid-row: 1; width: 300px; display: flex; flex-direction: column; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.85rem; }
+      .topology-legend { grid-column: 1; grid-row: 2; }
+      .recent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-subtle); padding-bottom: 0.6rem; border-bottom: var(--bw) solid var(--border-subtle); flex-shrink: 0; }
+      .recent-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+      .recent-list { list-style: none; margin: 0; padding: 0.35rem 0 0; overflow-y: auto; min-height: 0; }
       .recent-item { padding: 0.5rem 0; border-bottom: var(--bw) solid var(--border-subtle); }
       .recent-item:last-child { border-bottom: none; }
       .recent-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -115,7 +121,12 @@ function renderTopologyPane(topology) {
       .recent-empty { font-size: 0.8rem; color: var(--text-muted); padding: 1rem 0; text-align: center; }
       .recent-item-new { animation: recent-flash 1.2s ease-out; }
       @keyframes recent-flash { from { background: var(--accent-soft, rgba(10,10,10,0.06)); } to { background: transparent; } }
-      @media (max-width: 1100px) { .topo-split { flex-direction: column; } .recent-panel { width: 100%; } }
+      @media (max-width: 1100px) {
+        .topo-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+        .topo-main { grid-column: 1; grid-row: 1; }
+        .topology-legend { grid-column: 1; grid-row: 2; }
+        .recent-panel { grid-column: 1; grid-row: 3; width: 100%; }
+      }
       .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       @media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
       .quota-card { background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 #0a0a0a; }
@@ -216,9 +227,9 @@ function renderTopologyPane(topology) {
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
 
       var NS = "http://www.w3.org/2000/svg";
-      // Warna identitas provider memakai token tema existing; dekoratif saja (cincin & ping),
-  // teks tetap hitam karena teks berwarna di atas putih gagal WCAG.
-  var PALETTE = ["#34d399", "#fbbf24", "#f87171", "#93c5fd", "#737373", "#0a0a0a", "#34d399", "#fbbf24"];
+      // Warna identitas provider memakai token tema: aksen pastel biru & pink neo-brutalism + warna status.
+      // Teks tetap hitam karena teks berwarna di atas putih gagal WCAG.
+      var PALETTE = ["#93c5fd", "#ffb3d9", "#6ee7b7", "#fde047", "#fca5a5", "#7dd3fc", "#a3a3a3", "#0a0a0a"];
       function nodePos(i) {
         if (count === 1) return { x: CX, y: CY - RY };
         var angle = -Math.PI / 2 + (2 * Math.PI * i) / count;
@@ -258,8 +269,8 @@ function renderTopologyPane(topology) {
       // Router core memakai dua rect yang ditampilkan bergantian lewat apply().
       var router = document.createElementNS(NS, "g");
       router.innerHTML =
-        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="0" fill="#fafafa" stroke="#0a0a0a" stroke-width="2"/>' +
-        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="0" fill="rgba(10,10,10,0.06)" stroke="#0a0a0a" stroke-width="2" style="display:none"/>' +
+        '<rect class="topo-router-rect-off" x="' + (CX - 80) + '" y="' + (CY - 26) + '" width="160" height="52" rx="0" fill="#ffffff" stroke="#0a0a0a" stroke-width="2"/>' +
+        '<rect class="topo-router-rect-on" x="' + (CX - 84) + '" y="' + (CY - 30) + '" width="168" height="60" rx="0" fill="#ffffff" stroke="#0a0a0a" stroke-width="2" style="display:none"/>' +
         '<image class="topo-router-icon" x="' + (CX - 66) + '" y="' + (CY - 12) + '" width="24" height="24" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
         '<text class="topo-router-label" x="' + (CX - 34) + '" y="' + (CY + 4) + '" font-size="11" font-weight="bold" fill="#0a0a0a">Zenith Router</text>' +
         '<g class="topo-router-badge" style="display:none">' +
@@ -713,8 +724,37 @@ function antigravityFamilyRows(q, inventory) {
       };
     });
 
+  // Keluarga yang dilipat menjadi 1 baris tunggal (tanpa chip rincian varian level low/medium/high).
+  const SINGLE_RUNTIME_FAMILIES = new Set([
+    "gemini-3.8-flash",
+    "gemini-4-argon",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "gpt-oss-120b",
+  ]);
+
   return visible
     .map(([familyId, entry]) => {
+      // Model single-runtime: lipat semua varian jadi 1 baris tunggal.
+      if (SINGLE_RUNTIME_FAMILIES.has(familyId)) {
+        const allModelIds = [...Object.values(entry.variants), entry.unsuffixed, entry.tiered]
+          .filter(Boolean)
+          .filter((v, i, a) => a.indexOf(v) === i);
+        const allPcts = allModelIds.map((id) => pctFor(id)).filter((p) => p != null);
+        const pct = allPcts.length ? Math.max(...allPcts) : null;
+        const reset = allModelIds.map((id) => resetFor(id)).filter(Boolean).sort()[0] ?? null;
+        const off = isExhaustedNow(pct, reset);
+        return {
+          label: catalogNames.get(familyId) || familyId,
+          remaining: pct,
+          levelsHtml: levelChipsHtml([{ level: null, modelId: allModelIds[0], pct }], resetFor),
+          used: off ? "1 tingkat · Kuota habis" : "1 tingkat",
+          reset,
+        };
+      }
+
       const levels = Object.entries(entry.variants).sort((a, b) => levelOrderOf(a[0]) - levelOrderOf(b[0]));
       if (entry.unsuffixed && entry.unsuffixed !== entry.tiered) levels.push([null, entry.unsuffixed]);
       // Bucket -tiered yang jadi satu-satunya runtime keluarga tetap ditampilkan.
@@ -868,9 +908,15 @@ function renderQuotaCard(s, antigravityInventory = null) {
     <div class="card">
       <h3>Router Topology</h3>
       <p class="hint">Provider yang punya akun aktif tampil mengelilingi gateway, lengkap dengan jumlah akun dan pemakaiannya. Warna menandai trafik terakhir: request berjalan, terakhir dipakai, atau idle.</p>
-      <div class="topo-split">
+      <div class="topo-layout">
         <div class="topo-main">${renderTopologyPane(topology)}</div>
         ${renderRecentPanel(recent)}
+        <div class="topology-legend">
+          <span><i class="dot dot-router"></i>Zenith Router</span>
+          <span><i class="dot dot-active"></i>Request berjalan</span>
+          <span><i class="dot dot-last"></i>Terakhir dipakai</span>
+          <span><i class="dot dot-idle"></i>Idle</span>
+        </div>
       </div>
     </div>
 

@@ -71,9 +71,10 @@ export function renderDashboardLoginPage({
       --text: #fafafa;
       --text-muted: #a3a3a3;
       --text-subtle: #737373;
-      --accent: #fafafa;
-      --danger: #f87171;
-      --info: #93c5fd;
+      --accent: #93c5fd;
+      --accent-hover: #7db1f9;
+      --danger: #fca5a5;
+      --info: #7dd3fc;
       --radius: 10px;
       --radius-lg: 14px;
       --shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.5);
@@ -121,16 +122,17 @@ export function renderDashboardLoginPage({
       padding: 0.55rem 0.75rem; border-radius: 0; font-size: 0.88rem; font-family: inherit;
     }
     input[type="password"]:focus {
-      outline: none; border-color: var(--text); box-shadow: 3px 3px 0 #0a0a0a;
+      outline: none; border-color: var(--text); box-shadow: 3px 3px 0 var(--accent);
     }
     input[type="password"]:disabled { opacity: 0.6; }
     button {
       margin-top: 0.15rem; padding: 0.55rem 0.95rem; border-radius: 0;
-      border: 2px solid var(--accent); background: var(--accent); color: var(--bg);
-      font-size: 0.85rem; font-weight: 500; font-family: inherit; cursor: pointer;
-      transition: background 0.12s;
+      border: 2px solid var(--text); background: var(--accent); color: #0a0a0a;
+      font-size: 0.85rem; font-weight: 800; font-family: inherit; cursor: pointer;
+      box-shadow: 3px 3px 0 #0a0a0a;
+      transition: background 0.12s, transform 0.08s, box-shadow 0.08s;
     }
-    button:hover:not(:disabled) { background: #d4d4d4; }
+    button:hover:not(:disabled) { background: var(--accent-hover); transform: translate(-2px, -2px); box-shadow: 5px 5px 0 #0a0a0a; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .foot {
       margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--border-subtle);

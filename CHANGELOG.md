@@ -1,8 +1,36 @@
 ## [Unreleased]
 
+## [2.0.0] - 26-10-2026
+
+Zenith Router v2.0.0 menyatukan tema dashboard neo-brutalism (putih dan pastel), tema gelap dengan toggle, perapihan topologi Usage & Kuota, endpoint uji koneksi provider, prompt cache Claude, serta perbaikan router, relay gateway, dan streaming.
+
+Rentang perubahan: sejak `v0.1.8` (23-10-2026) hingga `v2.0.0`. Tidak ada entri `1.8.0` di riwayat repo, jadi `v0.1.8` dipakai sebagai batas.
+
+### Fitur
+
+- Tema neo-brutalism putih untuk seluruh dashboard: token warna dibalik ke latar putih dan teks hitam, border 2px, radius 0, dan shadow keras di kartu, tombol, dan input. Sidebar diganti topbar horizontal dengan indikator nav aktif.
+- Tema neo-brutalism pastel: aksen biru dan pink, tombol bahaya merah, segmented stepper prioritas akun, dan toggle switch hitam/putih.
+- Tema gelap dengan toggle di header. Pilihan tersimpan di `localStorage` dan diterapkan sebelum halaman dilukis.
+- Uji koneksi provider lewat `POST /dashboard/providers/test-connection` dan tombol "Uji Koneksi" di halaman detail provider.
+- Prompt cache Claude untuk target Anthropic: `cache_control` ephemeral pada tools, system, dan pesan terakhir, maksimal 4 breakpoint. Cache write dicatat terpisah dari cache read.
+- Kartu "New key" di halaman API Keys memakai outline hijau.
+- Kuota runtime Antigravity dilipat per keluarga (Argon, Claude, GPT-OSS) menjadi satu baris.
+
 ### Perbaikan
-- Rantai combo tidak lagi berhenti pada HTTP 400 yang disebabkan kredit akun habis (`insufficient credits`, `balance too low`, dan sejenisnya). 4xx lain tetap menghentikan rantai karena akan gagal sama pada setiap anggota; yang kehabisan kredit adalah keadaan billing satu anggota, sehingga anggota berikutnya masih bisa melayani.
-- Byte NUL disaring sebelum menjadi parameter bind SQLite. Sebelumnya `length`, `substr`, dan `instr` memotong nilai pada byte NUL tersebut, sehingga sebuah kolom terbaca utuh saat dibaca tapi terpotong saat disaring atau dipotong oleh SQL. Pembersihan dilakukan sekali pada batas database (`src/db/index.js`), bukan di setiap call site.
+
+- Router: modul `cooldownStrikes` diganti `accountCooldown`. Akun baru diparkir setelah dua request klien terpisah gagal. Kegagalan dalam satu request (failover akun, retry di akun yang sama, anggota combo) dihitung sekali. Error upstream tetap diteruskan ke klien.
+- Rantai combo tidak lagi berhenti pada HTTP 400 yang disebabkan kredit akun habis (`insufficient credits`, `balance too low`, dan sejenisnya). 4xx lain tetap menghentikan rantai.
+- Byte NUL disaring sekali di batas database sebelum menjadi parameter bind SQLite. Sebelumnya `length`, `substr`, dan `instr` memotong nilai pada byte NUL.
+- Streaming: normalisasi `reasoning` Cline ke `reasoning_content`, deteksi event error pada chunk SSE, dan pancaran event error saat mid-stream error (OpenAI ke Claude, OpenAI ke Responses). Konversi `reasoning_effort` ke `thinkingConfig` untuk Gemini.
+- Tema gelap: garis, border, bayangan, dan header tabel tidak lagi terbalik. Font dan ikon provider di Usage & Kuota terbaca.
+- Topologi Usage & Kuota: lebar kartu mengikuti teks sehingga nama dan subteks tampil utuh, ikon logo muncul di setiap kartu, highlight node aktif dan provider terakhir berfungsi, dan animasi traffic memakai biru di kedua tema.
+- Tata letak halaman Providers: toolbar model sejajar dengan aksi seleksi massal, dan status "Belum ada" memakai badge pill-muted.
+
+### Lainnya
+
+- Utilitas SSE dipusatkan di `utils/sse.js`, menggantikan parsing blok SSE yang sebelumnya berbeda di tiga tempat.
+- `public/logo.png` diperbarui ke aset logo resmi.
+- Hex di luar token tema dihapus, termasuk fallback di `providers.js`.
 
 ## [0.1.8] - 23-10-2026
 

@@ -1,6 +1,6 @@
 {
   "name": "zenith-router",
-  "version": "0.1.8",
+  "version": "2.0.0",
   "description": "Ultra-lightweight personal AI gateway for coding agents, built on Hono and node:sqlite",
   "type": "module",
   "main": "src/index.js",

@@ -6,6 +6,8 @@
  * pivot translation) are rejected upstream with HTTP 400.
  *
  * Repair steps, applied to the Claude-format `messages` array:
+ * 0. Null or non-object entries, null content blocks, and user messages left
+ *    without content are removed, so pairing is judged on the real turns.
  * 1. Consecutive user messages are merged when any of them carries a
  *    tool_result (Anthropic treats them as one turn anyway), with tool_result
  *    blocks first.
@@ -42,13 +44,46 @@ function toolUseIds(msg) {
   return [...new Set(ids)];
 }
 
+// Step 0: strip nullish values. Left in place, an `undefined` between an
+// assistant turn and its answer would make the real tool_result look orphaned.
+function stripNullish(messages, stats) {
+  let changed = false;
+  const out = [];
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") {
+      stats.removedEntries++;
+      changed = true;
+      continue;
+    }
+    if (!Array.isArray(msg.content)) {
+      out.push(msg);
+      continue;
+    }
+    const content = msg.content.filter((b) => b != null);
+    if (content.length === msg.content.length) {
+      out.push(msg);
+      continue;
+    }
+    changed = true;
+    stats.removedEntries += msg.content.length - content.length;
+    if (content.length === 0) {
+      stats.removedEntries++;
+      continue;
+    }
+    out.push({ ...msg, content });
+  }
+  return changed ? out : messages;
+}
+
 export function repairClaudeToolPairing(messages) {
-  const stats = { droppedResults: 0, addedResults: 0, mergedMessages: 0, droppedMessages: 0 };
+  const stats = { removedEntries: 0, droppedResults: 0, addedResults: 0, mergedMessages: 0, droppedMessages: 0 };
   if (!Array.isArray(messages)) return { messages, ...stats };
+
+  const cleaned = stripNullish(messages, stats);
 
   // Step 1: merge consecutive user turns that involve tool results.
   const merged = [];
-  for (const msg of messages) {
+  for (const msg of cleaned) {
     const prev = merged[merged.length - 1];
     if (prev?.role === "user" && msg?.role === "user" && (hasToolResult(prev) || hasToolResult(msg))) {
       const blocks = [...asBlocks(prev.content), ...asBlocks(msg.content)];
@@ -116,7 +151,11 @@ export function repairClaudeToolPairing(messages) {
     stats.addedResults += missing.length;
   }
 
-  const changed =
-    stats.mergedMessages > 0 || stats.droppedResults > 0 || stats.droppedMessages > 0 || stats.addedResults > 0;
-  return { messages: changed ? out : messages, ...stats };
+  const hasRepairs =
+    stats.removedEntries > 0 ||
+    stats.mergedMessages > 0 ||
+    stats.droppedResults > 0 ||
+    stats.droppedMessages > 0 ||
+    stats.addedResults > 0;
+  return { messages: hasRepairs ? out : messages, ...stats };
 }

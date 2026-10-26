@@ -53,7 +53,7 @@ export function prepareUpstreamRequest({
     if (repaired.messages !== translatedPayload.messages) {
       translatedPayload.messages = repaired.messages;
       captureLine(
-        `[zenith] repaired Claude tool pairing: dropped=${repaired.droppedResults} added=${repaired.addedResults} merged=${repaired.mergedMessages} droppedMessages=${repaired.droppedMessages}`
+        `[zenith] repaired Claude tool pairing: dropped=${repaired.droppedResults} added=${repaired.addedResults} merged=${repaired.mergedMessages} droppedMessages=${repaired.droppedMessages} removedEntries=${repaired.removedEntries}`
       );
     }
   }

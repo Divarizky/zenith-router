@@ -1,7 +1,9 @@
 import { getExecutor } from "../executors/base.js";
 import { opencodePathForModel } from "../executors/opencode.js";
 import { translateRequest, FORMATS } from "../translator/index.js";
+import { repairClaudeToolPairing } from "../translator/toolPairing.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
+import { captureLine } from "../services/logger.js";
 import { getAllSettings } from "../services/settings.js";
 import { effortFromRequest } from "../services/antigravityCatalog.js";
 
@@ -42,6 +44,19 @@ export function prepareUpstreamRequest({
     { ...body, stream: upstreamStream },
     targetModel
   );
+
+  // Anthropic rejects a history whose tool_use/tool_result pairs do not line up
+  // (HTTP 400). Clients and the pivot translation can both produce such gaps.
+  // translatedPayload is always a fresh object, so reassigning messages is safe.
+  if (targetFormat === FORMATS.CLAUDE && Array.isArray(translatedPayload?.messages)) {
+    const repaired = repairClaudeToolPairing(translatedPayload.messages);
+    if (repaired.messages !== translatedPayload.messages) {
+      translatedPayload.messages = repaired.messages;
+      captureLine(
+        `[zenith] repaired Claude tool pairing: dropped=${repaired.droppedResults} added=${repaired.addedResults} merged=${repaired.mergedMessages} droppedMessages=${repaired.droppedMessages}`
+      );
+    }
+  }
 
   const upstreamPayload = applyTokenSaver(
     translatedPayload,

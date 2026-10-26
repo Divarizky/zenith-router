@@ -151,7 +151,11 @@ test("POST /v1/chat/completions - cross-vendor routing to Claude upstream with t
   assert.strictEqual(json.choices[0].message.content, "Generated via translated Claude upstream");
 
   // Verify that upstream request was translated to Claude format (system extracted)
-  assert.ok(capturedUpstreamBody.system.startsWith("System rule"));
+  // system may be a string or an array of text blocks (the latter carries cache_control).
+  const systemText = Array.isArray(capturedUpstreamBody.system)
+    ? capturedUpstreamBody.system.map((b) => b.text).join("\n\n")
+    : capturedUpstreamBody.system;
+  assert.ok(systemText.startsWith("System rule"));
   assert.strictEqual(capturedUpstreamBody.messages.length, 1);
   assert.strictEqual(capturedUpstreamBody.messages[0].role, "user");
 

@@ -112,6 +112,9 @@ function importNotice(query = {}) {
   if (query.notice === "import_failed") {
     return { ok: false, text: "Import gagal: login tidak ditemukan di aplikasi lokal. Login dulu di CLI/IDE provider ini." };
   }
+  if (query.notice === "single_account_limit") {
+    return { ok: false, text: "Hanya satu akun yang diperbolehkan untuk provider ini. Hapus akun yang ada terlebih dahulu." };
+  }
   if (query.notice === "custom_added") return { ok: true, text: "Custom model berhasil ditambahkan." };
   if (query.notice === "custom_deleted") return { ok: true, text: "Custom model berhasil dihapus." };
   if (query.notice === "model_disabled") {
@@ -383,6 +386,7 @@ const LOGIN_LABELS = {
   kilocode: "Login dengan Kilo",
   kiro: "Login dengan AWS Builder ID",
   glm: "Login dengan Z.ai",
+  omnirush: "Login dengan Omnirush (Device Code)",
 };
 
 const LOCAL_IMPORT = {
@@ -406,7 +410,7 @@ const MANUAL_TOKEN_LABELS = {
   commandcode: "API Key (user_...)",
 };
 
-const REFRESHABLE = new Set(["claude", "codex", "antigravity", "cline", "kiro"]);
+const REFRESHABLE = new Set(["claude", "codex", "antigravity", "cline", "kiro", "omnirush"]);
 
 const OAUTH_SCOPE_NOTICES = {
   antigravity: "Login meminta izin <code>cloud-platform</code> penuh ke Google Cloud Platform untuk integrasi Gemini Code Assist.",
@@ -1033,6 +1037,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         </div>
         ${statusPill(p, stats, accounts)}
       </div>
+      ${p.warning ? `<div class="notice notice-error" style="margin-top: 1rem; border-left: 4px solid var(--danger);"><strong>Peringatan Risiko:</strong> ${escapeHtml(p.warning)}</div>` : ""}
       ${p.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       ${
         !p.noAuth
@@ -1217,6 +1222,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 export async function handleAddAccount(c) {
   const body = await c.req.parseBody();
   const provider = getProvider(String(body.provider || "").trim());
+  if (provider?.singleAccount && getConnections(provider.id)?.length > 0) {
+    return c.redirect(`${backTo(body.provider)}?notice=single_account_limit`);
+  }
   const name = String(body.name || "").trim() || `${provider?.name || "Provider"} Account`;
   const secret = String(body.api_key || "").trim();
   const refreshToken = String(body.refresh_token || "").trim();

@@ -9,6 +9,8 @@
  */
 const MAX_TOOL_DESCRIPTION = 240;
 const MAX_TOOL_SCHEMA = 1500;
+// Property description lengths tried in order, longest first, until the schema fits.
+const DESCRIPTION_STEPS = [240, 160, 80, 40, 0];
 // A coding agent reads whole files through tools, so results keep a generous
 // head and the tail (where errors and summaries land) instead of a short head.
 const DEFAULT_TOOL_RESULT_MAX = 12000;
@@ -62,6 +64,39 @@ function textOf(content) {
   return content === null || content === undefined ? "" : String(content);
 }
 
+function withPropertyDescriptions(schema, maxLength) {
+  const properties = schema?.properties;
+  if (!properties || typeof properties !== "object") return schema;
+  const next = {};
+  for (const [key, value] of Object.entries(properties)) {
+    if (value && typeof value === "object" && typeof value.description === "string") {
+      const description =
+        value.description.length > maxLength ? `${value.description.slice(0, maxLength)}...` : value.description;
+      next[key] = { ...value, description };
+    } else {
+      next[key] = value;
+    }
+  }
+  return { ...schema, properties: next };
+}
+
+/**
+ * Shrinks a JSON schema toward `limit` characters while keeping it valid JSON.
+ * Property descriptions are shortened first; names, types and `required` are never
+ * removed, since the model needs them to call the tool. A schema with very many
+ * properties can stay above the limit, and it is then sent without cutting.
+ */
+function fitSchema(schema, limit = MAX_TOOL_SCHEMA) {
+  const full = JSON.stringify(schema ?? {}, null, 0);
+  if (full.length <= limit) return full;
+  let candidate = full;
+  for (const maxLength of DESCRIPTION_STEPS) {
+    candidate = JSON.stringify(withPropertyDescriptions(schema, maxLength), null, 0);
+    if (candidate.length <= limit) return candidate;
+  }
+  return candidate;
+}
+
 export function renderToolCatalog(tools = []) {
   return tools
     .map((tool) => {
@@ -71,11 +106,10 @@ export function renderToolCatalog(tools = []) {
       if (description.length > MAX_TOOL_DESCRIPTION) description = `${description.slice(0, MAX_TOOL_DESCRIPTION)}...`;
       let parameters = "{}";
       try {
-        parameters = JSON.stringify(fn?.parameters || {}, null, 0);
+        parameters = fitSchema(fn?.parameters || {});
       } catch {
         parameters = "{}";
       }
-      if (parameters.length > MAX_TOOL_SCHEMA) parameters = `${parameters.slice(0, MAX_TOOL_SCHEMA)}...(trimmed)`;
       return `- ${name}: ${description}\n  params: ${parameters}`;
     })
     .join("\n");
@@ -98,6 +132,18 @@ export function toolNamesById(history = []) {
   return names;
 }
 
+// Tool arguments arrive as a JSON string. History must stay valid JSON, so anything
+// unparsable becomes an empty object rather than raw text.
+function parseArguments(value) {
+  if (value && typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(typeof value === "string" && value.trim() ? value : "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export function renderMessage(message = {}, toolNames = new Map()) {
   const role = message.role;
   let content = textOf(message.content);
@@ -113,10 +159,12 @@ export function renderMessage(message = {}, toolNames = new Map()) {
   if (role === "assistant") {
     const parts = [];
     if (content) parts.push(`Assistant: ${content}`);
+    // Written in the same tag form the preamble asks for, so the model copies the
+    // format it is taught rather than a prose line it could echo back.
     for (const call of message.tool_calls || []) {
       const fn = call?.function || call;
-      const label = call?.id ? `${fn?.name} (${call.id})` : fn?.name;
-      parts.push(`Assistant called tool ${label}: ${textOf(fn?.arguments)}`);
+      const args = parseArguments(fn?.arguments);
+      parts.push(`<tool_call>${JSON.stringify({ name: fn?.name, arguments: args })}</tool_call>`);
     }
     return parts.length > 0 ? parts.join("\n") : "Assistant: (tool call)";
   }

@@ -91,6 +91,22 @@ export function messageFingerprint(message) {
 }
 
 /**
+ * Stable hash of the tool catalog. The web chat keeps the catalog it was first
+ * shown, so a changed catalog needs a fresh chat. Order is ignored, since clients
+ * may list the same tools in a different order.
+ */
+export function toolsFingerprint(tools) {
+  const list = Array.isArray(tools) ? tools : [];
+  if (list.length === 0) return "";
+  const entries = list.map((tool) => {
+    const fn = tool?.function || tool || {};
+    return JSON.stringify({ name: fn.name ?? "", description: fn.description ?? "", parameters: fn.parameters ?? null });
+  });
+  entries.sort();
+  return createHash("sha256").update(entries.join("\n")).digest("hex").slice(0, 16);
+}
+
+/**
  * Which conversation a request belongs to: the first message after the system
  * prompt. It stays fixed for the life of a conversation, while the system
  * prompt may carry per-turn details (dates, git status) in some harnesses.
@@ -107,12 +123,20 @@ export function conversationId(messages) {
  * if the harness edited, rolled back, or replaced the conversation, the anchor
  * no longer matches and the chain starts a fresh chat session.
  */
-export function evaluateChain(chain, messages) {
+export function evaluateChain(chain, messages, tools = null) {
   const list = Array.isArray(messages) ? messages : [];
-  const full = { action: "reset", delta: list, count: list.length, fingerprint: messageFingerprint(list[list.length - 1]) };
+  const catalog = toolsFingerprint(tools);
+  const full = {
+    action: "reset",
+    delta: list,
+    count: list.length,
+    fingerprint: messageFingerprint(list[list.length - 1]),
+    toolsFingerprint: catalog,
+  };
 
   if (!chain) return { ...full, reason: "new_chain" };
   if (chain.dirty) return { ...full, reason: "dirty" };
+  if ((chain.toolsFingerprint ?? "") !== catalog) return { ...full, reason: "tools_changed" };
   if (list.length < chain.count) return { ...full, reason: "history_shrank" };
 
   const anchor = list[chain.count - 1];
@@ -130,6 +154,7 @@ export function evaluateChain(chain, messages) {
     delta: list.slice(chain.count),
     count: list.length,
     fingerprint: messageFingerprint(list[list.length - 1]),
+    toolsFingerprint: catalog,
   };
 }
 

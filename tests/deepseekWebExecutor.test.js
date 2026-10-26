@@ -6,7 +6,10 @@ import { initDb } from "../src/db/index.js";
 import { setSetting } from "../src/services/settings.js";
 import { resetDeepSeekTransportFactory } from "../src/services/deepseekWeb/transport.js";
 
-const TOOLS = [{ type: "function", function: { name: "bash", description: "run a command", parameters: { type: "object" } } }];
+const TOOLS = [
+  { type: "function", function: { name: "bash", description: "run a command", parameters: { type: "object" } } },
+  { type: "function", function: { name: "read", description: "read a file", parameters: { type: "object" } } },
+];
 const user = (content) => ({ role: "user", content });
 const assistant = (content) => ({ role: "assistant", content });
 

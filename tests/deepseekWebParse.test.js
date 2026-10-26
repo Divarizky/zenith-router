@@ -25,7 +25,7 @@ test("parse - one tagged call keeps the surrounding text out of content", () => 
 
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].type, "function");
-  assert.match(calls[0].id, /^call_[0-9a-f]{10}$/);
+  assert.match(calls[0].id, /^call_[0-9a-f]{12}$/);
   assert.strictEqual(calls[0].function.name, "bash");
   assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { command: "ls -la" });
   assert.strictEqual(text, "Aku jalankan.\n\nSelesai.");
@@ -48,8 +48,16 @@ test("parse - identical calls still receive unique ids", () => {
   const { calls } = parseReply(`${one}\n${one}`);
 
   assert.strictEqual(calls.length, 2);
-  assert.strictEqual(calls[1].id, `${calls[0].id}_2`);
+  assert.notStrictEqual(calls[1].id, calls[0].id);
   assert.strictEqual(calls[0].function.arguments, calls[1].function.arguments);
+});
+
+test("parse - the same call in two turns gets different ids", () => {
+  // A content hash made these equal, so the second result matched the first call.
+  const one = '<tool_call>{"name":"bash","arguments":{"command":"git status"}}</tool_call>';
+  const first = parseReply(one).calls[0].id;
+  const second = parseReply(one).calls[0].id;
+  assert.notStrictEqual(first, second);
 });
 
 test("parse - arguments may be a JSON string or flattened next to name", () => {
@@ -252,4 +260,164 @@ test("parse - a DSML parameter named arguments is unwrapped into the call argume
   const { calls } = parseReply(raw);
   assert.strictEqual(calls.length, 1);
   assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { command: "git status", description: "status" });
+});
+
+test("parse - a Windows path with an invalid escape or a valid one in its name keeps every character", () => {
+  // Written as raw text so the test string itself carries single backslashes.
+  const raw = String.raw`<tool_call>{"name":"Read","arguments":{"file_path":"C:\Users\diva\f.txt"}}</tool_call>`;
+  const { calls, malformed } = parseReply(raw, { toolNames: new Set(["Read"]) });
+
+  assert.strictEqual(malformed, false);
+  assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { file_path: String.raw`C:\Users\diva\f.txt` });
+});
+
+test("parse - a path such as C:\temp\new.txt is not read as a tab and a line break", () => {
+  const raw = String.raw`<tool_call>{"name":"Read","arguments":{"file_path":"C:\temp\new.txt"}}</tool_call>`;
+  const { calls } = parseReply(raw, { toolNames: new Set(["Read"]) });
+
+  assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { file_path: String.raw`C:\temp\new.txt` });
+});
+
+test("parse - an invalid escape in a regex argument is kept as a literal backslash", () => {
+  const raw = String.raw`<tool_call>{"name":"Bash","arguments":{"command":"grep -E \"\d+\" a.txt"}}</tool_call>`;
+  const { calls, malformed } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+
+  assert.strictEqual(malformed, false);
+  assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { command: String.raw`grep -E "\d+" a.txt` });
+});
+
+test("parse - valid JSON escapes in an ordinary string keep their meaning", () => {
+  const raw = String.raw`<tool_call>{"name":"Bash","arguments":{"command":"echo a\nb \"q\" \u0041"}}</tool_call>`;
+  const { calls } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+
+  assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { command: 'echo a\nb "q" A' });
+});
+
+test("parse - a tool name is checked against the catalog in every dialect", () => {
+  const toolNames = new Set(["Bash"]);
+
+  const dsmlUnknown = parseReply(`<${DSML}calls><${DSML}invoke name="Deploy"><${DSML}parameter name="env" string="true">prod</${DSML}parameter></${DSML}invoke></${DSML}calls>`, { toolNames });
+  assert.deepStrictEqual(dsmlUnknown.calls, []);
+  assert.strictEqual(dsmlUnknown.malformed, true);
+  assert.strictEqual(dsmlUnknown.text, "");
+
+  const dsmlCase = parseReply(`<${DSML}calls><${DSML}invoke name="bash"><${DSML}parameter name="command" string="true">pwd</${DSML}parameter></${DSML}invoke></${DSML}calls>`, { toolNames });
+  assert.strictEqual(dsmlCase.calls[0].function.name, "Bash");
+
+  const bareCase = parseReply('{"name":"bash","arguments":{"command":"pwd"}}', { toolNames });
+  assert.strictEqual(bareCase.calls[0].function.name, "Bash");
+});
+
+test("parse - an unknown tool name in a tagged call is not run and does not leak", () => {
+  const { calls, text, malformed } = parseReply('Oke.\n<tool_call>{"name":"Deploy","arguments":{"env":"prod"}}</tool_call>\nlanjut', { toolNames: new Set(["Bash"]) });
+
+  assert.deepStrictEqual(calls, []);
+  assert.strictEqual(malformed, true);
+  assert.doesNotMatch(text, /Deploy|tool_call|prod/);
+});
+
+test("parse - a tool_call inside a fence runs only when its name is in the catalog", () => {
+  const toolNames = new Set(["Bash"]);
+  const known = parseReply('Ini:\n```\n<tool_call>{"name":"Bash","arguments":{"command":"ls"}}</tool_call>\n```\nselesai', { toolNames });
+  assert.strictEqual(known.calls.length, 1);
+  assert.strictEqual(known.text, "Ini:\n\nselesai");
+
+  const example = parseReply('Contoh:\n```\n<tool_call>{"name":"Deploy","arguments":{"env":"prod"}}</tool_call>\n```\nselesai', { toolNames });
+  assert.deepStrictEqual(example.calls, []);
+  assert.strictEqual(example.malformed, false);
+  assert.match(example.text, /Deploy/);
+});
+
+test("parse - prose that names the tag is not flagged as a broken call", () => {
+  const raw = "Format call adalah <tool_call> dan itu JSON di dalamnya.";
+  const { calls, malformed, text } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+
+  assert.deepStrictEqual(calls, []);
+  assert.strictEqual(malformed, false);
+  assert.strictEqual(text, raw);
+});
+
+test("parse - DeepSeek V3 native sentinel block becomes a call and leaves no markup", () => {
+  const BEGIN = "\uFF5C\u2581calls\u2581begin\uFF5C";
+  const CALL_BEGIN = "\uFF5C\u2581call\u2581begin\uFF5C";
+  const SEP = "\uFF5C\u2581sep\uFF5C";
+  const CALL_END = "\uFF5C\u2581call\u2581end\uFF5C";
+  const CALLS_END = "\uFF5C\u2581calls\u2581end\uFF5C";
+  const raw = `ok <${BEGIN}><${CALL_BEGIN}>function<${SEP}>Bash\n\`\`\`json\n{"command":"ls"}\n\`\`\`<${CALL_END}><${CALLS_END}>`;
+
+  const { text, calls, malformed } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+  assert.strictEqual(malformed, false);
+  assert.strictEqual(text, "ok");
+  assert.strictEqual(calls[0].function.name, "Bash");
+  assert.deepStrictEqual(JSON.parse(calls[0].function.arguments), { command: "ls" });
+});
+
+test("parse - a V3 block naming an unknown tool is dropped and flagged", () => {
+  const BEGIN = "\uFF5C\u2581calls\u2581begin\uFF5C";
+  const CALL_BEGIN = "\uFF5C\u2581call\u2581begin\uFF5C";
+  const SEP = "\uFF5C\u2581sep\uFF5C";
+  const CALLS_END = "\uFF5C\u2581calls\u2581end\uFF5C";
+  const raw = `<${BEGIN}><${CALL_BEGIN}>function<${SEP}>Deploy\n\`\`\`json\n{"env":"prod"}\n\`\`\`<${CALLS_END}>`;
+
+  const { text, calls, malformed } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+  assert.deepStrictEqual(calls, []);
+  assert.strictEqual(malformed, true);
+  assert.strictEqual(text, "");
+});
+
+test("parse - echoed history lines and a closed think block never reach the answer", () => {
+  const echoed = parseReply('Assistant called tool Bash (call_1): {"command":"ls"}\nTool result (Bash, call_1): a b\nselesai');
+  assert.strictEqual(echoed.text, "selesai");
+  assert.strictEqual(echoed.malformed, false);
+
+  const thought = parseReply("<think>rencana</think>Jawab");
+  assert.strictEqual(thought.text, "Jawab");
+  assert.strictEqual(thought.malformed, false);
+});
+
+test("parse - an unclosed think tag cuts the answer and counts as malformed", () => {
+  const { text, malformed } = parseReply("Jawab dulu <think>masih mikir");
+  assert.strictEqual(text, "Jawab dulu");
+  assert.strictEqual(malformed, true);
+});
+
+test("parse - prose that mentions a tool result mid-sentence is kept", () => {
+  const raw = "Hasil dari Tool result (bash) tadi sudah jelas.";
+  assert.strictEqual(parseReply(raw).text, raw);
+});
+
+test("parse - an escaped backslash in a non-path argument survives one level, not two", () => {
+  // Triggers the repair path (\d is an invalid escape). The valid \\ must stay one backslash.
+  const raw = String.raw`<tool_call>{"name":"Bash","arguments":{"command":"grep \d x \\ y"}}</tool_call>`;
+  const { calls } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(JSON.parse(calls[0].function.arguments).command, "grep \\d x \\ y");
+});
+
+test("parse - a history-looking line inside a code fence is kept as an example", () => {
+  const raw = "Contoh log:\n```\nTool result (bash, call_1): a b\n```\nselesai";
+  const { text, malformed } = parseReply(raw);
+  assert.match(text, /Tool result \(bash, call_1\): a b/);
+  assert.strictEqual(malformed, false);
+});
+
+test("parse - a V3 sentinel block quoted in a code fence is an example, not a call", () => {
+  const BEGIN = "\uFF5C\u2581calls\u2581begin\uFF5C";
+  const CALL_BEGIN = "\uFF5C\u2581call\u2581begin\uFF5C";
+  const SEP = "\uFF5C\u2581sep\uFF5C";
+  const CALLS_END = "\uFF5C\u2581calls\u2581end\uFF5C";
+  const raw = `Contoh:\n\`\`\`\n<${BEGIN}><${CALL_BEGIN}>function<${SEP}>Bash\n\`\`\`json\n{"command":"ls"}\n\`\`\`<${CALLS_END}>\n\`\`\`\nselesai`;
+  const { calls, malformed } = parseReply(raw, { toolNames: new Set(["Bash"]) });
+  assert.deepStrictEqual(calls, []);
+  assert.strictEqual(malformed, false);
+});
+
+test("parse - a closed think block inside a code fence is kept as an example", () => {
+  const raw = "Contoh:\n```\n<think>rencana</think>\n```\nselesai";
+  assert.match(parseReply(raw).text, /<think>rencana<\/think>/);
+});
+
+test("parse - prose that starts with Tool result is not treated as history", () => {
+  const raw = "Tool result (hasil tes) menunjukkan semuanya lulus.";
+  assert.strictEqual(parseReply(raw).text, raw);
 });

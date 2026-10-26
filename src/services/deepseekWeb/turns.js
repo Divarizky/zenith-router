@@ -148,6 +148,7 @@ export async function runChainTurn({
       store.markTurn(key, {
         count: plan.count,
         fingerprint: plan.fingerprint,
+        toolsFingerprint: plan.toolsFingerprint,
         chatSessionId,
         parentMessageId: reply?.parentMessageId ?? null,
       });
@@ -176,7 +177,7 @@ export async function runChainTurn({
 
   return store.withLock(key, async () => {
     if (signal?.aborted) throw abortError();
-    const plan = evaluateChain(store.get(key), messages);
+    const plan = evaluateChain(store.get(key), messages, tools);
     try {
       return await attempt(plan);
     } catch (err) {

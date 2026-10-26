@@ -56,8 +56,35 @@ test("prompt - catalog sizes are capped per tool", () => {
 
   assert.match(catalog, /d{240}\.\.\./);
   assert.doesNotMatch(catalog, /d{241}/);
-  assert.match(catalog, /\.\.\.\(trimmed\)/);
+  assert.doesNotMatch(catalog, /\.\.\.\(trimmed\)/, "schema is no longer cut as text");
   assert.ok(catalog.length < 1800, `catalog stays bounded, got ${catalog.length}`);
+  const params = JSON.parse(catalog.match(/params: (.*)$/m)[1]);
+  assert.strictEqual(params.type, "object", "schema stays valid JSON");
+  assert.ok(params.properties.blob, "property name survives shrinking");
+});
+
+test("prompt - a long schema keeps required and property names valid JSON", () => {
+  const properties = {};
+  for (let i = 0; i < 40; i += 1) {
+    properties[`field_${i}`] = { type: "string", description: `desc ${i} `.repeat(30) };
+  }
+  const tool = {
+    name: "wide",
+    description: "wide tool",
+    parameters: { type: "object", required: ["field_0", "field_39"], properties },
+  };
+  const catalog = renderToolCatalog([tool]);
+  const params = JSON.parse(catalog.match(/params: (.*)$/m)[1]);
+
+  assert.deepStrictEqual(params.required, ["field_0", "field_39"]);
+  assert.strictEqual(Object.keys(params.properties).length, 40);
+  assert.strictEqual(params.properties.field_39.type, "string");
+});
+
+test("prompt - a small schema is rendered unchanged", () => {
+  const schema = { type: "object", required: ["command"], properties: { command: { type: "string", description: "shell" } } };
+  const catalog = renderToolCatalog([{ name: "Bash", description: "run", parameters: schema }]);
+  assert.ok(catalog.includes(`params: ${JSON.stringify(schema)}`));
 });
 
 test("prompt - tool results and assistant calls are rendered in a readable shape", () => {
@@ -78,7 +105,8 @@ test("prompt - tool results and assistant calls are rendered in a readable shape
     tool_calls: [{ function: { name: "bash", arguments: '{"command":"ls"}' } }],
   });
   assert.match(assistant, /Assistant: Aku cek\./);
-  assert.match(assistant, /Assistant called tool bash: \{"command":"ls"\}/);
+  assert.match(assistant, /<tool_call>\{"name":"bash","arguments":\{"command":"ls"\}\}<\/tool_call>/);
+  assert.doesNotMatch(assistant, /Assistant called tool/);
 
   assert.strictEqual(renderMessage({ role: "assistant", content: null }), "Assistant: (tool call)");
 
@@ -87,7 +115,7 @@ test("prompt - tool results and assistant calls are rendered in a readable shape
     content: null,
     tool_calls: [{ id: "call_a", function: { name: "read", arguments: '{"path":"a.txt"}' } }],
   });
-  assert.strictEqual(withId, 'Assistant called tool read (call_a): {"path":"a.txt"}');
+  assert.strictEqual(withId, '<tool_call>{"name":"read","arguments":{"path":"a.txt"}}</tool_call>');
   assert.match(renderMessage({ role: "system", content: "aturan" }), /\[System instructions\]\naturan/);
 });
 

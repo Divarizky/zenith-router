@@ -311,3 +311,22 @@ test("single-flight - different chains still run in parallel", async () => {
   await Promise.all([turn("chain-c"), turn("chain-d")]);
   assert.strictEqual(maxActive, 2, "separate conversations are not serialized together");
 });
+
+test("chains - a changed tool catalog starts a fresh chat, reordering does not", () => {
+  const msgs = [
+    { role: "user", content: "satu" },
+    { role: "assistant", content: "dua" },
+  ];
+  const toolA = { type: "function", function: { name: "Bash", description: "run", parameters: { type: "object" } } };
+  const toolB = { type: "function", function: { name: "Read", description: "read", parameters: { type: "object" } } };
+
+  const first = evaluateChain(null, msgs, [toolA, toolB]);
+  const chain = { count: msgs.length, fingerprint: first.fingerprint, dirty: false, toolsFingerprint: first.toolsFingerprint };
+
+  const same = evaluateChain(chain, [...msgs, { role: "user", content: "tiga" }], [toolB, toolA]);
+  assert.strictEqual(same.action, "continue", "same tools in another order keep the chat");
+
+  const changed = evaluateChain(chain, [...msgs, { role: "user", content: "tiga" }], [toolA]);
+  assert.strictEqual(changed.action, "reset");
+  assert.strictEqual(changed.reason, "tools_changed");
+});

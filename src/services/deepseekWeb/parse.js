@@ -22,7 +22,7 @@
  * be parsed, the text from that block onward is dropped and `malformed` is set,
  * so the caller can retry instead of showing a half-written command as an answer.
  */
-import { createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 const PIPE = "\uFF5C"; // ｜ FULLWIDTH VERTICAL LINE, the DSML delimiter
 const DSML = `${PIPE}${PIPE}DSML${PIPE}${PIPE}`;
@@ -35,7 +35,12 @@ const FENCE_KEEP_LINES = 10;
 
 // Any call-related tag still present after parsing. Fenced code is masked first,
 // so a code sample in a visible answer never counts as markup.
-const LEFTOVER_MARKUP = new RegExp(`<\\/?\\s*(?:${DSML}|(?:tool_calls?|invoke|parameter|function_calls)\\b)`, "i");
+// A `<tool_call>` opening tag counts as markup only when a JSON object follows it.
+// Prose that merely names the tag ("the <tool_call> format") is not a call block.
+const LEFTOVER_MARKUP = new RegExp(
+  `<\\/?\\s*(?:${DSML}|(?:tool_calls|invoke|parameter|function_calls)\\b)|<tool_call\\s*>\\s*\\{|<think\\s*>`,
+  "i"
+);
 
 // An invoke must close before its wrapper or the next invoke starts. One that
 // runs into the end of the reply was cut off, so it is not a call.
@@ -93,13 +98,11 @@ export function extractJsonObject(source) {
   return null;
 }
 
-function hashOf(value) {
-  return createHash("md5").update(value).digest("hex").slice(0, 10);
-}
-
-function makeCall(name, args, idSeed) {
+// The id must differ across turns. A hash of the call's content repeats whenever the
+// same command runs again, and a repeated id makes tool results match the wrong call.
+function makeCall(name, args) {
   return {
-    id: `call_${hashOf(idSeed)}`,
+    id: `call_${randomBytes(6).toString("hex")}`,
     type: "function",
     function: { name, arguments: JSON.stringify(args) },
   };
@@ -146,8 +149,67 @@ function repairLooseStrings(json) {
   return out;
 }
 
+// A Windows drive (`C:\`) or a UNC prefix (`\\server`). Inside such a string every
+// backslash is literal: JSON.parse reads `\t`, `\n`, `\b`, `\f`, `\r` in
+// `C:\temp\new.txt` as control characters and silently corrupts the path.
+const PATH_LIKE = /[A-Za-z]:\\|\\\\[A-Za-z]/;
+// A backslash followed by anything other than a valid JSON escape start.
+const HAS_INVALID_ESCAPE = /\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/;
+
+/**
+ * Doubles each backslash that does not start a valid JSON escape, so Windows paths
+ * and regex fragments such as `\d` or `\U` survive intact. In a path-like string
+ * only an escaped quote and an escaped backslash keep their meaning.
+ */
+function escapeBackslashes(json) {
+  let out = "";
+  let index = 0;
+  while (index < json.length) {
+    const char = json[index];
+    if (char !== '"') {
+      out += char;
+      index += 1;
+      continue;
+    }
+    let close = index + 1;
+    while (close < json.length && json[close] !== '"') close += json[close] === "\\" ? 2 : 1;
+    const body = json.slice(index + 1, close);
+    const pathLike = PATH_LIKE.test(body);
+    let fixed = "";
+    for (let i = 0; i < body.length; i += 1) {
+      if (body[i] !== "\\") {
+        fixed += body[i];
+        continue;
+      }
+      const next = body[i + 1] ?? "";
+      const standard = pathLike
+        ? next === '"' || next === "\\"
+        : /["\\\/bfnrt]/.test(next) || (next === "u" && /^[0-9a-fA-F]{4}$/.test(body.slice(i + 2, i + 6)));
+      if (standard) {
+        fixed += body[i] + next;
+        i += 1;
+      } else {
+        fixed += "\\\\";
+      }
+    }
+    out += '"' + fixed + '"';
+    index = close + 1;
+  }
+  return out;
+}
+
 /** JSON.parse, then one retry with the loose repair. Null when neither works. */
 function parseLooseJson(text) {
+  // A path can parse cleanly and still be wrong (see PATH_LIKE), and an invalid
+  // escape such as \d only fails later, so the backslash pass runs first whenever
+  // the text has either.
+  if (PATH_LIKE.test(text) || HAS_INVALID_ESCAPE.test(text)) {
+    try {
+      return JSON.parse(repairLooseStrings(escapeBackslashes(text)));
+    } catch {
+      // fall through to the standard attempts below
+    }
+  }
   try {
     return JSON.parse(text);
   } catch {
@@ -214,26 +276,57 @@ function insideRanges(index, ranges) {
   return ranges.some(([start, end]) => index >= start && index < end);
 }
 
+/**
+ * Maps a name the model wrote onto the request's catalog. Matching is
+ * case-insensitive and returns the catalog spelling. With no catalog (auxiliary
+ * calls) the name passes through unchanged.
+ */
+function canonicalToolName(name, toolNames) {
+  if (!toolNames || toolNames.size === 0) return name;
+  if (toolNames.has(name)) return name;
+  const lower = name.toLowerCase();
+  for (const known of toolNames) {
+    if (known.toLowerCase() === lower) return known;
+  }
+  return null;
+}
+
 /** Dialect 1: `<tool_call>` blocks located by a brace scan. */
-function parseTaggedCalls(raw) {
+function parseTaggedCalls(raw, toolNames) {
   const calls = [];
   const spans = [];
+  let malformedTag = false;
   const fences = fencedRanges(raw);
   const openTag = /<tool_call\s*>/gi;
 
   for (const match of raw.matchAll(openTag)) {
-    if (insideRanges(match.index, fences)) continue;
+    const fenced = insideRanges(match.index, fences);
     const segmentStart = match.index + match[0].length;
     const found = extractJsonObject(raw.slice(segmentStart));
     if (!found) continue;
 
     const source = parseLooseJson(found.json);
     if (!isPlainObject(source)) continue;
-    const name = typeof source.name === "string" ? source.name.trim() : "";
-    if (!name) continue;
+    const rawName = typeof source.name === "string" ? source.name.trim() : "";
+    if (!rawName) continue;
+    // Inside a code fence the same markup is usually a quoted example, so it runs
+    // only when its name is a tool from the request. Outside a fence an unknown
+    // name is a malformed call, not a tool to run.
+    const name = canonicalToolName(rawName, toolNames);
+    if (!name) {
+      // Outside a fence an unknown tool is a broken call: drop its markup and JSON so
+      // nothing leaks, and flag the reply. Inside a fence it is quoted text, kept as is.
+      if (!fenced) {
+        malformedTag = true;
+        const stop = segmentStart + found.end;
+        const closing = /^\s*<\/tool_call\s*>/i.exec(raw.slice(stop, stop + MAX_TRAILING_CLOSE));
+        spans.push([match.index, stop + (closing ? closing[0].length : 0)]);
+      }
+      continue;
+    }
 
     const args = normalizeArguments(source.arguments, source);
-    calls.push(makeCall(name, args, found.json));
+    calls.push(makeCall(name, args));
 
     let end = segmentStart + found.end;
     const tail = raw.slice(end, end + MAX_TRAILING_CLOSE);
@@ -242,20 +335,76 @@ function parseTaggedCalls(raw) {
     spans.push([match.index, end]);
   }
 
-  if (spans.length === 0) return { text: raw, calls };
-  return { text: removeSpans(raw, spans), calls };
+  if (spans.length === 0) return { text: raw, calls, malformedTag };
+  return { text: removeSpans(raw, spans), calls, malformedTag };
+}
+
+// DeepSeek V3's own tool-call sentinels. Each is `｜` + `▁`-joined words + `｜`.
+const V3_CALLS_BEGIN = "\uFF5C\u2581calls\u2581begin\uFF5C";
+const V3_CALLS_END = "\uFF5C\u2581calls\u2581end\uFF5C";
+const V3_CALL_BEGIN = "\uFF5C\u2581call\u2581begin\uFF5C";
+const V3_CALL_END = "\uFF5C\u2581call\u2581end\uFF5C";
+const V3_SEP = "\uFF5C\u2581sep\uFF5C";
+const V3_ANY = /\uFF5C\u2581(?:calls|call)\u2581(?:begin|end)\uFF5C|\uFF5C\u2581sep\uFF5C/g;
+// One call: `call begin`, `function`, the separator, the tool name, then the arguments
+// up to the call end or the next call. The arguments are usually a json fence.
+// Each sentinel sits inside angle brackets in the reply: `<｜▁call▁begin｜>`.
+const wrap = (sentinel) => `<?${sentinel}>?`;
+const V3_CALL = new RegExp(
+  `${wrap(V3_CALL_BEGIN)}\\s*function<?${V3_SEP}>?\\s*([^\\s<]+)([\\s\\S]*?)(?=${wrap(V3_CALL_END)}|${wrap(V3_CALLS_END)}|${wrap(V3_CALL_BEGIN)}|$)`,
+  "g"
+);
+
+/**
+ * Dialect 2a: DeepSeek V3's native sentinel block. The tool name follows the
+ * separator and the arguments are a JSON object, usually inside a json fence.
+ */
+function parseNativeV3(raw, toolNames = null) {
+  if (!raw.includes(V3_CALL_BEGIN)) return { text: raw, calls: [], malformed: false };
+  const calls = [];
+  let malformed = false;
+  const fences = fencedRanges(raw);
+  for (const match of raw.matchAll(V3_CALL)) {
+    // A sentinel block quoted in a code fence is an example, not a call.
+    if (insideRanges(match.index, fences)) continue;
+    const name = canonicalToolName(match[1].trim(), toolNames);
+    if (!name) {
+      malformed = true;
+      continue;
+    }
+    const body = match[2].replace(/```[^\n]*\n?|```/g, "").trim();
+    const parsed = body ? parseLooseJson(body) : {};
+    if (!isPlainObject(parsed)) {
+      malformed = true;
+      continue;
+    }
+    calls.push(makeCall(name, parsed));
+  }
+  // Everything from the block's opening sentinel onward is markup or call body.
+  const start = raw.search(new RegExp(`<?(?:${V3_CALLS_BEGIN}|${V3_CALL_BEGIN})`));
+  if (start >= 0 && insideRanges(start, fences)) return { text: raw, calls, malformed };
+  const text = (start >= 0 ? raw.slice(0, start) : raw).replace(V3_ANY, "");
+  return { text: text.trim(), calls, malformed };
 }
 
 /** Dialect 2: DSML (or plain) invoke/parameter markup. */
-export function parseDsml(raw) {
+export function parseDsml(raw, toolNames = null) {
   const text = normalizeDsml(raw);
   const calls = [];
   const spans = [];
+  let malformedInvoke = false;
 
   const fences = fencedRanges(text);
   for (const match of text.matchAll(INVOKE)) {
     if (insideRanges(match.index, fences)) continue;
-    const name = match[1].trim();
+    const name = canonicalToolName(match[1].trim(), toolNames);
+    if (!name) {
+      // An invoke for a tool the request does not have is a broken call. Drop it so
+      // its markup stays out of the answer, and flag the reply.
+      malformedInvoke = true;
+      spans.push([match.index, match.index + match[0].length]);
+      continue;
+    }
     const args = {};
     for (const param of match[2].matchAll(PARAMETER)) {
       const key = param[1];
@@ -270,12 +419,12 @@ export function parseDsml(raw) {
         }
       }
     }
-    if (name) calls.push(makeCall(name, unwrapArguments(args), match[0]));
+    calls.push(makeCall(name, unwrapArguments(args)));
     spans.push([match.index, match.index + match[0].length]);
   }
 
   const cleaned = removeSpans(text, spans).replace(WRAPPER_TAGS, "").trim();
-  return { text: cleaned, calls };
+  return { text: cleaned, calls, malformedInvoke };
 }
 
 /**
@@ -298,12 +447,12 @@ function parseBareCalls(raw, toolNames) {
   const calls = [];
   for (const item of items) {
     if (!isPlainObject(item) || typeof item.name !== "string") return null;
-    const name = item.name.trim();
-    if (!toolNames.has(name)) return null;
+    const name = canonicalToolName(item.name.trim(), toolNames);
+    if (!name) return null;
     const payload = item.arguments ?? item.parameters ?? item.input;
     const args = typeof payload === "string" ? parseLooseJson(payload) : payload;
     if (!isPlainObject(args)) return null;
-    calls.push(makeCall(name, args, JSON.stringify(item)));
+    calls.push(makeCall(name, args));
   }
   return calls;
 }
@@ -325,11 +474,29 @@ export function trimCodeBlocks(raw) {
 }
 
 /** Strips leftover markup that survived both dialects. */
+// History lines the model sometimes echoes back. They start a line and run to its end.
+const HISTORY_ECHO = /^(?:Assistant called tool |Tool result \([^)\n]*\): ).*$/gm;
+
 function sweepMarkup(raw) {
   return raw
     .replace(new RegExp(`<\\/?${DSML}[^>]*>`, "g"), "")
-    .replace(/<\/?tool_calls?\s*>/gi, "")
+    .replace(/<\/?tool_calls\s*>/gi, "")
+    .replace(/<\/tool_call\s*>/gi, "")
+    .replace(/<tool_call\s*>(?=\s*\{)/gi, "")
+    .replace(/```[^\n]*\n\s*```/g, "")
     .trim();
+}
+
+/** Removes a closed <think> block only outside code fences, where it is a real leftover. */
+function removeClosedThinks(text) {
+  const fences = fencedRanges(text);
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, (block, offset) => (insideRanges(offset, fences) ? block : ""));
+}
+
+/** Drops echoed history lines that sit outside code fences, where they are not quoted examples. */
+function removeHistoryEchoes(text) {
+  const fences = fencedRanges(text);
+  return text.replace(HISTORY_ECHO, (line, offset) => (insideRanges(offset, fences) ? line : ""));
 }
 
 /**
@@ -367,10 +534,11 @@ function makeIdsUnique(calls) {
  */
 export function parseReply(raw, { toolNames = null } = {}) {
   const normalized = normalizeDsml(raw);
-  const tagged = parseTaggedCalls(normalized);
-  const dsml = parseDsml(tagged.text);
+  const native = parseNativeV3(normalized, toolNames);
+  const tagged = parseTaggedCalls(native.text, toolNames);
+  const dsml = parseDsml(tagged.text, toolNames);
 
-  let calls = makeIdsUnique([...tagged.calls, ...dsml.calls]);
+  let calls = makeIdsUnique([...native.calls, ...tagged.calls, ...dsml.calls]);
   let body = dsml.text;
   if (calls.length === 0) {
     const bare = parseBareCalls(body, toolNames);
@@ -380,9 +548,9 @@ export function parseReply(raw, { toolNames = null } = {}) {
     }
   }
 
-  const cut = cutAtLeftoverMarkup(body);
-  const malformed = cut.dangling && calls.length === 0;
-  let text = sweepMarkup(cut.text);
+  const cut = cutAtLeftoverMarkup(removeClosedThinks(body));
+  const malformed = (cut.dangling || native.malformed || tagged.malformedTag || dsml.malformedInvoke) && calls.length === 0;
+  let text = sweepMarkup(removeHistoryEchoes(cut.text));
   if (calls.length > 0) text = trimCodeBlocks(text);
 
   return { text, calls, malformed };

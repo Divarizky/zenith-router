@@ -360,7 +360,13 @@ export function buildErrorResponse(res, bodyText, targetFormat) {
   }
   const headers = { "Content-Type": "application/json" };
   // Clients back off on Retry-After; the gate labels say why a route was refused.
-  for (const name of ["retry-after", "x-opencode-gate", "x-opencode-log-id", "x-zenith-auth-expired"]) {
+  for (const name of [
+    "retry-after",
+    "x-opencode-gate",
+    "x-opencode-log-id",
+    "x-zenith-auth-expired",
+    "x-zenith-error",
+  ]) {
     const value = res.headers?.get?.(name);
     if (value) headers[name] = value;
   }

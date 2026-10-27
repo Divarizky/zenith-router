@@ -20,7 +20,7 @@ import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
 import deepseekWeb from "./registry/deepseek-web.js";
-import omnirush from "./registry/omnirush.js";
+import duckduckgoWeb from "./registry/duckduckgo-web.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
 
@@ -100,7 +100,7 @@ const REGISTRY = [
   ovhcloud,
   xkiro,
   deepseekWeb,
-  omnirush,
+  duckduckgoWeb,
 ];
 
 const providerMap = new Map();

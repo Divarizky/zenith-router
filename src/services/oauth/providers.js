@@ -1,13 +1,7 @@
 import crypto from "node:crypto";
-import os from "node:os";
 import { proxyFetch } from "../../executors/proxy.js";
 import { antigravityUserAgent } from "../antigravityIdentity.js";
 import { claudeUserAgent } from "../claudeIdentity.js";
-import {
-  getOmnirushDeviceHeaders,
-  buildUpdateRequiredMessage,
-} from "../../executors/omnirush.js";
-import { getConnections } from "../../db/index.js";
 
 // Login flows for OAuth providers, ported from the upstream OAuth provider definitions.
 // Client ids are the public ones shipped in each vendor's own CLI/IDE.
@@ -138,12 +132,6 @@ export const OAUTH_CONFIG = {
     businessLoginUrl: "https://api.z.ai/api/auth/z/login",
     apiBaseUrl: "https://api.z.ai",
     planApiKeyName: "zcode-api-key",
-  },
-  omnirush: {
-    origin: "https://omnirush.ai/omnirush",
-    authorizeUrl: "https://omnirush.ai/omnirush/device/authorize",
-    tokenUrl: "https://omnirush.ai/omnirush/device/token",
-    refreshUrl: "https://omnirush.ai/omnirush/device/refresh",
   },
 };
 
@@ -716,127 +704,7 @@ async function resolveGlmPlanApiKey(zaiToken, { proxyUrl = null } = {}) {
   return `${apiKey}.${secret.secretKey.trim()}`;
 }
 
-function isOmnirushHost(candidate) {
-  if (typeof candidate !== "string" || !candidate) return false;
-  try {
-    const u = new URL(candidate);
-    const h = u.hostname.toLowerCase();
-    return h === "omnirush.ai" || h.endsWith(".omnirush.ai");
-  } catch {
-    return false;
-  }
-}
-
-const omnirush = {
-  flowType: "device_code",
-  async start({ proxyUrl = null } = {}) {
-    // Pengaman: batasi satu akun Omnirush per instalasi
-    const existing = getConnections("omnirush");
-    if (existing && existing.length > 0) {
-      throw new Error("Hanya satu akun Omnirush yang diperbolehkan. Hapus akun yang ada terlebih dahulu.");
-    }
-
-    const cfg = OAUTH_CONFIG.omnirush;
-    const hostname = os.hostname ? os.hostname() : "localhost";
-    const deviceName = `zenith-router di ${hostname}`;
-    const payload = {
-      device_name: deviceName,
-      platform: process.platform,
-    };
-
-    const headers = getOmnirushDeviceHeaders({ "Content-Type": "application/json" });
-    const res = await oauthFetch(cfg.authorizeUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    }, { proxyUrl });
-
-    if (res.status === 426) {
-      throw new Error(buildUpdateRequiredMessage());
-    }
-    if (res.status === 429) {
-      throw new Error("Terlalu banyak permintaan login ke Omnirush. Coba lagi beberapa saat lagi.");
-    }
-    const d = await readJson(res, "Omnirush device authorize");
-
-    // Validasi URL verifikasi harus domain omnirush.ai
-    const uri = d.verification_uri_complete || d.verification_uri || "https://omnirush.ai/console";
-    if (!isOmnirushHost(uri)) {
-      throw new Error(`URL verifikasi Omnirush mencurigakan: ${uri}`);
-    }
-
-    return {
-      deviceCode: d.device_code,
-      userCode: d.user_code || d.device_code,
-      verificationUri: uri,
-      expiresIn: d.expires_in || 600,
-      interval: d.interval || 5,
-    };
-  },
-
-  async poll({ deviceCode, interval = 5, proxyUrl = null }) {
-    const cfg = OAUTH_CONFIG.omnirush;
-    const headers = getOmnirushDeviceHeaders({ "Content-Type": "application/json" });
-    const res = await oauthFetch(cfg.tokenUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ device_code: deviceCode }),
-    }, { proxyUrl });
-
-    // 428 Precondition Required: authorization_pending
-    if (res.status === 428) return { pending: true };
-
-    // 429 atau slow_down: tambah interval
-    if (res.status === 429) {
-      return { pending: true, interval: Math.min((interval || 5) + 5, 30) };
-    }
-
-    if (res.status === 426) {
-      return { error: buildUpdateRequiredMessage() };
-    }
-
-    let d;
-    try {
-      d = await res.json();
-    } catch {
-      d = {};
-    }
-
-    if (d?.detail === "authorization_pending") return { pending: true };
-    if (d?.detail === "slow_down") {
-      return { pending: true, interval: Math.min((interval || 5) + 5, 30) };
-    }
-    if (d?.detail === "expired_token" || (res.status === 400 && d?.detail === "expired_token")) {
-      return { error: "Kode verifikasi Omnirush telah kedaluwarsa. Silakan mulai ulang login." };
-    }
-    if (res.status === 403) {
-      return { error: d?.detail ? `Akses Omnirush ditolak: ${d.detail}` : "Login Omnirush ditolak oleh server." };
-    }
-
-    if (!res.ok) {
-      return { error: d?.detail || d?.error || `Omnirush poll gagal (HTTP ${res.status})` };
-    }
-
-    if (!d.access_token) {
-      return { error: "Respons Omnirush tidak memuat access_token" };
-    }
-
-    const gatewayUrl = isOmnirushHost(d.gateway_url) ? d.gateway_url : undefined;
-
-    return {
-      tokens: {
-        access_token: d.access_token,
-        refresh_token: d.refresh_token || null,
-        extra: {
-          device_code: deviceCode,
-          ...(gatewayUrl ? { gateway_url: gatewayUrl } : {}),
-        },
-      },
-    };
-  },
-};
-
-export const OAUTH_FLOWS = { claude, codex, antigravity, cline, github, kilocode, kiro, glm, omnirush };
+export const OAUTH_FLOWS = { claude, codex, antigravity, cline, github, kilocode, kiro, glm };
 
 export function getOAuthFlow(providerId) {
   return OAUTH_FLOWS[providerId] || null;

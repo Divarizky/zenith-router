@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { addConnection, getConnections } from "../../db/index.js";
+import { addConnection } from "../../db/index.js";
 import { getProvider } from "../../providers/index.js";
 import { getOAuthFlow } from "./providers.js";
 
@@ -46,12 +46,6 @@ function finish(flow, patch) {
 /** Store tokens from any login method as an oauth connection. Returns the account name. */
 export function saveOAuthConnection(providerId, tokens, { name, proxyUrl } = {}) {
   const provider = getProvider(providerId);
-  if (provider?.singleAccount) {
-    const existing = getConnections(provider.id);
-    if (existing && existing.length > 0) {
-      throw new Error(`Hanya satu akun ${provider.name} yang diperbolehkan. Hapus akun yang ada terlebih dahulu.`);
-    }
-  }
   const expiresAt =
     tokens.expires_at || (Number(tokens.expires_in) > 0 ? Date.now() + Number(tokens.expires_in) * 1000 : undefined);
   const credentials = { access_token: tokens.access_token };
@@ -79,12 +73,6 @@ export async function startOAuthFlow({ providerId, origin, name, proxyUrl }) {
   const provider = getProvider(providerId);
   const impl = provider && getOAuthFlow(provider.id);
   if (!impl) throw new Error("Provider ini tidak mendukung login OAuth.");
-  if (provider?.singleAccount) {
-    const existing = getConnections(provider.id);
-    if (existing && existing.length > 0) {
-      throw new Error(`Hanya satu akun ${provider.name} yang diperbolehkan. Hapus akun yang ada terlebih dahulu.`);
-    }
-  }
 
   const flowId = crypto.randomBytes(16).toString("base64url");
   const flow = {

@@ -19,7 +19,7 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 
 **Akun dan provider**
 
-- 22 provider dengan empat jenis autentikasi: OAuth, API key, free tier tanpa login, dan token sesi browser untuk provider yang hanya punya antarmuka web
+- 23 provider dengan empat jenis autentikasi: OAuth, API key, free tier tanpa login, dan token sesi browser untuk provider yang hanya punya antarmuka web
 - Login OAuth lewat browser dengan callback lokal, login device code, import kredensial dari CLI yang sudah terpasang, dan tempel token manual
 - Proxy HTTP/HTTPS per akun dengan kunci single-flight saat refresh token
 - Sinkronisasi model gratis otomatis dan berkala
@@ -70,14 +70,12 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 | `tg` | Together AI | API key | — |
 | `ol` | Ollama Cloud | API key | — |
 | `l7` | LLM7 | API key | — |
+| `ddgw` | DuckDuckGo AI Chat | Free tier tanpa login | — |
 | `dsw` | DeepSeek Web Chat | Token sesi web | — |
-| `omnirush` | Omnirush | OAuth / device code | — |
 
-Alias lengkap tanpa prefix pendek juga diterima, misalnya `mistral/mistral-large-latest` atau `or-rush/gpt-6-astra`.
+Alias lengkap tanpa prefix pendek juga diterima, misalnya `mistral/mistral-large-latest`.
 
 `dsw` tidak memakai API resmi DeepSeek. Provider ini membaca token dari sesi chat.deepseek.com, tidak aktif sampai Anda menambahkan akun sendiri, dan memakai akun tersebut dengan risiko pemblokiran. Rincian ada di [Provider DeepSeek Web](#provider-deepseek-web-chat).
-
-`omnirush` mengemulasikan identitas klien CLI resmi Omnirush. Provider ini melanggar ketentuan Fair use Omnirush (larangan klien kustom/wrapper pihak ketiga), sesi percakapan dipakai Omnirush untuk training, dan akun berisiko ditutup otomatis oleh sistem mereka. Nonaktif secara default sampai Anda menambahkan akun pribadi secara sadar. Batas maksimal 1 akun per instalasi.
 
 ## Kebutuhan Sistem
 

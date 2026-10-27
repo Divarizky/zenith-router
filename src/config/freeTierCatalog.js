@@ -19,6 +19,8 @@ export const FREE_TIER_TOS = {
   mistral: "caution",
   xkiro: "caution",
   ovhcloud: "ok",
+  // duck.ai privacy terms forbid automated querying and building services on it.
+  "duckduckgo-web": "avoid",
 };
 
 export function computeFreeTierTotals({ excludeTosAvoid = false } = {}) {

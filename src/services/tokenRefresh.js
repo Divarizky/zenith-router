@@ -1,8 +1,7 @@
-import { getConnectionById, getConnections, mergeConnectionCredentials, updateConnection } from "../db/index.js";
+import { getConnectionById, getConnections, mergeConnectionCredentials } from "../db/index.js";
 import { logQuiet } from "./logger.js";
 import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn } from "./oauth/providers.js";
 import { requireResolvedProxy } from "./proxyPools.js";
-import { getOmnirushDeviceHeaders, buildUpdateRequiredMessage } from "../executors/omnirush.js";
 
 let customTokenRefresher = null;
 const inFlightRefreshes = new Map();
@@ -32,8 +31,6 @@ export function canRefresh(connection) {
  */
 export function needsTokenRefresh(connection) {
   if (!canRefresh(connection)) return false;
-  // Omnirush melarang polling proaktif latar belakang; refresh hanya dilakukan reaktif saat request
-  if (connection.provider === "omnirush") return false;
   const creds = connection.credentials;
 
   // If no expires_at is set, assume it doesn't need proactive refresh unless reactive 401 triggers
@@ -196,92 +193,6 @@ const REFRESHERS = {
     const copilot = await fetchCopilotToken(ghToken, { proxyUrl });
     return { access_token: copilot.token, expires_at: copilot.expiresAt, github_token: ghToken };
   },
-
-  async omnirush(creds, proxyUrl, connection) {
-    const cfg = OAUTH_CONFIG.omnirush;
-    const refreshToken = creds.refresh_token;
-    if (!refreshToken) {
-      throw new Error("Koneksi Omnirush tidak memiliki refresh token");
-    }
-
-    const headers = getOmnirushDeviceHeaders({
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    });
-
-    const timeoutMs = refreshTimeoutMs;
-    const signal = AbortSignal.timeout(timeoutMs);
-
-    let res;
-    try {
-      res = await oauthFetch(
-        cfg.refreshUrl,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ refresh_token: refreshToken }),
-          signal,
-        },
-        { proxyUrl }
-      );
-    } catch (err) {
-      if (signal.aborted) throw new Error(`Omnirush refresh timed out after ${timeoutMs}ms`);
-      throw err;
-    }
-
-    if (res.status === 426) {
-      throw new Error(buildUpdateRequiredMessage());
-    }
-
-    let payload = null;
-    try {
-      payload = await res.json();
-    } catch {
-      payload = {};
-    }
-
-    if (!res.ok) {
-      const detail = payload?.detail || payload?.error || `HTTP ${res.status}`;
-      // 401: refresh_token_invalid_or_expired
-      // 409: refresh_token_already_used (deteksi kredensial dibagi atau race)
-      // 403: account_inactive|account_pending|account_rejected
-      if (res.status === 401 || res.status === 409) {
-        if (connection?.id) {
-          try {
-            updateConnection(connection.id, { is_active: 0 });
-          } catch {}
-        }
-        const reason =
-          res.status === 409
-            ? "Refresh token Omnirush sudah pernah digunakan (deteksi race/kredensial dibagi). Akun dinonaktifkan, silakan login ulang."
-            : `Sesi login Omnirush tidak lagi valid (${detail}). Akun dinonaktifkan, silakan login ulang.`;
-        throw new Error(reason);
-      }
-      if (res.status === 403) {
-        if (connection?.id) {
-          try {
-            updateConnection(connection.id, { is_active: 0 });
-          } catch {}
-        }
-        throw new Error(`Akun Omnirush ditolak atau tidak aktif: ${detail}`);
-      }
-      throw new Error(`Omnirush refresh gagal (HTTP ${res.status}): ${detail}`);
-    }
-
-    const nextAccessToken = payload.access_token;
-    const nextRefreshToken = payload.refresh_token;
-
-    if (!nextAccessToken || !nextRefreshToken) {
-      throw new Error("Respons refresh Omnirush tidak memuat pasangan access_token dan refresh_token baru");
-    }
-
-    return {
-      access_token: nextAccessToken,
-      refresh_token: nextRefreshToken,
-      expires_at: Date.now() + 3600 * 1000,
-      ...(payload.gateway_url ? { gateway_url: payload.gateway_url } : {}),
-    };
-  },
 };
 
 /**
@@ -290,7 +201,7 @@ const REFRESHERS = {
 async function defaultRefreshHandler(connection) {
   const refresher = REFRESHERS[connection.provider];
   if (!refresher) throw new Error(`Token refresh is not supported for ${connection.provider}`);
-  return refresher(connection.credentials || {}, requireResolvedProxy(connection), connection);
+  return refresher(connection.credentials || {}, requireResolvedProxy(connection));
 }
 
 /**

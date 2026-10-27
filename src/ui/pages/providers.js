@@ -800,7 +800,7 @@ function accountProxyCell(c, id, pools) {
   }
   return `
             ${label}
-            <form action="/dashboard/providers/accounts/set-proxy" method="POST" style="display: flex; gap: 0.35rem; margin-top: 0.4rem; flex-wrap: wrap;">
+            <form action="/dashboard/providers/accounts/set-proxy" method="POST" class="account-proxy-form">
               <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
               <input type="hidden" name="provider" value="${id}" />
               <select name="proxy_choice">
@@ -813,7 +813,7 @@ function accountProxyCell(c, id, pools) {
                   .join("")}
                 <option value="manual" ${!c.proxy_pool_id && c.proxy_url ? "selected" : ""}>Manual…</option>
               </select>
-              <input type="text" name="proxy_url" placeholder="alamat manual baru" style="min-width: 9rem;" />
+              <input type="text" name="proxy_url" placeholder="alamat manual baru" />
               <button type="submit" class="btn btn-sm">Simpan</button>
             </form>`;
 }
@@ -874,10 +874,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
               ${hidden}
               <button type="submit" class="btn btn-sm">Periksa sesi</button>
             </form>
-            <form action="/dashboard/providers/accounts/update-session" method="POST">
+            <form action="/dashboard/providers/accounts/update-session" method="POST" class="account-session-form">
               ${hidden}
-              <input type="password" name="token" placeholder="token baru" required autocomplete="off" style="min-width: 9rem;" />
-              <input type="text" name="cookies" placeholder="cookies (opsional)" autocomplete="off" style="min-width: 9rem;" />
+              <input type="password" name="token" placeholder="token baru" required autocomplete="off" />
+              <input type="text" name="cookies" placeholder="cookies (opsional)" autocomplete="off" />
               <button type="submit" class="btn btn-sm">Perbarui sesi</button>
             </form>`
           : "";
@@ -907,7 +907,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   } else if (accounts.length === 0) {
     accountsBody = `<div class="empty"><p class="big"><span class="pill pill-muted">Belum ada akun</span></p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
-    accountsBody = `<table>
+    accountsBody = `<table class="accounts-table">
         <thead><tr><th title="Akun #1 dipakai duluan; akun berikutnya hanya saat akun di atasnya tidak tersedia">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th title="Request berjalan / batas per akun. Angka diambil saat halaman dimuat.">Slot</th>${isSession ? "<th>Sesi</th>" : ""}<th></th></tr></thead>
         <tbody>${accountRows}</tbody>
       </table>${

@@ -565,6 +565,69 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     tbody tr:hover { background: var(--surface-2); }
     tr:last-child td { border-bottom: none; }
 
+    /* ===== Accounts Table ===== */
+    .accounts-table td { word-break: break-word; }
+    .accounts-table .account-proxy-form {
+      display: flex;
+      gap: 0.35rem;
+      margin-top: 0.35rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .accounts-table .account-proxy-form select {
+      width: auto;
+      max-width: 130px;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+      height: 28px;
+    }
+    .accounts-table .account-proxy-form input[type="text"] {
+      width: auto;
+      min-width: 7rem;
+      max-width: 140px;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+      height: 28px;
+    }
+    .accounts-table .account-proxy-form .btn {
+      height: 28px;
+      padding: 0.2rem 0.6rem;
+      display: inline-flex;
+      align-items: center;
+    }
+    .accounts-table td.actions {
+      white-space: normal;
+      text-align: right;
+    }
+    .accounts-table td.actions form {
+      margin: 0.15rem 0 0.15rem 0.35rem;
+      vertical-align: middle;
+    }
+    .accounts-table td.actions form:first-child {
+      margin-left: 0;
+    }
+    .accounts-table .account-session-form {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .accounts-table .account-session-form input {
+      width: 7.5rem;
+      max-width: 9rem;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+      height: 28px;
+    }
+    .accounts-table .account-session-form .btn,
+    .accounts-table td.actions .btn {
+      height: 28px;
+      padding: 0.2rem 0.6rem;
+      display: inline-flex;
+      align-items: center;
+    }
+
     /* ===== Settings ===== */
     .setting-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; padding: 1.1rem 0; border-bottom: var(--bw) solid var(--border-subtle); }
     .setting-row:last-child { border-bottom: none; }

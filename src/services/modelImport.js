@@ -73,14 +73,20 @@ function payloadSaysFree(m) {
 
 function cleanClineDisplayName(rawName, id) {
   let name = rawName || id || "";
-  if (!name.startsWith("cline-free/")) return name;
-  const stripped = name.slice("cline-free/".length);
-  return stripped
-    .split("-")
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
-    .join(" ")
-    .replace(/\bVl\b/i, "VL")
-    .trim() || stripped;
+  for (const prefix of ["cline-free/", "cline-pass/", "cline-cloud/"]) {
+    if (name.startsWith(prefix)) {
+      const stripped = name.slice(prefix.length);
+      const tag = prefix === "cline-pass/" ? " (ClinePass)" : prefix === "cline-cloud/" ? " (ClineCloud)" : "";
+      const formatted = stripped
+        .split("-")
+        .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+        .join(" ")
+        .replace(/\bVl\b/i, "VL")
+        .trim() || stripped;
+      return `${formatted}${tag}`;
+    }
+  }
+  return name;
 }
 
 /**
@@ -92,15 +98,25 @@ const IMPORTERS = {
   cline: {
     url: "https://api.cline.bot/api/v1/ai/cline/recommended-models",
     public: true,
-    // The public feed publishes the free tier in a `free` array; the same
-    // models also appear under `cline-free/` in the `recommended` list.
+    // The feed publishes `recommended`, `free`, `clinePass`, and `clineCloud`.
+    // All sections are merged so users can access the full catalog.
     modes: ["all", "free"],
     parse: (json) => {
       const free = Array.isArray(json?.free) ? json.free : [];
       const freeIds = new Set(free.map((m) => m.id));
-      const all = [...(Array.isArray(json?.recommended) ? json.recommended : [])];
-      for (const m of free) if (!all.some((r) => r.id === m.id)) all.push(m);
-      return all.map((m) => ({
+      const pool = [
+        ...(Array.isArray(json?.recommended) ? json.recommended : []),
+        ...free,
+        ...(Array.isArray(json?.clinePass) ? json.clinePass : []),
+        ...(Array.isArray(json?.clineCloud) ? json.clineCloud : []),
+      ];
+      const byId = new Map();
+      for (const m of pool) {
+        if (m && typeof m.id === "string" && m.id && !byId.has(m.id)) {
+          byId.set(m.id, m);
+        }
+      }
+      return Array.from(byId.values()).map((m) => ({
         id: m.id,
         name: cleanClineDisplayName(m.name, m.id),
         isFree: freeIds.has(m.id) || String(m.id).startsWith("cline-free/"),

@@ -25,10 +25,13 @@ export default {
       "X-Title": "Cline",
     },
   },
+  // Disamakan dengan array `recommended` pada feed recommended-models (27-10-2026).
+  // Entri `free` tidak didaftarkan di sini karena masuk lewat freeModelSync;
+  // `clinePass` dan `clineCloud` berbayar dan belum didukung.
   models: [
     { id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5" },
+    { id: "google/gemini-4-argon", name: "Gemini 4 Argon" },
     { id: "anthropic/claude-opus-5.5", name: "Claude Opus 5.5" },
-    { id: "spacexai/grok-4.7", name: "Grok 4.7" },
     { id: "openai/gpt-6-astra", name: "GPT-6 Astra" },
     { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol" },
     { id: "moonshotai/kimi-k3", name: "Kimi K3" },

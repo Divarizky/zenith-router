@@ -277,3 +277,72 @@ test("commandcode import - full import writes imported rows without an account",
     ["stealth/glyph-cluster:free", "xai/grok-4.7"]
   );
 });
+
+const CLINE_FEED = {
+  recommended: [
+    { id: "anthropic/claude-sonnet-5.5", name: "claude-sonnet-5.5" },
+    { id: "google/gemini-4-argon", name: "Gemini 4 Argon" },
+  ],
+  free: [
+    { id: "reflection/beam-free", name: "Beam" },
+    { id: "cline-free/solar-mini4", name: "cline-free/solar-mini4" },
+  ],
+  clinePass: [
+    { id: "cline-pass/deepseek-v4.1-flash", name: "cline-pass/deepseek-v4.1-flash" },
+    { id: "cline-pass/qwen3.8-max", name: "cline-pass/qwen3.8-max" },
+  ],
+  clineCloud: [
+    { id: "cline-cloud/deepseek-v4.1-flash", name: "cline-cloud/deepseek-v4.1-flash" },
+  ],
+};
+
+test("cline import - importer absorbs recommended, free, clinePass, and clineCloud arrays", async () => {
+  const { getImporter } = await import("../src/services/modelImport.js");
+  const importer = getImporter("cline");
+  assert.ok(importer, "importer cline terdaftar");
+  assert.strictEqual(importer.public, true);
+
+  const parsed = importer.parse(CLINE_FEED);
+  const ids = parsed.map((m) => m.id);
+  assert.deepStrictEqual(ids, [
+    "anthropic/claude-sonnet-5.5",
+    "google/gemini-4-argon",
+    "reflection/beam-free",
+    "cline-free/solar-mini4",
+    "cline-pass/deepseek-v4.1-flash",
+    "cline-pass/qwen3.8-max",
+    "cline-cloud/deepseek-v4.1-flash",
+  ]);
+
+  const freeMap = Object.fromEntries(parsed.map((m) => [m.id, m.isFree]));
+  assert.strictEqual(freeMap["reflection/beam-free"], true);
+  assert.strictEqual(freeMap["cline-free/solar-mini4"], true);
+  assert.strictEqual(freeMap["anthropic/claude-sonnet-5.5"], false);
+  assert.strictEqual(freeMap["cline-pass/deepseek-v4.1-flash"], false);
+  assert.strictEqual(freeMap["cline-cloud/deepseek-v4.1-flash"], false);
+
+  const names = Object.fromEntries(parsed.map((m) => [m.id, m.name]));
+  assert.strictEqual(names["cline-free/solar-mini4"], "Solar Mini4");
+  assert.strictEqual(names["cline-pass/deepseek-v4.1-flash"], "Deepseek V4.1 Flash (ClinePass)");
+  assert.strictEqual(names["cline-cloud/deepseek-v4.1-flash"], "Deepseek V4.1 Flash (ClineCloud)");
+});
+
+test("cline import - full import writes non-builtin models to database", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream(CLINE_FEED);
+
+  const res = await importProviderModels("cline", "all");
+  assert.strictEqual(res.code, "imported");
+  const imported = listImportedModels("cline");
+  const importedIds = imported.map((m) => m.model_id);
+
+  // Model yang sudah terdaftar di registry static (claude-sonnet-5.5, gemini-4-argon)
+  // tidak dimasukkan ulang ke imported_models.
+  assert.ok(!importedIds.includes("anthropic/claude-sonnet-5.5"));
+  assert.ok(importedIds.includes("reflection/beam-free"));
+  assert.ok(importedIds.includes("cline-free/solar-mini4"));
+  assert.ok(importedIds.includes("cline-pass/deepseek-v4.1-flash"));
+  assert.ok(importedIds.includes("cline-pass/qwen3.8-max"));
+  assert.ok(importedIds.includes("cline-cloud/deepseek-v4.1-flash"));
+});

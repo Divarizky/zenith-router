@@ -268,16 +268,26 @@ test("openrouter sync - public model list merges free models without requiring a
   assert.ok(!routed.includes("or/other/paid-model"));
 });
 
-test("ollama sync - public cloud model list merges free cloud models without requiring an account", async (t) => {
+test("ollama sync - the public list is filtered by what a free key can actually call", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
-  mockUpstream({ "ollama.com": { payload: { data: [{ id: "gpt-oss:120b", pricing: { prompt: "0", completion: "0" } }, { id: "mistral-large-4", pricing: { prompt: "0", completion: "0" } }] } } });
+  // The real /v1/models carries no pricing fields, so a listed id is no proof of
+  // being free: gemma3:4b answers 402 on a free key and glm-5.3 is paid. Only
+  // gpt-oss:20b from this payload is callable without credits.
+  mockUpstream({
+    "ollama.com": {
+      payload: {
+        data: [{ id: "gpt-oss:20b" }, { id: "gemma3:4b" }, { id: "glm-5.3" }],
+      },
+    },
+  });
 
-  assert.deepStrictEqual(await syncFreeModels("ollama"), { code: "synced", count: 2 });
+  assert.deepStrictEqual(await syncFreeModels("ollama"), { code: "synced", count: 1 });
   const routed = ids();
-  assert.ok(routed.includes("ol/kimi-k3"), "hardcoded models stay");
-  assert.ok(routed.includes("ol/gpt-oss:120b"));
-  assert.ok(routed.includes("ol/mistral-large-4"));
+  assert.ok(routed.includes("ol/gemma4:31b"), "hardcoded models stay");
+  assert.ok(routed.includes("ol/gpt-oss:20b"), "a callable free-plan model is synced");
+  assert.ok(!routed.includes("ol/gemma3:4b"), "listed upstream but 402 on a free key, so not synced");
+  assert.ok(!routed.includes("ol/glm-5.3"), "a paid model is not synced as free");
 });
 
 test("ovhcloud - free access is account-level credit, so sync is unsupported", async (t) => {

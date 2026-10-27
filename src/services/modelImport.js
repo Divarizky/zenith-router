@@ -13,6 +13,23 @@ const IMPORT_TIMEOUT_MS = 20000;
 // GLM free-tier models from OmniRoute's free model catalog.
 const FREE_GLM = new Set(["glm-4.7-flash", "glm-4.5-flash"]);
 
+// Ollama Cloud models a free-plan key can actually call. Verified 27-10-2026
+// with GET /v1/models plus a real chat completion per id: everything else listed
+// there answers 402 "not included in your free usage", 410 for retired ids, or
+// 403 while a model is still rolling out. Re-check when upstream changes the
+// plan: a model that starts answering 402 must be dropped here, otherwise sync
+// keeps advertising it as free and combos fail at the upstream.
+const FREE_OLLAMA = new Set([
+  "beam",
+  "gemma4:31b",
+  "gemma4:31b-cloud",
+  "gpt-oss:20b",
+  "gpt-oss:120b",
+  "nemotron-3-nano:30b",
+  "nemotron-3-super",
+  "nemotron-3-ultra",
+]);
+
 const ACCESS_CHECK_CONCURRENCY = 5;
 
 /**
@@ -212,9 +229,17 @@ const IMPORTERS = {
     url: "https://ollama.com/v1/models",
     public: true,
     modes: ["all", "free"],
-    // Zen serves the listed models on the free tier and returns no pricing
-    // fields, so every listed model counts as free.
-    parse: (json) => listOf(json).map((m) => ({ id: m.id || m.name, name: m.name || m.id, isFree: true })),
+    // The public list carries no pricing fields, so it cannot say which models a
+    // free key may call; FREE_OLLAMA decides that instead.
+    parse: (json) =>
+      listOf(json).map((m) => {
+        const id = m.id || m.name;
+        return {
+          id,
+          name: m.name || m.id,
+          isFree: payloadSaysFree(m) || FREE_OLLAMA.has(id),
+        };
+      }),
   },
   ovhcloud: {
     url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/models",

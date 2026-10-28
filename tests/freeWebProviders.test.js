@@ -60,3 +60,46 @@ test("models - a retired id reroutes to the same family, then to the default", (
   assert.strictEqual(pickLiveModel("tinfoil/gemma4-31b", live), "gpt-5.4-mini", "unknown family falls back");
   assert.strictEqual(pickLiveModel("anything", null), "anything", "no live list keeps the request");
 });
+
+test("executor - the chat POST carries a reasoningEffort the model lists", async () => {
+  const roster = {
+    models: [
+      { id: "gpt-5.4-mini", supportedReasoningEffort: ["none", "low", "medium"] },
+      { id: "tinfoil/gpt-oss-120b", supportedReasoningEffort: ["low"] },
+      { id: "mistral-small-2603", supportedReasoningEffort: [] },
+    ],
+  };
+  const sent = {};
+  const fakeFetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.endsWith("/duckchat/v1/models")) return Response.json(roster);
+    if (target.endsWith("/duckchat/v1/chat")) {
+      const body = JSON.parse(options.body);
+      sent[body.model] = body;
+      return new Response('data: {"message":"hi"}\n\ndata: [DONE]\n\n', { status: 200 });
+    }
+    return new Response("", { status: 200 });
+  };
+  const { DuckDuckGoWebExecutor } = await import("../src/executors/duckduckgoWeb.js");
+  const executor = new DuckDuckGoWebExecutor();
+  // Skip the live challenge: it needs the real upstream.
+  executor.session.warm = async () => {};
+  executor.session.acquireChallenge = async () => ({
+    status: 200,
+    vqd4: null,
+    challenge: Buffer.from("(() => ({ client_hashes: ['a'], meta: {} }))()", "utf8").toString("base64"),
+  });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeFetch;
+  try {
+    for (const model of ["gpt-5.4-mini", "tinfoil/gpt-oss-120b", "mistral-small-2603"]) {
+      const res = await executor.execute({ body: { messages: [{ role: "user", content: "hi" }] }, stream: false, targetModel: model });
+      assert.strictEqual(res.status, 200);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.strictEqual(sent["gpt-5.4-mini"].reasoningEffort, "none", "none exists, so it is used");
+  assert.strictEqual(sent["tinfoil/gpt-oss-120b"].reasoningEffort, "low", "none is absent, so the first listed effort is used");
+  assert.ok(!("reasoningEffort" in sent["mistral-small-2603"]), "a model without efforts takes no field");
+});

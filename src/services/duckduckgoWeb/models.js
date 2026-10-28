@@ -35,7 +35,7 @@ export const DUCKDUCKGO_STATIC_MODELS = [
 ];
 
 const MODEL_IDS_CACHE_TTL_MS = 10 * 60 * 1000;
-let cache = { at: 0, ids: null };
+let cache = { at: 0, ids: null, efforts: new Map() };
 
 /** Live roster, cached briefly so a combo fan-out does not refetch per request. */
 export async function fetchDuckDuckGoModelIds(fetchFn = globalThis.fetch, headers = {}) {
@@ -44,9 +44,13 @@ export async function fetchDuckDuckGoModelIds(fetchFn = globalThis.fetch, header
     const res = await fetchFn(DUCKDUCKGO_MODELS_URL, { headers });
     if (!res.ok) return cache.ids;
     const json = await res.json();
-    const ids = new Set((json?.models ?? []).map((m) => m?.id).filter((id) => typeof id === "string"));
+    const models = (json?.models ?? []).filter((m) => typeof m?.id === "string");
+    const ids = new Set(models.map((m) => m.id));
     if (ids.size > 0) {
-      cache = { at: Date.now(), ids };
+      const efforts = new Map(
+        models.map((m) => [m.id, Array.isArray(m.supportedReasoningEffort) ? m.supportedReasoningEffort : []])
+      );
+      cache = { at: Date.now(), ids, efforts };
       return ids;
     }
   } catch {
@@ -69,4 +73,18 @@ export function pickLiveModel(requested, liveIds) {
   }
   if (liveIds.has("gpt-5.4-mini")) return "gpt-5.4-mini";
   return [...liveIds][0];
+}
+
+/**
+ * The chat POST answers 400 ERR_BAD_REQUEST when `reasoningEffort` is missing for a
+ * model that has efforts, and again when the value is one that model does not list
+ * (gpt-oss-120b has only "low"). Pick "none" where it exists, else the first listed
+ * effort. A model that lists none takes no field at all. Before the roster has been
+ * read, "none" is the value most of the roster accepts.
+ */
+export function pickReasoningEffort(modelId) {
+  const efforts = cache.efforts.get(modelId);
+  if (!efforts) return "none";
+  if (efforts.length === 0) return undefined;
+  return efforts.includes("none") ? "none" : efforts[0];
 }

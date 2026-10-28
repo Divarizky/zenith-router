@@ -23,6 +23,7 @@ import {
   DUCKDUCKGO_USER_AGENT,
   fetchDuckDuckGoModelIds,
   pickLiveModel,
+  pickReasoningEffort,
 } from "../services/duckduckgoWeb/models.js";
 
 const encoder = new TextEncoder();
@@ -165,7 +166,7 @@ class DuckDuckGoSession {
   }
 }
 
-function buildPayload(model, messages) {
+function buildPayload(model, messages, effort) {
   return {
     model,
     // The frontend always sends this map; leaving it out is treated as a non-browser.
@@ -174,6 +175,8 @@ function buildPayload(model, messages) {
     },
     messages,
     canUseTools: false,
+    // Required by the upstream: without it, or with an effort the model does not list, the POST is a 400.
+    ...(effort ? { reasoningEffort: effort } : {}),
     canUseApproxLocation: null,
     canDelegateImageGeneration: null,
   };
@@ -298,7 +301,7 @@ export class DuckDuckGoWebExecutor {
           "x-vqd-hash-1": solved,
           ...(vqd4 ? { "x-vqd-4": vqd4 } : {}),
         }),
-        body: JSON.stringify(buildPayload(model, messages)),
+        body: JSON.stringify(buildPayload(model, messages, pickReasoningEffort(model))),
         signal: merged,
       });
       this.session.absorbCookies(upstream);

@@ -280,7 +280,7 @@ test("e2e - a tool call reaches OpenAI, Claude, and Responses clients", async ()
   assert.strictEqual(upstream.state.completions, 3, "one upstream turn per client request");
 });
 
-test("e2e - four parallel conversations never exceed two upstream completions", async () => {
+test("e2e - four parallel conversations take turns on the single upstream slot", async () => {
   await boot({ delayMs: 150, settings: { "provider_throttle_ms:deepseek-web": "0" } });
 
   const responses = await Promise.all(
@@ -295,7 +295,7 @@ test("e2e - four parallel conversations never exceed two upstream completions", 
 
   for (const res of responses) assert.strictEqual(res.status, 200);
   assert.strictEqual(upstream.state.completions, 4);
-  assert.strictEqual(upstream.state.maxActive, 2, "the third turn waited for a free slot");
+  assert.strictEqual(upstream.state.maxActive, 1, "hanya satu completion upstream berjalan bersamaan");
   assert.strictEqual(upstream.state.sessions, 4, "each conversation owns a chat session");
 });
 

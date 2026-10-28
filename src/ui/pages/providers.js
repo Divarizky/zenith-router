@@ -9,7 +9,7 @@ import {
 } from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionFullyCooledDown } from "../../services/auth.js";
-import { getProviderTraffic } from "../../services/trafficGuard.js";
+import { getProviderTraffic, resolveProviderQueueTimeout } from "../../services/trafficGuard.js";
 import { checkSessionHealth, forgetSessionHealth, getSessionHealth } from "../../services/deepseekWeb/turns.js";
 import { findSessionAccount } from "../../services/deepseekWeb/browserLogin.js";
 import { isConnectionExhausted } from "../../services/quota.js";
@@ -859,6 +859,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
   const globalConcurrency = Number(getSetting("max_account_concurrency", "2")) || 2;
   const effectiveConcurrency = Number(concurrencySetting) || declaredConcurrency || globalConcurrency;
   const concurrencyPlaceholder = declaredConcurrency || globalConcurrency;
+  // A provider that holds its slot for a whole turn declares its own ceiling,
+  // so the hint must not promise the generic 30s it no longer uses.
+  const queueTimeoutMs = resolveProviderQueueTimeout(p.id);
 
   const accountRows = accounts
     .map((c, index) => {
@@ -1069,6 +1072,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
       <div class="card-head">
         <h3>Batas Sesi Paralel</h3>
         <span class="pill">${escapeHtml(String(effectiveConcurrency))} per akun</span>
+        ${traffic.serialTurns ? `<span class="pill pill-info" title="Upstream hanya melayani satu generasi per akun, jadi turn kedua menunggu turn pertama selesai">1 turn bergiliran</span>` : ""}
         ${
           traffic.accounts.length > 0
             ? `<span class="pill${traffic.inFlight >= traffic.cap ? " pill-warning" : ""}">${traffic.inFlight}/${traffic.cap} dipakai</span>
@@ -1082,7 +1086,11 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           <label for="provider-concurrency">Maksimal request serentak per akun</label>
           <input id="provider-concurrency" name="concurrency" type="number" min="1" max="10" step="1" value="${escapeHtml(String(concurrencySetting))}" placeholder="${escapeHtml(String(concurrencyPlaceholder))}" />
         </div>
-        <p class="hint">Batas dihitung per akun, jadi dua akun aktif berarti total dua kali lipat. Request di atas batas menunggu dalam antrean; lewat 30 detik klien menerima 429 dan gateway mencoba akun berikutnya. Panggilan bantu seperti judul sesi menyerah setelah 2 detik agar tidak menahan percakapan. Kosongkan untuk memakai nilai bawaan.</p>
+        <p class="hint">Batas dihitung per akun, jadi dua akun aktif berarti total dua kali lipat. Request di atas batas menunggu dalam antrean; lewat ${escapeHtml(String(Math.round((queueTimeoutMs ?? 30000) / 1000)))} detik klien menerima 429 dan gateway mencoba akun berikutnya. Panggilan bantu seperti judul sesi menyerah setelah 2 detik agar tidak menahan percakapan. Kosongkan untuk memakai nilai bawaan.${
+          traffic.serialTurns
+            ? " Provider ini menyerialkan turn: angka di atas adalah jumlah percakapan yang tetap hangat di upstream, sedangkan turn yang berjalan bersamaan tetap satu per akun dan sisanya menunggu."
+            : ""
+        }</p>
         <div class="modal-actions">
           <button type="submit" class="btn btn-primary">Simpan Batas</button>
         </div>

@@ -148,7 +148,7 @@ test("gateway - a tools request carries the tool contract and streams OpenAI chu
   }
 });
 
-test("gateway - four parallel conversations run at most two turns and the third waits", async () => {
+test("gateway - four parallel conversations run one turn at a time", async () => {
   seed();
 
   let active = 0;
@@ -176,7 +176,10 @@ test("gateway - four parallel conversations run at most two turns and the third 
     );
 
     for (const res of responses) assert.strictEqual(res.status, 200);
-    assert.strictEqual(maxActive, 2, "the third turn waits for a free slot");
+    // deepseek-web declares serialTurns: the web chat serves one generation per
+    // account, so four conversations take turns instead of racing the upstream
+    // into "Messages too frequent".
+    assert.strictEqual(maxActive, 1, "hanya satu turn yang boleh berjalan bersamaan");
     assert.strictEqual(messages, 4);
   } finally {
     resetDeepSeekTransportFactory();

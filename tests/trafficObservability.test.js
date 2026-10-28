@@ -30,7 +30,8 @@ test("traffic - an idle provider reports zeros", () => {
     queue: 0,
     cap: 2,
     perAccountCap: 2,
-    accounts: [{ id: 1, name: "Akun 1", inFlight: 0, queue: 0, cap: 2 }],
+    serialTurns: false,
+    accounts: [{ id: 1, name: "Akun 1", inFlight: 0, queue: 0, cap: 2, conversationCap: 2 }],
   });
   assert.deepStrictEqual(getProviderTraffic("tidak-ada"), {
     provider: "tidak-ada",
@@ -38,16 +39,21 @@ test("traffic - an idle provider reports zeros", () => {
     queue: 0,
     cap: 0,
     perAccountCap: 0,
+    serialTurns: false,
     accounts: [],
   });
 });
 
-test("traffic - a provider's cap follows the registry, not the global default", () => {
+test("traffic - a serial provider hands out one slot but keeps its conversation pool", () => {
   setup({ provider: "deepseek-web", accounts: 1 });
   const traffic = getProviderTraffic("deepseek-web");
 
-  assert.strictEqual(traffic.perAccountCap, 2, "deepseek-web declares concurrency: 2");
-  assert.strictEqual(traffic.cap, 2);
+  // The registry says concurrency: 2 (two warm conversations) and serialTurns:
+  // true (one generation at a time), so the slot cap must not follow the pool.
+  assert.strictEqual(traffic.perAccountCap, 1, "serialTurns pins the slot cap to one");
+  assert.strictEqual(traffic.cap, 1);
+  assert.strictEqual(traffic.serialTurns, true);
+  assert.strictEqual(traffic.accounts[0].conversationCap, 2, "the warm conversation pool is still two");
 });
 
 test("traffic - in-flight and queued requests are visible per account and per provider", async () => {

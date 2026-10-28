@@ -65,6 +65,21 @@ test("chains - limits follow the provider cap, then the global cap", () => {
   assert.strictEqual(limits.main, 2);
 });
 
+test("chains - a serial provider keeps a two-conversation pool, not one", () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  setSetting("max_account_concurrency", "8");
+
+  // deepseek-web declares serialTurns: true, which pins the traffic slot cap to
+  // one. The chain pool must not follow that number: one warm conversation means
+  // alternating sessions evict each other and every turn re-renders the prompt.
+  const limits = resolveChainLimits(account());
+  assert.strictEqual(limits.main, 2, "dua percakapan tetap hangat walau turn-nya bergiliran");
+
+  setSetting("provider_serial_turns:deepseek-web", "true");
+  assert.strictEqual(resolveChainLimits(account()).main, 2, "serialTurns tidak menyusutkan pool percakapan");
+});
+
 test("chains - a fourth main chain drops auxiliary chains first, then the least recently used conversation", () => {
   const { store, advance } = clockedStore();
   const conn = account();

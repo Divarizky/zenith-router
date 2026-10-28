@@ -37,8 +37,11 @@ export function buildChainKey({ connectionId, purpose = "main", sessionKey = nul
 }
 
 /**
- * Session bounds for one account. The main bound is the provider's parallel
- * cap, resolved the same way the traffic guard resolves it.
+ * Session bounds for one account: how many server-side conversations may stay
+ * warm, not how many turns may run at once. The traffic guard owns the latter
+ * and may pin it to one (serialTurns), while this pool stays at the declared
+ * concurrency; collapsing the two would evict a conversation every time two
+ * sessions alternate and force a full prompt re-render.
  */
 export function resolveChainLimits(connection) {
   const providerCap = resolveProviderConcurrency(connection?.provider);

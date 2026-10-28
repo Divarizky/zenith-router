@@ -196,6 +196,19 @@ const TRANSIENT_UPSTREAM_404 = /models\/([\w.-]+) is not found for API version [
 // How often a transient upstream 404 is retried on the same account.
 const MAX_TRANSIENT_NOT_FOUND_RETRIES = 1;
 
+// Same-account retries for a 429 that means contention, not exhaustion.
+const MAX_SOFT_RATE_LIMIT_RETRIES = 1;
+
+/**
+ * A 429 from a provider that serialises its turns means the account was pushed
+ * while another turn was still running, not that its quota is spent. Locking the
+ * model for a minute (and parking the whole account after two such failures)
+ * would punish a healthy account for the router's own scheduling.
+ */
+function isSoftRateLimitResponse(provider, res) {
+  return res.status === 429 && provider?.softRateLimit === true;
+}
+
 // Only Cloud Code speaks this wording, so no other provider is affected by
 // mistaking its own 404 for a transient one. Antigravity is the only provider
 // that talks to Cloud Code.
@@ -477,6 +490,8 @@ export async function executeWithFallback({
   // A transient upstream 404 is retried on the same account this many times
   // before it is reported to the client.
   let transientNotFoundRetries = 0;
+  // Same-account retries spent on a soft 429.
+  let softRateLimitRetries = 0;
   // The account a same-account retry goes back to.
   let retryConnection = null;
 
@@ -639,6 +654,22 @@ export async function executeWithFallback({
 
     // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
+      // Contention on a serialised provider: the slot was released above, so
+      // re-acquiring it applies the throttle gap and the turn is retried on the
+      // same account. No lock, no park, no strike.
+      if (connection.id && isSoftRateLimitResponse(provider, res)) {
+        if (softRateLimitRetries < MAX_SOFT_RATE_LIMIT_RETRIES) {
+          softRateLimitRetries++;
+          captureLine(
+            `[RETRY] provider=${provider.id} account="${connection.name || connection.id}" soft 429 upstream, mengulang ke akun yang sama setelah jeda throttle`
+          );
+          retryConnection = connection;
+          attempt--;
+        }
+        // Either the retry round above or the next account; never a lock.
+        continue;
+      }
+
       // A transport failure means the path to upstream dropped, not that the
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
@@ -703,7 +734,9 @@ export async function executeWithFallback({
         lastFailureResponse = buildErrorResponse(res, retryErrText, targetFormat);
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
-          if (connection.id && !isTransportFailure(res, retryErrText)) {
+          // Same rule as the main branch: a soft 429 is contention, so it never
+          // locks the account and never counts as a park strike.
+          if (connection.id && !isSoftRateLimitResponse(provider, res) && !isTransportFailure(res, retryErrText)) {
             if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
               applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
             }

@@ -8,6 +8,10 @@ import { getConnectionById, getConnections } from "../db/index.js";
 // they can never occupy a slot a conversation is waiting for.
 const QUEUE_TIMEOUT_MS = 30000;
 const AUX_QUEUE_TIMEOUT_MS = 2000;
+// Serial providers let one turn run at a time, so an auxiliary call (session
+// title, memory job) waits behind a full main turn. Without a longer ceiling
+// every title would be dropped on a busy account.
+const AUX_SERIAL_QUEUE_TIMEOUT_MS = 10000;
 const MIN_CONCURRENCY = 1;
 const MAX_CONCURRENCY = 10;
 
@@ -61,6 +65,43 @@ export function resolveProviderThrottle(providerId) {
 }
 
 /**
+ * True when a provider serves one turn at a time per account, no matter how many
+ * conversations stay warm. A web chat upstream with a single generation slot is
+ * the case this exists for: two in-flight turns make it answer "too frequent",
+ * which the router would then read as a rate limit on a healthy account.
+ */
+export function resolveProviderSerialTurns(providerId) {
+  const key = String(providerId || "").toLowerCase();
+  if (!key) return false;
+
+  const configured = String(getSetting(`provider_serial_turns:${key}`, ""));
+  if (configured !== "") return /^(1|true|yes|on)$/i.test(configured.trim());
+
+  return getProvider(key)?.serialTurns === true;
+}
+
+/**
+ * How long a main request may wait for a free slot. A serial provider holds the
+ * slot for a whole turn, so the generic 30s would reject every second
+ * conversation; the provider may declare its own ceiling.
+ */
+export function resolveProviderQueueTimeout(providerId) {
+  const key = String(providerId || "").toLowerCase();
+  if (!key) return null;
+
+  const raw = getSetting(`provider_queue_timeout_ms:${key}`, "");
+  if (raw !== "") {
+    const configured = Number(raw);
+    if (Number.isFinite(configured) && configured > 0) return configured;
+  }
+
+  const declared = Number(getProvider(key)?.queueTimeoutMs);
+  if (Number.isFinite(declared) && declared > 0) return declared;
+
+  return null;
+}
+
+/**
  * Throttle interval in ms for one account before it can dispatch its next turn.
  */
 export function effectiveAccountThrottle(connection) {
@@ -79,6 +120,16 @@ export function effectiveAccountConcurrency(connection) {
     MIN_CONCURRENCY,
     providerConcurrency ?? (Number(getSetting("max_account_concurrency", connection?.auth_type === "oauth" ? "2" : "8")) || 2)
   );
+}
+
+/**
+ * Slots actually handed out at once. This is the traffic cap, which a serial
+ * provider pins to one; the declared concurrency keeps describing how many
+ * conversations the account can hold warm.
+ */
+export function effectiveAccountSlotCap(connection) {
+  if (resolveProviderSerialTurns(connection?.provider)) return 1;
+  return effectiveAccountConcurrency(connection);
 }
 
 function enterProviderSlot(providerId) {
@@ -146,11 +197,22 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
 
   // API key connections typically have higher limits; traffic guard focuses primarily on OAuth connections.
   // A provider that declares its own cap (DeepSeek web sessions, for example) overrides that global value.
-  const maxConcurrency = effectiveAccountConcurrency(connection);
+  // A serial provider pins the slot cap to one while keeping its declared
+  // concurrency for the chain pool, so a second conversation waits here
+  // instead of racing the first one into the upstream.
+  const serialTurns = resolveProviderSerialTurns(connection.provider);
+  const maxConcurrency = effectiveAccountSlotCap(connection);
   const minThrottleMs = effectiveAccountThrottle(connection);
   const isJitterEnabled = getSetting("request_jitter_enabled", "true") === "true";
   const isAux = purpose === "aux";
-  const queueTimeoutMs = isAux ? Math.max(AUX_QUEUE_TIMEOUT_MS, minThrottleMs + 2000) : QUEUE_TIMEOUT_MS;
+  // A serial provider holds its only slot for a whole turn, so the generic 30s
+  // ceiling would reject every second conversation while the first is still
+  // streaming. The provider declares how long a turn may legitimately take.
+  const declaredQueueTimeoutMs = resolveProviderQueueTimeout(connection.provider);
+  const mainQueueTimeoutMs = declaredQueueTimeoutMs ?? QUEUE_TIMEOUT_MS;
+  const queueTimeoutMs = isAux
+    ? Math.max(AUX_QUEUE_TIMEOUT_MS, minThrottleMs + 2000, serialTurns ? AUX_SERIAL_QUEUE_TIMEOUT_MS : 0)
+    : mainQueueTimeoutMs;
 
   const state = getState(connection.id);
 
@@ -321,18 +383,22 @@ export function getConnectionTraffic(connId) {
 
 /**
  * Live traffic for one provider: per-account slot usage, the aggregate, and the
- * queue. `cap` is the provider-wide ceiling (per-account cap times the number of
- * accounts); `perAccountCap` is what one conversation competes for.
+ * queue. `cap` is the provider-wide ceiling (per-account slot cap times the
+ * number of accounts); `perAccountCap` is what one conversation competes for.
+ * A serial provider hands out one slot per account while still holding several
+ * conversations warm, so `conversationCap` reports that larger pool and
+ * `serialTurns` says the two numbers differ on purpose.
  */
 export function getProviderTraffic(providerId) {
   const key = String(providerId || "").toLowerCase();
-  if (!key) return { provider: "", inFlight: 0, queue: 0, cap: 0, perAccountCap: 0, accounts: [] };
+  if (!key) return { provider: "", inFlight: 0, queue: 0, cap: 0, perAccountCap: 0, serialTurns: false, accounts: [] };
 
   const accounts = getConnections(key).map((connection) => ({
     id: connection.id,
     name: connection.name,
     ...getConnectionTraffic(connection.id),
-    cap: effectiveAccountConcurrency(connection),
+    cap: effectiveAccountSlotCap(connection),
+    conversationCap: effectiveAccountConcurrency(connection),
   }));
 
   const inFlight = accounts.reduce((total, account) => total + account.inFlight, 0);
@@ -347,6 +413,7 @@ export function getProviderTraffic(providerId) {
     queue,
     cap: perAccountCap * accounts.length,
     perAccountCap,
+    serialTurns: resolveProviderSerialTurns(key),
     accounts,
   };
 }

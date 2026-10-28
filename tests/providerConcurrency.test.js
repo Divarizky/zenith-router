@@ -23,12 +23,14 @@ function setup(settings = {}) {
   for (const [key, value] of Object.entries(settings)) setSetting(key, value);
 }
 
-const account = (id, provider = "deepseek-web") => ({ id, provider, auth_type: "session" });
+// A provider with no registry entry of its own, so a test about the slot cap is
+// not silently rewritten by a registry field like deepseek-web's serialTurns.
+const account = (id, provider = "cap-provider") => ({ id, provider, auth_type: "session" });
 
 const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("provider concurrency - a per-account cap of 3 holds the fourth request", async () => {
-  setup({ "provider_concurrency:deepseek-web": "3" });
+  setup({ "provider_concurrency:cap-provider": "3" });
   const conn = account(301);
 
   const held = [];
@@ -52,7 +54,7 @@ test("provider concurrency - a per-account cap of 3 holds the fourth request", a
 });
 
 test("provider concurrency - the cap is per account, not per provider", async () => {
-  setup({ "provider_concurrency:deepseek-web": "3" });
+  setup({ "provider_concurrency:cap-provider": "3" });
 
   const first = account(302);
   const second = account(303);

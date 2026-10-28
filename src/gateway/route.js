@@ -179,6 +179,8 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     targetModel,
     resolveUrl,
     sessionKey: endpoint.sessionKey,
+    sessionSource: endpoint.sessionSource,
+    sessionPromptCacheKey: endpoint.sessionPromptCacheKey,
     effort,
     requestId: endpoint.requestId,
   });

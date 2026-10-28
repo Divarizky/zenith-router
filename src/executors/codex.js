@@ -44,10 +44,45 @@ export function stripUnsupportedFields(body) {
   }
 }
 
+// Session identity for the Codex backend's session affinity. Only ids the client
+// chose qualify: a session header, or prompt_cache_key from the body. Other body
+// markers (metadata.user_id, OpenAI `user`) and the gateway fallback
+// `apikey:<id>` can merge unrelated conversations or carry personal data, so
+// they are never forwarded.
+const CODEX_SESSION_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+const FORWARDABLE_SESSION_SOURCES = new Set(["header"]);
+
+export function codexSessionId(sessionKey, { source = null, promptCacheKey = false } = {}) {
+  if (typeof sessionKey !== "string") return null;
+  if (sessionKey.startsWith("apikey:")) return null;
+  if (!CODEX_SESSION_ID_PATTERN.test(sessionKey)) return null;
+  if (FORWARDABLE_SESSION_SOURCES.has(source)) return sessionKey;
+  if (source === "body" && promptCacheKey) return sessionKey;
+  return null;
+}
+
+// Gives the request a stable prompt_cache_key when the client sent none, so the
+// backend can key its prompt cache by conversation. A client-supplied key is
+// left untouched.
+export function withPromptCacheKey(body, sessionId) {
+  if (typeof body !== "string" || !sessionId) return body;
+  try {
+    const parsed = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object") return body;
+    if (parsed.prompt_cache_key !== undefined) return body;
+    parsed.prompt_cache_key = sessionId;
+    return JSON.stringify(parsed);
+  } catch {
+    return body;
+  }
+}
+
 export class CodexExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, sessionKey = null, sessionSource = null, sessionPromptCacheKey = false }) {
     body = stripUnsupportedFields(body);
     const accountId = extractAccountId(connection?.credentials);
+    const sessionId = codexSessionId(sessionKey, { source: sessionSource, promptCacheKey: sessionPromptCacheKey });
+    body = withPromptCacheKey(body, sessionId);
     const codexHeaders = {
       ...headers,
       originator: "codex_cli_rs",
@@ -55,6 +90,7 @@ export class CodexExecutor extends BaseExecutor {
       version: "0.159.0",
       Accept: "text/event-stream",
       ...(accountId ? { "chatgpt-account-id": accountId } : {}),
+      ...(sessionId ? { session_id: sessionId, conversation_id: sessionId } : {}),
     };
 
     const res = await super.execute({

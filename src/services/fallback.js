@@ -401,6 +401,8 @@ export async function executeWithFallback({
   stream = false,
   targetModel = "",
   sessionKey = null,
+  sessionSource = null,
+  sessionPromptCacheKey = false,
   effort = undefined,
   requestId = null,
 }) {
@@ -557,6 +559,8 @@ export async function executeWithFallback({
         targetModel,
         targetFormat,
         sessionKey,
+        sessionSource,
+        sessionPromptCacheKey,
         effort,
       });
       // An HTTP 200 stream whose first event is an error (rate limit, quota)
@@ -717,6 +721,8 @@ export async function executeWithFallback({
             targetModel,
             targetFormat,
             sessionKey,
+            sessionSource,
+            sessionPromptCacheKey,
             effort,
           });
           res = await probeStreamError(res, signal);

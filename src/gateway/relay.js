@@ -21,7 +21,7 @@
  */
 
 import { routeRequest } from "./route.js";
-import { clientSessionKey } from "./session.js";
+import { clientSession } from "./session.js";
 import { createTransformStream } from "../translator/index.js";
 import { recordUsage, createUsageTapStream } from "../services/usage.js";
 import { guardStream } from "../services/streamGuard.js";
@@ -90,6 +90,7 @@ export async function relayClientRequest(c, spec) {
     const intercepted = spec.beforeRoute ? await spec.beforeRoute(body, c) : null;
     if (intercepted) return intercepted;
 
+    const session = clientSession({ header: (n) => c.req.header(n), body, apiKeyId: c.get("apiKeyId") });
     const routed = await routeRequest({
       model: body.model,
       body,
@@ -101,7 +102,9 @@ export async function relayClientRequest(c, spec) {
       withUsageChunk: Boolean(spec.withUsageChunk),
       streamOptions: spec.withUsageChunk ? body.stream_options : undefined,
       baseUrlFor: spec.baseUrlFor,
-      sessionKey: clientSessionKey({ header: (n) => c.req.header(n), body, apiKeyId: c.get("apiKeyId") }),
+      sessionKey: session.key,
+      sessionSource: session.source,
+      sessionPromptCacheKey: session.promptCacheKey === true,
     });
 
     if (routed.notFound) {

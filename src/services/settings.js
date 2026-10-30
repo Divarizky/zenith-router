@@ -54,6 +54,7 @@ const DEFAULT_SETTINGS = {
   max_account_concurrency: "2",
   request_jitter_enabled: "true",
   default_fallback_model: "",
+  dlp_mode: "off",
 };
 
 /**

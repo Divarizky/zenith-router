@@ -25,6 +25,9 @@ import { clientSession } from "./session.js";
 import { createTransformStream } from "../translator/index.js";
 import { recordUsage, createUsageTapStream } from "../services/usage.js";
 import { guardStream } from "../services/streamGuard.js";
+import { getSetting } from "../services/settings.js";
+import { dlpModeFrom, scanForSecrets, redactSecrets } from "../services/dlp.js";
+import { captureLine } from "../services/logger.js";
 
 /** Error envelope for the OpenAI-shaped clients. */
 export const openAIEnvelope = {
@@ -52,6 +55,13 @@ export const openAIEnvelope = {
       code: "internal_error",
     },
   }),
+  securityBlocked: (types = []) => ({
+    error: {
+      message: `Request blocked by security policy: detected secret(s) (${types.join(", ")})`,
+      type: "security_policy_error",
+      code: "security_policy_error",
+    },
+  }),
 };
 
 /** Error envelope for the Anthropic-shaped client. */
@@ -72,6 +82,13 @@ export const claudeEnvelope = {
     type: "error",
     error: { type: "api_error", message: `Internal gateway error: ${err.message}` },
   }),
+  securityBlocked: (types = []) => ({
+    type: "error",
+    error: {
+      type: "security_policy_error",
+      message: `Request blocked by security policy: detected secret(s) (${types.join(", ")})`,
+    },
+  }),
 };
 
 export async function relayClientRequest(c, spec) {
@@ -84,6 +101,29 @@ export async function relayClientRequest(c, spec) {
 
   if (!spec.validate(body)) {
     return c.json(spec.envelope.missingField(spec.missingFieldMessage), 400);
+  }
+
+  const dlpMode = dlpModeFrom(getSetting("dlp_mode", "off"));
+  if (dlpMode !== "off") {
+    try {
+      if (dlpMode === "block") {
+        const scan = scanForSecrets(body);
+        if (scan.found) {
+          return c.json(spec.envelope.securityBlocked(scan.types), 422);
+        }
+      } else if (dlpMode === "redact") {
+        const redacted = redactSecrets(body);
+        if (redacted.value === null) {
+          return c.json(spec.envelope.securityBlocked(redacted.types), 422);
+        }
+        if (redacted.count > 0) {
+          captureLine(`[zenith] DLP redacted ${redacted.count} secret(s): ${redacted.types.join(", ")}`);
+          body = redacted.value;
+        }
+      }
+    } catch (err) {
+      return c.json(spec.envelope.internal(err), 500);
+    }
   }
 
   try {

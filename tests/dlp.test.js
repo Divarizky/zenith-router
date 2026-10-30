@@ -258,6 +258,46 @@ test("dlp - performance: 2 MB string scanned < 500 ms and ReDoS backtracking pro
   assert.ok(durationReDoS < 100, `ReDoS scan took ${durationReDoS}ms, expected < 100ms`);
 });
 
+test("dlp - regression: repeated private key BEGIN headers do not cause quadratic freeze", () => {
+  // 1. 5000 contiguous repeated BEGIN headers without END (~135 KB)
+  const contiguousBegin = "-----BEGIN PRIVATE KEY-----".repeat(5000);
+
+  const t0 = performance.now();
+  const scan1 = scanForSecrets(contiguousBegin);
+  const durScan1 = performance.now() - t0;
+
+  assert.strictEqual(scan1.found, true);
+  assert.deepStrictEqual(scan1.types, ["private_key"]);
+  assert.ok(durScan1 < 500, `Contiguous BEGIN scan took ${durScan1}ms, expected < 500ms`);
+
+  const t1 = performance.now();
+  const red1 = redactSecrets(contiguousBegin);
+  const durRed1 = performance.now() - t1;
+
+  assert.strictEqual(red1.count, 1);
+  assert.strictEqual(red1.value, "[REDACTED:private_key]");
+  assert.ok(durRed1 < 500, `Contiguous BEGIN redact took ${durRed1}ms, expected < 500ms`);
+
+  // 2. Repeated BEGIN with data between them and one END at the end
+  const withEnd = "-----BEGIN RSA PRIVATE KEY-----\ndata\n".repeat(5000) + "-----END RSA PRIVATE KEY-----";
+
+  const t2 = performance.now();
+  const scan2 = scanForSecrets(withEnd);
+  const durScan2 = performance.now() - t2;
+
+  assert.strictEqual(scan2.found, true);
+  assert.deepStrictEqual(scan2.types, ["private_key"]);
+  assert.ok(durScan2 < 500, `BEGIN with single END scan took ${durScan2}ms, expected < 500ms`);
+
+  const t3 = performance.now();
+  const red2 = redactSecrets(withEnd);
+  const durRed2 = performance.now() - t3;
+
+  assert.strictEqual(red2.count, 1);
+  assert.strictEqual(red2.value, "[REDACTED:private_key]");
+  assert.ok(durRed2 < 500, `BEGIN with single END redact took ${durRed2}ms, expected < 500ms`);
+});
+
 // ============================================================================
 // Pengaturan DLP (Dashboard GET & POST)
 // ============================================================================

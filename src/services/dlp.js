@@ -44,9 +44,10 @@ const OPENAI_KEY_RE = /\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}/g;
 const GITHUB_TOKEN_RE = /\b(?:gh[posur]_[A-Za-z0-9]{20,}|github_pat_\w{20,})\b/g;
 const AWS_ACCESS_KEY_RE = /\b(?:AKIA|ASIA|AIDA|AROA|AIPA|ANPA|ANVA|ASCA)[A-Z0-9]{16}\b/g;
 
-// Private key blocks: complete and truncated
-const PRIVATE_KEY_COMPLETE_RE = /-----BEGIN [A-Z0-9 _-]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 _-]*PRIVATE KEY-----/g;
-const PRIVATE_KEY_TRUNCATED_RE = /-----BEGIN [A-Z0-9 _-]*PRIVATE KEY-----[\s\S]*/g;
+// Private key blocks: complete and truncated (bounded header to avoid quadratic backtracking)
+const PRIVATE_KEY_COMPLETE_RE =
+  /-----BEGIN [A-Z0-9 _-]{0,40}PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 _-]{0,40}PRIVATE KEY-----/g;
+const PRIVATE_KEY_TRUNCATED_RE = /-----BEGIN [A-Z0-9 _-]{0,40}PRIVATE KEY-----[\s\S]*/g;
 
 // Free text credential assignments: key = value or key: value
 const FREE_TEXT_ASSIGN_RE =
@@ -110,8 +111,10 @@ function isSafeNonText(val, key, parent) {
 function hasSpecificToken(str) {
   if (typeof str !== "string" || str.length === 0) return false;
   if (str.includes("-----BEGIN")) {
-    PRIVATE_KEY_COMPLETE_RE.lastIndex = 0;
-    if (PRIVATE_KEY_COMPLETE_RE.test(str)) return true;
+    if (str.includes("-----END")) {
+      PRIVATE_KEY_COMPLETE_RE.lastIndex = 0;
+      if (PRIVATE_KEY_COMPLETE_RE.test(str)) return true;
+    }
     PRIVATE_KEY_TRUNCATED_RE.lastIndex = 0;
     if (PRIVATE_KEY_TRUNCATED_RE.test(str)) return true;
   }
@@ -142,10 +145,13 @@ function scanString(str, foundTypes) {
 
   // 1. Private keys
   if (str.includes("-----BEGIN")) {
-    PRIVATE_KEY_COMPLETE_RE.lastIndex = 0;
-    if (PRIVATE_KEY_COMPLETE_RE.test(str)) {
-      foundTypes.add("private_key");
-    } else {
+    if (str.includes("-----END")) {
+      PRIVATE_KEY_COMPLETE_RE.lastIndex = 0;
+      if (PRIVATE_KEY_COMPLETE_RE.test(str)) {
+        foundTypes.add("private_key");
+      }
+    }
+    if (!foundTypes.has("private_key")) {
       PRIVATE_KEY_TRUNCATED_RE.lastIndex = 0;
       if (PRIVATE_KEY_TRUNCATED_RE.test(str)) {
         foundTypes.add("private_key");
@@ -222,12 +228,14 @@ function redactString(str, foundTypes) {
 
   // 1. Private keys
   if (text.includes("-----BEGIN")) {
-    PRIVATE_KEY_COMPLETE_RE.lastIndex = 0;
-    text = text.replace(PRIVATE_KEY_COMPLETE_RE, () => {
-      count++;
-      foundTypes.add("private_key");
-      return "[REDACTED:private_key]";
-    });
+    if (text.includes("-----END")) {
+      PRIVATE_KEY_COMPLETE_RE.lastIndex = 0;
+      text = text.replace(PRIVATE_KEY_COMPLETE_RE, () => {
+        count++;
+        foundTypes.add("private_key");
+        return "[REDACTED:private_key]";
+      });
+    }
 
     if (text.includes("-----BEGIN")) {
       PRIVATE_KEY_TRUNCATED_RE.lastIndex = 0;

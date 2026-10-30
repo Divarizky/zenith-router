@@ -110,6 +110,7 @@ function claudeImageToOpenAI(part) {
 // OpenAI tool messages accept text-only content and reject image parts with a
 // 400.
 function claudeToolResultToOpenAI(content) {
+  if (content === undefined || content === null) return "";
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return typeof content === "object" ? JSON.stringify(content) : String(content);
 
@@ -189,10 +190,14 @@ function claudeContentToOpenAI(content) {
       const img = claudeImageToOpenAI(part);
       if (img) userParts.push(img);
     } else if (part.type === "tool_result") {
+      let text = claudeToolResultToOpenAI(part.content);
+      if (part.is_error === true) {
+        text = text ? `Error: ${text}` : "Error:";
+      }
       toolMessages.push({
         role: "tool",
         tool_call_id: part.tool_use_id,
-        content: claudeToolResultToOpenAI(part.content),
+        content: text,
       });
     }
     // thinking / redacted_thinking / server_tool_use have no chat analogue

@@ -73,14 +73,18 @@ const UNSUPPORTED_SCHEMA_KEYS = [
   "$schema", "$id", "$ref", "$defs", "definitions", "additionalProperties", "default",
   "patternProperties", "propertyNames", "unevaluatedProperties", "const", "not", "if", "then", "else",
   "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "examples", "contentEncoding", "contentMediaType",
+  "deprecated", "readOnly", "writeOnly",
 ];
 
-function cleanJsonSchema(schema) {
+export function cleanJsonSchema(schema) {
   if (!schema || typeof schema !== "object") return schema;
   if (Array.isArray(schema)) return schema.map(cleanJsonSchema);
   const copy = { ...schema };
   if ("const" in copy && !copy.enum) copy.enum = [copy.const];
   for (const key of UNSUPPORTED_SCHEMA_KEYS) delete copy[key];
+  for (const key of Object.keys(copy)) {
+    if (key.startsWith("x-")) delete copy[key];
+  }
 
   if (copy.properties && typeof copy.properties === "object") {
     const newProps = {};

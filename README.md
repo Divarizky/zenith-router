@@ -19,7 +19,7 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 
 **Akun dan provider**
 
-- 23 provider dengan empat jenis autentikasi: OAuth, API key, free tier tanpa login, dan token sesi browser untuk provider yang hanya punya antarmuka web
+- 21 provider dengan empat jenis autentikasi: OAuth, API key, free tier tanpa login, dan token sesi browser untuk provider yang hanya punya antarmuka web
 - Login OAuth lewat browser dengan callback lokal, login device code, import kredensial dari CLI yang sudah terpasang, dan tempel token manual
 - Proxy HTTP/HTTPS per akun dengan kunci single-flight saat refresh token
 - Sinkronisasi model gratis otomatis dan berkala
@@ -63,14 +63,12 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 | `mis` | Mistral AI | API key | — |
 | `or` | OpenRouter | API key | Ya |
 | `oc` | OpenCode Free | Free tier | — |
-| `bzl` | Bazaarlink | API key | — |
 | `cf` | Cloudflare Workers AI | API key | — |
 | `nv` | NVIDIA NIM | API key | — |
 | `ovh` | OVHcloud AI Endpoints | Free tier | — |
 | `tg` | Together AI | API key | — |
 | `ol` | Ollama Cloud | API key | — |
 | `l7` | LLM7 | API key | — |
-| `ddgw` | DuckDuckGo AI Chat | Free tier tanpa login | — |
 | `dsw` | DeepSeek Web Chat | Token sesi web | — |
 
 Alias lengkap tanpa prefix pendek juga diterima, misalnya `mistral/mistral-large-latest`.

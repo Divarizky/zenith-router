@@ -20,7 +20,6 @@ test("Provider Registry - contains 21 core providers", () => {
     "cloudflare-ai",
     "openrouter",
     "llm7",
-    "bazaarlink",
     "together",
     "freebuff",
     "ollama",
@@ -68,10 +67,6 @@ test("Provider Registry - new providers use expected configs", () => {
   const l7 = getProvider("llm7");
   assert.strictEqual(l7.category, "apikey");
   assert.strictEqual(l7.transport.baseUrl, "https://api.llm7.io/v1/chat/completions");
-
-  const bzl = getProvider("bazaarlink");
-  assert.strictEqual(bzl.category, "apikey");
-  assert.strictEqual(bzl.transport.baseUrl, "https://bazaarlink.ai/api/v1/chat/completions");
 
   const fb = getProvider("freebuff");
   assert.strictEqual(fb.category, "oauth");
@@ -152,7 +147,6 @@ test("Provider Registry - getAvailableModels aggregates model list with provider
   assert.ok(modelIds.some((id) => id.startsWith("cf/")), "Must contain Cloudflare model");
   assert.ok(modelIds.some((id) => id.startsWith("or/")), "Must contain OpenRouter model");
   assert.ok(modelIds.some((id) => id.startsWith("llm7/")), "Must contain LLM7 model");
-  assert.ok(modelIds.some((id) => id.startsWith("bzl/")), "Must contain Bazaarlink model");
   assert.ok(modelIds.some((id) => id.startsWith("together/")), "Must contain Together model");
   assert.ok(modelIds.some((id) => id.startsWith("fb/")), "Must contain Freebuff model");
   assert.ok(modelIds.some((id) => id.startsWith("ol/")), "Must contain Ollama model");
@@ -185,7 +179,7 @@ test("GET /v1/models - publishes capabilities and token limits, and omits them w
   assert.deepEqual(gpt.capabilities, { vision: true, reasoning: true });
   assert.equal(gpt.context_length, 1050000);
 
-  const unknown = find("bzl/auto:free");
+  const unknown = find("oc/big-pickle");
   assert.ok(unknown, "unknown model is still listed");
   assert.equal(unknown.capabilities, undefined, "unknown models get no capabilities field");
   assert.equal(unknown.context_length, undefined);

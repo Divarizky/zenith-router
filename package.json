@@ -51,8 +51,7 @@
   "author": "Divarizky",
   "dependencies": {
     "@hono/node-server": "^1.13.8",
-    "hono": "^4.7.2",
-    "parse5": "^7.3.0"
+    "hono": "^4.7.2"
   },
   "license": "MIT"
 }

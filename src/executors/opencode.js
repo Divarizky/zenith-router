@@ -66,9 +66,14 @@ export function opencodeRequestId(timestamp = Date.now()) {
   return createOpencodeId("msg", timestamp);
 }
 
+// Zen validates that the 12 hex prefix of a `ses_` decodes to a recent inverted
+// timestamp, so a hash of the downstream id (random bits) is refused with 403
+// FreeTierError. Mint a canonical id once per downstream session and reuse it,
+// like the real CLI does; the window matches the 9router PR #4791 fix (1 jam)
+// so a long conversation does not rotate mid-chat after a pause.
 const translatedSessions = new Map();
 export const MAX_OPENCODE_SESSIONS = 1000;
-export const OPENCODE_SESSION_TTL_MS = 1800000; // 30 menit
+export const OPENCODE_SESSION_TTL_MS = 3600000; // 60 menit
 
 export function resetOpencodeSessionCache() {
   translatedSessions.clear();

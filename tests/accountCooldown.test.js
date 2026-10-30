@@ -45,7 +45,7 @@ test("park - a model lock and the account lock are separate budgets", () => {
 
 test("park - a connection without an id (virtual free tier) is never parked", () => {
   resetAccountStrikes();
-  const virtual = { id: null, provider: "bazaarlink", name: "BazaarLink (Virtual Free)" };
+  const virtual = { id: null, provider: "ollama", name: "Ollama (Virtual Free)" };
   assert.strictEqual(parkThresholdReached(virtual, { requestId: "r1" }), false);
   assert.strictEqual(parkThresholdReached(virtual, { requestId: "r2" }), false);
 });

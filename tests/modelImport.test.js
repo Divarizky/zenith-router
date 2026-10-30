@@ -42,7 +42,6 @@ test("import modes - free-only import is dropped for providers that sync free mo
   assert.deepStrictEqual(getImportModes(getProvider("glm")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("openrouter")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("together")), ["all"]);
-  assert.deepStrictEqual(getImportModes(getProvider("bazaarlink")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("llm7")), ["all"]);
   assert.deepStrictEqual(getImportModes(getProvider("mistral")), [], "mistral lists usable models through sync only");
   assert.deepStrictEqual(getImportModes(getProvider("ollama")), ["all"]);

@@ -317,32 +317,27 @@ test("xkiro sync - public free model list merges free models without requiring a
   assert.ok(routed.includes("xkr/minimax/minimax-m3:free"));
 });
 
-test("conditional sync - glm, bazaarlink, and mistral require connection, sync when account is added", async (t) => {
+test("conditional sync - glm and mistral require connection, sync when account is added", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
 
   // Without connection
   assert.deepStrictEqual(await syncFreeModels("glm"), { code: "no_account", count: 0 });
-  assert.deepStrictEqual(await syncFreeModels("bazaarlink"), { code: "no_account", count: 0 });
   assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "no_account", count: 0 });
 
   // With connection
   addConnection({ provider: "glm", name: "GLM", credentials: { api_key: "glm-key" } });
-  addConnection({ provider: "bazaarlink", name: "BZL", credentials: { api_key: "bzl-key" } });
   addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
 
   mockUpstream({
     "api.z.ai": { payload: { data: [{ id: "glm-4.7-flash" }, { id: "glm-5.1" }] } },
-    "bazaarlink.ai": { payload: { data: [{ id: "auto:free", isFree: true }, { id: "gpt-5.5", isFree: false }] } },
     "api.mistral.ai": MISTRAL,
   });
 
   assert.deepStrictEqual(await syncFreeModels("glm"), { code: "synced", count: 1 });
-  assert.deepStrictEqual(await syncFreeModels("bazaarlink"), { code: "synced", count: 1 });
   assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
   const routed = ids();
   assert.ok(routed.includes("glm/glm-4.7-flash"));
-  assert.ok(routed.includes("bzl/auto:free"));
   assert.ok(routed.includes("mis/mistral-large-latest"));
 });
 
@@ -378,7 +373,6 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
 
   const results = await syncAllFreeModels();
   assert.deepStrictEqual(Object.keys(results).sort(), [
-    "bazaarlink",
     "cline",
     "commandcode",
     "freebuff",
@@ -390,7 +384,7 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "openrouter",
     "xkiro",
   ]);
-  // 7 public providers make calls (+1 dari sync commandcode langsung di atas); bazaarlink, freebuff, glm, dan mistral return no_account tanpa calls
+  // 7 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff, glm, dan mistral return no_account tanpa calls
   assert.strictEqual(calls.length, 8);
 
   disableModel("opencode", "exo-free");

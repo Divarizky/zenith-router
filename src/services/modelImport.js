@@ -200,11 +200,6 @@ const IMPORTERS = {
     modes: ["all"],
     parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.display_name || m.id, isFree: false })),
   },
-  bazaarlink: {
-    url: "https://bazaarlink.ai/api/v1/models",
-    modes: ["all", "free"],
-    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
-  },
   llm7: {
     url: "https://api.llm7.io/v1/models",
     modes: ["all"],

@@ -184,3 +184,24 @@ test("Gateway - different client conversations reach OpenCode as different sessi
   assert.notStrictEqual(sessions[2], sessions[0], "klien lain tidak berbagi sesi");
   assert.notStrictEqual(sessions[4], sessions[3], "dua sesi Claude Code (metadata.user_id) tidak berbagi sesi");
 });
+
+// Port dari 9router PR #4791: Zen menolak `ses_` yang 12 karakter hex-nya bukan
+// ~(Date.now()*4096+n) dengan 403 FreeTierError. ID hasil translasi karena itu
+// wajib memuat timestamp asli, bukan bit hash dari ID sesi klien.
+const SESSION_PREFIX_MASK = 0xffffffffffffn;
+const decodedUnits = (id) => SESSION_PREFIX_MASK - BigInt(`0x${id.slice(4, 16)}`);
+
+test("translateOpencodeSession - ID translasi memuat timestamp asli, bukan bit hash", () => {
+  resetOpencodeSessionCache();
+  const key = "claude:550e8400-e29b-41d4-a716-446655440000";
+
+  const id = translateOpencodeSession(key, "claude");
+  assert.ok(OPENCODE_SESSION_RE.test(id), `'${id}' harus berupa ses_ kanonikal`);
+
+  const nowUnits = (BigInt(Date.now()) * 0x1000n) & SESSION_PREFIX_MASK;
+  const diffMs = Number((decodedUnits(id) - nowUnits) / 0x1000n);
+  assert.ok(Math.abs(diffMs) < 60_000, `prefix harus mendekode ke waktu sekarang, selisih ${diffMs} ms`);
+
+  const otherTool = translateOpencodeSession(key, "codex");
+  assert.notStrictEqual(otherTool, id, "klien berbeda tidak berbagi ID sesi");
+});

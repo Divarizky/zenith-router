@@ -95,9 +95,12 @@ export const LAYOUT_TOKENS_CSS = `
   --text-xl: 1.5rem;
   /* Skala jarak: dipakai kartu, sel tabel, tombol, dan jarak antar bagian. */
   --space-1: 0.35rem;
-  --space-2: 0.6rem;
-  --space-3: 0.85rem;
-  --space-4: 1.25rem;
+  --space-2: 0.8rem;
+  --space-3: 1.1rem;
+  --space-4: 1.6rem;
+  /* Padding tombol: naik sekitar 30% dari 0.45rem 0.9rem. */
+  --btn-pad-y: 0.6rem;
+  --btn-pad-x: 1.1rem;
   --space-5: 1.75rem;
   --leading: 1.55;
   /* Target sentuh minimal 44x44 px pada layar sempit. */

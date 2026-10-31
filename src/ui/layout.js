@@ -304,7 +304,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     /* ===== Tombol ===== */
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
-      padding: 0.45rem 0.9rem;
+      padding: var(--btn-pad-y) var(--btn-pad-x);
       border-radius: var(--radius);
       border: var(--bw) solid var(--line);
       background: var(--surface-2); color: var(--text);

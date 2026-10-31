@@ -83,3 +83,24 @@ export const THEME_TOKENS_CSS = `
   --bg-hover: #26262e;
 }
 `;
+
+export const LAYOUT_TOKENS_CSS = `
+:root {
+  /* Skala teks: teks fungsional tidak turun di bawah 0.8rem. */
+  --text-xs: 0.8rem;
+  --text-sm: 0.9rem;
+  --text-base: 1rem;
+  --text-md: 1.05rem;
+  --text-lg: 1.2rem;
+  --text-xl: 1.5rem;
+  /* Skala jarak: dipakai kartu, sel tabel, tombol, dan jarak antar bagian. */
+  --space-1: 0.35rem;
+  --space-2: 0.6rem;
+  --space-3: 0.85rem;
+  --space-4: 1.25rem;
+  --space-5: 1.75rem;
+  --leading: 1.55;
+  /* Target sentuh minimal 44x44 px pada layar sempit. */
+  --touch-min: 44px;
+}
+`;

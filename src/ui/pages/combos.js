@@ -191,7 +191,7 @@ export function renderCombosContent(query = {}) {
       .combo-card-actions { display: flex; align-items: center; gap: 0.4rem; }
       .combo-card-actions form { display: flex; gap: 0.35rem; }
       .combo-card-row { display: flex; align-items: flex-start; gap: 0.9rem; margin-top: 0.85rem; }
-      .combo-card-label { flex: none; width: 6.5rem; padding-top: 0.3rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-subtle); }
+      .combo-card-label { flex: none; width: 6.5rem; padding-top: 0.3rem; font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-subtle); }
       .combo-card-value { flex: 1; min-width: 0; }
       .combo-card-details { margin-top: 0.9rem; padding-top: 0.6rem; border-top: 1px solid var(--border-subtle); }
       .combo-rename-form { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
@@ -200,7 +200,7 @@ export function renderCombosContent(query = {}) {
       .combo-selected { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
       .combo-selected li { display: flex; align-items: center; gap: 0.5rem; border: 2px solid var(--text); border-radius: 0; padding: 0.35rem 0.55rem; font-size: 0.85rem; background: var(--surface-2); }
       .combo-selected li.cs-empty { border: none; padding: 0.2rem 0; color: var(--text-subtle); background: transparent; }
-      .combo-selected .cs-order { color: var(--text-muted); font-size: 0.75rem; font-weight: 800; min-width: 1.4em; text-align: center; }
+      .combo-selected .cs-order { color: var(--text-muted); font-size: var(--text-xs); font-weight: 800; min-width: 1.4em; text-align: center; }
       .combo-selected code { font-size: 0.82rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .combo-selected-actions { display: flex; gap: 0.2rem; flex: none; }
       .combo-selected-actions .btn-ghost { padding: 0.15rem 0.4rem; min-height: auto; line-height: 1.1; font-size: 0.85rem; }
@@ -212,7 +212,7 @@ export function renderCombosContent(query = {}) {
       .picker-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.4rem 0.5rem; border: 2px solid transparent; background: none; color: var(--text); text-align: left; font-size: 0.85rem; cursor: pointer; border-radius: 0; }
       .picker-row:hover { background: var(--surface-2); border-color: var(--text); }
       .picker-check { width: 1em; text-align: center; color: var(--text-subtle); }
-      .picker-caps { margin-left: auto; display: flex; gap: 0.5rem; font-size: 0.7rem; color: var(--text-subtle); flex-shrink: 0; }
+      .picker-caps { margin-left: auto; display: flex; gap: 0.5rem; font-size: var(--text-xs); color: var(--text-subtle); flex-shrink: 0; }
     </style>
 
     <script>

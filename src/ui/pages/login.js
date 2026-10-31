@@ -105,7 +105,7 @@ export function renderDashboardLoginPage({
     .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
     .brand img { width: 36px; height: 36px; border-radius: 0; object-fit: cover; display: block; }
     .brand h1 { font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em; }
-    .brand p { font-size: 0.78rem; color: var(--text-subtle); }
+    .brand p { font-size: var(--text-xs); color: var(--text-subtle); }
     .alert {
       padding: 0.6rem 0.75rem; border-radius: 0; font-size: 0.82rem;
       border: 1px solid var(--border); margin-bottom: 1rem;
@@ -114,7 +114,7 @@ export function renderDashboardLoginPage({
     .alert-danger { color: var(--text); border-left: 4px solid var(--danger); background: var(--surface-2); }
     .alert strong { font-weight: 600; }
     form { display: flex; flex-direction: column; gap: 0.9rem; }
-    label { font-size: 0.78rem; font-weight: 500; color: var(--text-muted); margin-bottom: -0.4rem; }
+    label { font-size: var(--text-xs); font-weight: 500; color: var(--text-muted); margin-bottom: -0.4rem; }
     input[type="password"] {
       width: 100%; background: var(--surface); border: 2px solid var(--text); color: var(--text);
       padding: 0.55rem 0.75rem; border-radius: 0; font-size: 0.88rem; font-family: inherit;
@@ -134,7 +134,7 @@ export function renderDashboardLoginPage({
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .foot {
       margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--border-subtle);
-      font-size: 0.75rem; color: var(--text-subtle); text-align: center;
+      font-size: var(--text-xs); color: var(--text-subtle); text-align: center;
     }
   </style>
 </head>

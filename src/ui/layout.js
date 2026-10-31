@@ -1,5 +1,5 @@
 import { escapeHtml } from "./html.js";
-import { THEME_TOKENS_CSS } from "./theme.js";
+import { THEME_TOKENS_CSS, LAYOUT_TOKENS_CSS } from "./theme.js";
 import { isUsingDefaultPassword } from "../services/dashboardAuth.js";
 // Versi sidebar dibaca dari package.json, sama dengan banner CLI dan User-Agent upstream.
 import pkg from "../../package.json" with { type: "json" };
@@ -77,6 +77,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
   <title>${escapeHtml(title)} &middot; Zenith Router</title>
   <style>
     ${THEME_TOKENS_CSS}
+    ${LAYOUT_TOKENS_CSS}
     [data-theme="dark"] .nav-link.active,
     [data-theme="dark"] .btn-primary,
     [data-theme="dark"] .btn-pink,
@@ -94,7 +95,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
         repeating-linear-gradient(0deg, var(--grid-line) 0 1px, transparent 1px 32px),
         repeating-linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px 32px);
       color: var(--text);
-      line-height: 1.5;
+      font-size: var(--text-base);
+      line-height: var(--leading);
       min-height: 100vh;
     }
     a { color: inherit; }
@@ -118,14 +120,14 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       object-fit: cover; display: block; background: transparent; flex-shrink: 0;
     }
     .brand h1 { font-size: 0.98rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; text-transform: uppercase; }
-    .brand small { display: block; color: var(--text-subtle); font-size: 0.72rem; font-weight: 500; }
+    .brand small { display: block; color: var(--text-subtle); font-size: var(--text-xs); font-weight: 500; }
     .topbar-app nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; flex: 1 1 auto; min-width: 0; }
     .nav-link {
       display: flex; align-items: center; gap: 0.45rem;
       padding: 0.45rem 0.75rem;
       border: var(--bw) solid transparent;
       color: var(--text-muted); text-decoration: none;
-      font-size: 0.84rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
+      font-size: var(--text-sm); font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
       white-space: nowrap;
       transition: color 0.12s, background 0.12s, border-color 0.12s;
     }
@@ -133,7 +135,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .nav-link.active { color: var(--text); background: var(--accent); border-color: var(--line); box-shadow: var(--hard-sm); }
     .nav-link svg { flex-shrink: 0; }
     .topbar-end { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; margin-left: auto; }
-    .sidebar-user { color: var(--text-subtle); font-size: 0.74rem; }
+    .sidebar-user { color: var(--text-subtle); font-size: var(--text-xs); }
     @media (max-width: 1100px) { .sidebar-user { display: none; } }
     .sidebar-user form { margin: 0; display: inline; }
     /* Tombol tema: ikon bulan saat terang, matahari saat gelap. */
@@ -151,30 +153,30 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       background: var(--surface);
       border: var(--bw) solid var(--line);
       border-left-width: 6px; border-left-color: var(--accent-pink);
-      font-size: 0.75rem; color: var(--text);
+      font-size: var(--text-xs); color: var(--text);
       box-shadow: var(--hard-sm);
       animation: fadeIn 0.2s ease-in-out;
     }
     .update-banner > span {
       font-weight: 800; color: var(--text);
-      display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.76rem;
+      display: inline-flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs);
     }
     .update-banner > span::before {
       content: ""; width: 8px; height: 8px;
       background: var(--accent-pink); display: inline-block; flex-shrink: 0;
     }
     .update-banner > a {
-      color: var(--text-muted); font-size: 0.7rem; text-decoration: none;
+      color: var(--text-muted); font-size: var(--text-xs); text-decoration: none;
       padding: 0.15rem 0.5rem; border: var(--bw) solid var(--border);
       background: var(--surface-2);
       transition: color 0.12s, background 0.12s;
       justify-self: end; display: inline-flex; align-items: center; gap: 0.2rem;
     }
-    .update-banner > a::after { content: " \\2197"; font-size: 0.65rem; }
+    .update-banner > a::after { content: " \\2197"; font-size: var(--text-xs); }
     .update-banner > a:hover { color: var(--accent); background: var(--surface-3); }
     .update-banner > button {
       grid-column: 1 / -1; width: 100%; margin-top: 0.15rem;
-      padding: 0.35rem 0.65rem; font-size: 0.75rem; font-weight: 800;
+      padding: 0.35rem 0.65rem; font-size: var(--text-xs); font-weight: 800;
       height: 30px; background: var(--accent-pink); color: #0a0a0a;
       border: var(--bw) solid var(--line); cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
@@ -191,8 +193,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     }
 
     /* ===== Main & topbar judul ===== */
-    .main { min-width: 0; padding: 1.75rem 2rem 5rem; }
-    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .main { min-width: 0; padding: var(--space-5) 2.25rem 5rem; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); flex-wrap: wrap; }
     .topbar h2 { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; text-transform: uppercase; }
     .page-tabs { display: flex; gap: 0.35rem; margin-bottom: 1.25rem; border-bottom: var(--bw) solid var(--border-subtle); flex-wrap: wrap; }
     .page-tab { padding: 0.45rem 0.9rem; color: var(--text-muted); text-decoration: none; font-size: 0.88rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: var(--bw-thick) solid transparent; margin-bottom: -2px; }
@@ -223,7 +225,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       background: var(--surface);
       /* Teks hitam, bukan warna status: kontras teks berwarna di atas putih gagal WCAG. */
       color: var(--text);
-      font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+      font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
       white-space: nowrap;
     }
     .pill-success { background: var(--success); border-color: var(--line); color: #0a0a0a; }
@@ -243,17 +245,17 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
 
     /* ===== Kartu & grid ===== */
-    .card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1.25rem; box-shadow: var(--hard); }
+    .card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--radius-lg); padding: var(--space-4); margin-bottom: var(--space-5); box-shadow: var(--hard); }
     .card h3 { font-size: 0.95rem; font-weight: 800; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.04em; }
-    .card .hint { color: var(--text-muted); font-size: 0.82rem; }
+    .card .hint { color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading); }
     .card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
     .card-head h3 { margin-bottom: 0; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
     .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-    .section { margin-bottom: 1.75rem; }
+    .section { margin-bottom: var(--space-5); }
     .section-head { margin-bottom: 0.75rem; }
     .section-head h3 { font-size: 1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
-    .section-head .hint { color: var(--text-muted); font-size: 0.82rem; }
+    .section-head .hint { color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading); }
     .section-head h3 svg { vertical-align: -2px; color: var(--text-muted); margin-right: 0.3rem; }
     .empty { text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); }
     .empty .big { font-size: 1rem; color: var(--text); margin-bottom: 0.25rem; font-weight: 800; }
@@ -296,7 +298,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       width: 1.35rem; height: 1.35rem;
       background: var(--surface-2); color: var(--text-muted);
       border: var(--bw) solid var(--line);
-      font-size: 0.72rem; font-variant-numeric: tabular-nums;
+      font-size: var(--text-xs); font-variant-numeric: tabular-nums;
     }
 
     /* ===== Tombol ===== */
@@ -338,12 +340,12 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       transform: translate(-2px, -2px);
       box-shadow: var(--hard);
     }
-    .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+    .btn-sm { padding: 0.4rem 0.8rem; font-size: var(--text-xs); }
     .btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 0.3rem; min-width: 1.9rem; min-height: 1.9rem; line-height: 1; }
     .btn-icon svg { flex-shrink: 0; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
     .btn-row { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
-    .btn-ghost { padding: 0.25rem 0.6rem; border-radius: var(--radius); border: var(--bw) solid var(--border); background: transparent; color: var(--text-muted); font-size: 0.78rem; font-weight: 700; }
+    .btn-ghost { padding: 0.25rem 0.6rem; border-radius: var(--radius); border: var(--bw) solid var(--border); background: transparent; color: var(--text-muted); font-size: var(--text-xs); font-weight: 700; }
     .btn-ghost:hover { background: var(--surface-2); color: var(--text); border-color: var(--line); }
     .key-link { color: var(--link); text-decoration: underline; font-weight: 700; }
     .key-link:hover { color: var(--link-hover); }
@@ -372,7 +374,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       background: var(--surface-2);
       color: var(--text);
       font-weight: 800;
-      font-size: 0.78rem;
+      font-size: var(--text-xs);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       border-right: var(--bw) solid var(--line);
       user-select: none;
@@ -442,13 +444,13 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .proxy-title-line { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
     .proxy-name { font-weight: 800; font-size: 0.92rem; color: var(--text); }
     .proxy-url-line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; color: var(--text-muted); word-break: break-all; margin-bottom: 0.25rem; }
-    .proxy-meta-line { font-size: 0.75rem; color: var(--text-subtle); }
+    .proxy-meta-line { font-size: var(--text-xs); color: var(--text-subtle); }
     .proxy-actions { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; flex-wrap: wrap; }
 
     /* ===== Form ===== */
     .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.9rem; }
     .field label { display: block; font-size: 0.8rem; color: var(--text); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
-    .field-label { font-size: 0.75rem; color: var(--text-muted); }
+    .field-label { font-size: var(--text-xs); color: var(--text-muted); }
     .field input { padding: 0.45rem 0.65rem; font-size: 0.85rem; }
     input, select, textarea { width: 100%; background: var(--surface); border: var(--bw) solid var(--line); color: var(--text); padding: 0.5rem 0.75rem; border-radius: var(--radius); font-size: 0.88rem; font-family: inherit; }
     input:focus, select:focus, textarea:focus { outline: 3px solid var(--focus-ring); outline-offset: 2px; border-color: var(--line); box-shadow: 3px 3px 0 var(--accent); }
@@ -474,11 +476,11 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     kbd { background: var(--surface-2); border: var(--bw) solid var(--border); border-bottom-width: var(--bw-thick); border-radius: var(--radius); padding: 0.05rem 0.35rem; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; color: var(--text); }
 
     /* ===== Tabel ===== */
-    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; border: var(--bw) solid var(--line); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); border: var(--bw) solid var(--line); background: var(--surface); }
     .card:has(> table) { overflow-x: auto; }
-    th, td { padding: 0.6rem 0.85rem; text-align: left; vertical-align: middle; border-bottom: var(--bw) solid var(--border-subtle); }
+    th, td { padding: var(--space-2) var(--space-3); line-height: var(--leading); text-align: left; vertical-align: middle; border-bottom: var(--bw) solid var(--border-subtle); }
     /* Header tabel: permukaan sedikit lebih gelap dari badan tabel, teks mengikuti tema. */
-    th { color: var(--text); background: var(--surface-3); font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; border-bottom: var(--bw) solid var(--line); }
+    th { color: var(--text); background: var(--surface-3); font-weight: 800; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.07em; border-bottom: var(--bw) solid var(--line); }
     tbody tr { transition: background 0.12s; }
     tbody tr:hover { background: var(--surface-2); }
     tr:last-child td { border-bottom: none; }
@@ -580,13 +582,16 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 
     /* ===== Stat ===== */
     .stat .value { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-    .stat .label { color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 800; }
-    .stat .sub { color: var(--text-subtle); font-size: 0.78rem; margin-top: 0.2rem; }
+    .stat .label { color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 800; }
+    .stat .sub { color: var(--text-subtle); font-size: var(--text-xs); margin-top: 0.2rem; }
 
     /* ===== Responsif ===== */
     @media (max-width: 860px) {
       .main { padding: 1.25rem 1rem 4rem; }
       .topbar-app { flex-wrap: wrap; padding: 0.6rem 1rem; gap: 0.6rem; }
+      /* Target sentuh interaktif minimal 44x44 px pada layar sempit. */
+      .btn, .btn-sm, .btn-icon, .nav-link, .btn-ghost { min-height: var(--touch-min); min-width: var(--touch-min); }
+      .btn-sm { padding: 0.5rem 0.9rem; }
       .topbar-app nav { order: 3; width: 100%; flex: 1 0 100%; }
       .topbar-end { margin-left: auto; }
       .sidebar-user { display: none; }

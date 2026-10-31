@@ -829,7 +829,7 @@ function accountIdentityCell(c) {
   if (creds.organization_name) parts.push(escapeHtml(creds.organization_name));
   if (creds.organization_rate_limit_tier) parts.push(`tier ${escapeHtml(creds.organization_rate_limit_tier)}`);
   if (parts.length === 0) return "";
-  return `<div class="hint" style="font-size: 0.75rem;">${parts.join(" · ")}</div>`;
+  return `<div class="hint" style="font-size: var(--text-xs);">${parts.join(" · ")}</div>`;
 }
 
 /**
@@ -1046,7 +1046,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           : ""
       }
       ${p.keyUrl ? `<p class="hint" style="margin-top: 10px;">${keyLink(p, p.noAuth ? "Buat API key (opsional)" : "Buat API key")}</p>` : ""}
-      <p class="hint" style="margin-top: 6px; font-size: 0.75rem;">Data traffic & slot difetch pada ${trafficUpdated} WIB. Segarkan halaman untuk memperbarui.</p>
+      <p class="hint" style="margin-top: 6px; font-size: var(--text-xs);">Data traffic & slot difetch pada ${trafficUpdated} WIB. Segarkan halaman untuk memperbarui.</p>
     </div>
 
     ${

@@ -115,8 +115,8 @@ function renderTopologyPane(topology) {
       .recent-item:last-child { border-bottom: none; }
       .recent-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
       .recent-model { font-size: 0.8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .recent-when { font-size: 0.7rem; color: var(--text-subtle); flex-shrink: 0; }
-      .recent-io { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+      .recent-when { font-size: var(--text-xs); color: var(--text-subtle); flex-shrink: 0; }
+      .recent-io { font-size: var(--text-xs); color: var(--text-muted); margin-top: 2px; }
       .recent-empty { font-size: 0.8rem; color: var(--text-muted); padding: 1rem 0; text-align: center; }
       .recent-item-new { animation: recent-flash 1.2s ease-out; }
       @keyframes recent-flash { from { background: var(--accent-soft, rgba(10,10,10,0.06)); } to { background: transparent; } }
@@ -130,15 +130,15 @@ function renderTopologyPane(topology) {
       @media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
       .quota-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 var(--shadow-ink); }
       .q-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--logo-tile); border: var(--bw) solid var(--line); font-size: 0.75rem; font-weight: 800; color: var(--text); }
+      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--logo-tile); border: var(--bw) solid var(--line); font-size: var(--text-xs); font-weight: 800; color: var(--text); }
       .q-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1; }
       .q-name strong { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .q-body { display: flex; flex-direction: column; gap: 0.5rem; }
       .q-row { display: flex; flex-direction: column; gap: 3px; }
-      .q-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.78rem; }
+      .q-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--text-xs); }
       .q-label { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .q-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
-      .q-pct { font-size: 0.78rem; font-weight: 600; }
+      .q-meta { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+      .q-pct { font-size: var(--text-xs); font-weight: 600; }
       .q-pct.q-ok { color: var(--text); }
       .q-pct.q-warn { color: var(--text); }
       .q-pct.q-bad { color: var(--text); }
@@ -147,19 +147,19 @@ function renderTopologyPane(topology) {
       .q-bar i.q-ok { background: var(--success); }
       .q-bar i.q-warn { background: var(--warning); }
       .q-bar i.q-bad { background: var(--danger); }
-      .q-more { font-size: 0.72rem; }
+      .q-more { font-size: var(--text-xs); }
       .q-more summary { cursor: pointer; color: var(--text-muted); list-style: none; padding: 2px 0; }
       .q-more summary::-webkit-details-marker { display: none; }
       .q-more summary::before { content: "+ "; font-weight: 700; }
       .q-more[open] summary::before { content: "\\2212 "; }
       .q-more summary:hover { color: var(--text); }
       .q-more .q-rows { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.5rem; }
-      .q-levels { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 0.7rem; color: var(--text-subtle); }
+      .q-levels { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: var(--text-xs); color: var(--text-subtle); }
       .q-levels span { white-space: nowrap; }
       .q-levels b { font-weight: 600; color: var(--text-muted); }
       .q-levels b.q-bad { color: var(--text); }
       .q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
-      .q-updated { font-size: 0.7rem; color: var(--text-subtle); }
+      .q-updated { font-size: var(--text-xs); color: var(--text-subtle); }
       @keyframes topo-ping { 0% { opacity: .8; r: 4; } 80%,100% { opacity: 0; r: 10; } }
       /* Node provider yang sedang dipakai: badan kartu bernapas + transisi halus. */
       @keyframes topo-node-breathe { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: .4; } }

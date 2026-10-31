@@ -62,7 +62,7 @@ export function renderOverviewPage(port = 20120) {
       <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-wrap: wrap; gap: 0.5rem;">
         <div style="display: flex; align-items: center; gap: 0.65rem;">
           <h3 style="font-size: 0.95rem; margin: 0; font-weight: 600;">Console Log</h3>
-          <span id="log-status" class="pill pill-success" style="font-size: 0.68rem;">
+          <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs);">
             <span class="dot" style="width:6px;height:6px;"></span>
             Connecting...
           </span>
@@ -73,14 +73,14 @@ export function renderOverviewPage(port = 20120) {
             type="text"
             id="log-filter"
             placeholder="Saring log..."
-            style="width: 160px; padding: 0.25rem 0.6rem; font-size: 0.78rem; border-radius: 0; background: var(--surface);"
+            style="width: 160px; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface);"
             oninput="applyLogFilter()"
           />
-          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--text-muted); cursor: pointer; user-select: none;">
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: var(--text-muted); cursor: pointer; user-select: none;">
             <input type="checkbox" id="log-autoscroll" checked style="width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer;" />
             Auto-scroll
           </label>
-          <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: 0.75rem; padding: 0.25rem 0.65rem;">
+          <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: var(--text-xs); padding: 0.25rem 0.65rem;">
             Clear
           </button>
         </div>
@@ -88,7 +88,7 @@ export function renderOverviewPage(port = 20120) {
 
       <div
         id="console-terminal"
-        style="height: 380px; overflow-y: auto; background: #080808; padding: 0.85rem 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem; line-height: 1.5; color: #d4d4d4;"
+        style="height: 380px; overflow-y: auto; background: #080808; padding: 0.85rem 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-xs); line-height: 1.5; color: #d4d4d4;"
       >
         <div id="log-entries" style="display: flex; flex-direction: column; gap: 2px;">
           <div class="log-empty" style="color: #a3a3a3; padding: 1rem 0; text-align: center;">Menunggu log aktivitas gateway...</div>

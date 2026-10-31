@@ -55,9 +55,11 @@ async function waitForPortClose(target, timeoutMs = 30000) {
   return false;
 }
 
+// /health tidak lewat auth dashboard; /api/version dibalik login sehingga bisa
+// menjawab 401 walau server sehat.
 function getOnce(target) {
   return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${target}/api/version`, { timeout: 3000 }, (res) => {
+    const req = http.get(`http://127.0.0.1:${target}/health`, { timeout: 3000 }, (res) => {
       res.resume();
       resolve(res.statusCode === 200);
     });
@@ -127,9 +129,41 @@ async function main() {
 
   if (await waitForHealth(port)) {
     log(`selesai: ${tag} berjalan di port ${port}`);
-  } else {
-    log(`server baru tidak menjawab /api/version dalam 45 detik — cek log startup dan jalankan ulang manual (npm start)`);
+    return;
   }
+
+  log(`server baru tidak menjawab /health dalam 45 detik — mengembalikan ke ${previousRef}`);
+  const rolledBack = await rollbackTo(previousRef);
+  if (!rolledBack) {
+    log("rollback gagal — pulihkan manual dari data/updater.log");
+    process.exit(1);
+  }
+  if (await waitForHealth(port)) {
+    log(`rollback selesai: ${previousRef} berjalan di port ${port}`);
+  } else {
+    log(`server ${previousRef} juga tidak menjawab /health — jalankan ulang manual (npm start)`);
+    process.exit(1);
+  }
+}
+
+/** Checkout versi sebelumnya, pasang dependensi, lalu jalankan server lama. */
+async function rollbackTo(ref) {
+  try {
+    await run(`git checkout -f ${ref}`, { cwd: repoDir });
+    await run(NPM_CI, { cwd: repoDir });
+  } catch (err) {
+    log(`rollback checkout gagal: ${err.message}`);
+    return false;
+  }
+  const previous = spawn(process.execPath, ["src/index.js"], {
+    cwd: repoDir,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...process.env, PORT: String(port) },
+  });
+  previous.unref();
+  return true;
 }
 
 main().catch((err) => {

@@ -351,7 +351,29 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
       const lines = buffer.split("\n");
       // Keep unfinished line in buffer
       buffer = lines.pop() || "";
+      consumeLines(lines, controller);
+    },
 
+    flush(controller) {
+      // Sisa buffer tanpa newline di akhir stream ikut diproses sebelum penutupan.
+      buffer += textDecoder.decode();
+      const rest = buffer;
+      buffer = "";
+      if (rest) consumeLines([rest], controller);
+
+      if (sourceFormat === "claude" && targetFormat === "openai") {
+        if (!doneSent) {
+          controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+          doneSent = true;
+        }
+      }
+      if (sourceFormat === "openai" && targetFormat === "claude" && !doneSent) {
+        finishClaudeStream(controller, "end_turn");
+      }
+    },
+  });
+
+  function consumeLines(lines, controller) {
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) {
@@ -642,18 +664,5 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
           }
         }
       }
-    },
-
-    flush(controller) {
-      if (sourceFormat === "claude" && targetFormat === "openai") {
-        if (!doneSent) {
-          controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
-          doneSent = true;
-        }
-      }
-      if (sourceFormat === "openai" && targetFormat === "claude" && !doneSent) {
-        finishClaudeStream(controller, "end_turn");
-      }
-    },
-  });
+  }
 }

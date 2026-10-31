@@ -502,7 +502,19 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
       buffer += textDecoder.decode(chunk, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
+      consumeLines(lines, controller);
+    },
+    flush(controller) {
+      // Sisa buffer tanpa newline di akhir stream ikut diproses.
+      buffer += textDecoder.decode();
+      const rest = buffer;
+      buffer = "";
+      if (rest) consumeLines([rest], controller);
+      controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
+    },
+  });
 
+  function consumeLines(lines, controller) {
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || !trimmed.startsWith("data:")) continue;
@@ -594,11 +606,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
           }
         } catch {}
       }
-    },
-    flush(controller) {
-      controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
-    },
-  });
+  }
 }
 
 /**

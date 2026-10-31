@@ -106,3 +106,17 @@ test("openai->claude translation moves cached tokens out of input_tokens", async
   const delta = chunks.join("").split("\n").find((l) => l.startsWith("data:") && l.includes('"message_delta"'));
   assert.deepStrictEqual(JSON.parse(delta.slice(5)).usage, { input_tokens: 100, output_tokens: 5, cache_read_input_tokens: 900 });
 });
+
+test("F-05 usage tap - usage pada chunk terakhir tanpa newline tetap tercatat", async () => {
+  initDb(":memory:");
+  // Event message_delta terakhir tidak diakhiri newline; usage-nya harus ikut dihitung.
+  await drain(
+    [
+      'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":77}}',
+    ],
+    createUsageTapStream({ model: "claude-tail" })
+  );
+  const s = getUsageStats().summary;
+  assert.strictEqual(s.total_output_tokens, 77, "output token di baris terakhir tanpa newline harus tercatat");
+});

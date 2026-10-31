@@ -203,7 +203,23 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
         buffer += textDecoder.decode(chunk, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
+        consumeLines(lines);
+      } catch {}
+    },
 
+    flush() {
+      // Baris terakhir tanpa newline masih tertahan di buffer; proses dulu.
+      try {
+        buffer += textDecoder.decode();
+        const rest = buffer;
+        buffer = "";
+        if (rest) consumeLines([rest]);
+      } catch {}
+      finishUsage();
+    },
+  });
+
+  function consumeLines(lines) {
         for (const line of lines) {
           const trimmed = line.trim();
           if (trimmed.startsWith("data:")) {
@@ -245,10 +261,9 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
             }
           }
         }
-      } catch {}
-    },
+  }
 
-    flush() {
+  function finishUsage() {
       const durationMs = Date.now() - startTime;
       const { cacheReadTokens, cacheWriteTokens, reasoningTokens, ...counts } = normalizeUsage(lastUsage);
       let { inputTokens, outputTokens } = counts;
@@ -276,8 +291,7 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
           durationMs,
         });
       });
-    },
-  });
+  }
 }
 
 /**

@@ -17,6 +17,13 @@ const CREDENTIAL_KEY_NAMES = new Set([
   "secret",
   "clientsecret",
   "signingsecret",
+  // F-04: nama key yang biasa dipakai untuk kredensial cloud/DB.
+  "awssecretaccesskey",
+  "awssecretkey",
+  "privatekey",
+  "authorization",
+  "databaseurl",
+  "connectionstring",
 ]);
 
 const PLACEHOLDER_WORDS = new Set([
@@ -43,6 +50,19 @@ const ANTHROPIC_KEY_RE = /\bsk-ant-(?:api\d{2}-)?[A-Za-z0-9_-]{16,}/g;
 const OPENAI_KEY_RE = /\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}/g;
 const GITHUB_TOKEN_RE = /\b(?:gh[posur]_[A-Za-z0-9]{20,}|github_pat_\w{20,})\b/g;
 const AWS_ACCESS_KEY_RE = /\b(?:AKIA|ASIA|AIDA|AROA|AIPA|ANPA|ANVA|ASCA)[A-Z0-9]{16}\b/g;
+// F-04: AWS secret access key selalu mengikuti assignment bernama key.
+const AWS_SECRET_KEY_RE = /(?:aws_secret_access_key|awssecretkey)[\"']?\s*[:=]\s*[\"']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi;
+// F-04: Google API key dan token Slack.
+const GOOGLE_API_KEY_RE = /\bAIza[0-9A-Za-z_-]{35}\b/g;
+const SLACK_TOKEN_RE = /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g;
+// F-04: URL berkredensial (postgres://user:pass@host/db, mongodb+srv://, redis://, ...).
+const CREDENTIAL_URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@[^\s]+/gi;
+// F-04: pola kalimat nalar manusia ("the password is ..."), bukan assignment.
+const FREE_TEXT_PHRASE_RE =
+  /\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)\s+is\s+([\"']?)([^\s\"',;]{8,})\1/gi;
+// F-04: header Authorization dengan skema Bearer/Basic/Token pada teks bebas.
+// Nilai assignment biasa berhenti di spasi, sehingga token JWT ikut terlewat.
+const AUTH_HEADER_RE = /\bAuthorization\s*[:=]\s*(?:Bearer|Basic|Token)\s+([A-Za-z0-9._~+/-]{8,}={0,2})/gi;
 
 // Private key blocks: complete and truncated (bounded header to avoid quadratic backtracking)
 const PRIVATE_KEY_COMPLETE_RE =
@@ -89,6 +109,31 @@ function isCredentialValue(rawVal, isQuoted = false) {
 }
 
 /**
+ * Media type biner: benar-benar bukan teks, aman dilewati.
+ * F-04 dulu melewati SEMUA data:*;base64 sehingga rahasia yang dibungkus
+ * data:text/plain;base64 lolos tanpa dipindai.
+ */
+const BINARY_MEDIA_RE = /^data:(?:image|audio|video|font)\/(?:x-)?[a-z0-9.+-]+/;
+const DATA_URI_TEXT_RE =
+  /^data:(text\/[a-z0-9.+-]+|application\/(?:json|xml|javascript|x-www-form-urlencoded));base64,([A-Za-z0-9+/=\s]+)$/;
+
+/**
+ * Decode payload teks dari data URI (mis. data:text/plain;base64,...).
+ * Mengembalikan null bila bukan data URI teks atau gagal decode.
+ */
+function decodeDataUriText(val) {
+  if (typeof val !== "string") return null;
+  const match = DATA_URI_TEXT_RE.exec(val.trim());
+  if (!match) return null;
+  try {
+    const decoded = Buffer.from(match[2].replace(/\s+/g, ""), "base64").toString("utf8");
+    return { mime: match[1], text: decoded };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check if a value is binary or base64 data that should never be inspected.
  */
 function isSafeNonText(val, key, parent) {
@@ -97,12 +142,41 @@ function isSafeNonText(val, key, parent) {
   if (val instanceof Uint8Array || (typeof ArrayBuffer !== "undefined" && val instanceof ArrayBuffer)) return true;
 
   if (typeof val === "string") {
-    if (val.startsWith("data:image/") || val.startsWith("data:audio/") || val.startsWith("data:video/")) return true;
-    if (val.startsWith("data:") && val.includes(";base64,")) return true;
+    if (BINARY_MEDIA_RE.test(val)) return true;
     if (parent && (parent.type === "base64" || parent.media_type) && key === "data") return true;
   }
 
   return false;
+}
+
+/**
+ * Pola token spesifik F-04 yang bukan assignment biasa (key: value).
+ * Dipakai bersama oleh deteksi, redaksi, dan hasSpecificToken.
+ */
+function detectSpecificTokens(str, foundTypes) {
+  if (typeof str !== "string" || str.length === 0) return;
+
+  if (/authorization\s*[:=]\s*(?:bearer|basic|token)\s/i.test(str)) {
+    AUTH_HEADER_RE.lastIndex = 0;
+    if (AUTH_HEADER_RE.test(str)) foundTypes.add("authorization_header");
+  }
+  if (str.includes("AIza")) {
+    GOOGLE_API_KEY_RE.lastIndex = 0;
+    if (GOOGLE_API_KEY_RE.test(str)) foundTypes.add("google_api_key");
+  }
+  if (/xox[abprs]-/i.test(str)) {
+    SLACK_TOKEN_RE.lastIndex = 0;
+    if (SLACK_TOKEN_RE.test(str)) foundTypes.add("slack_token");
+  }
+  if (/aws[_ ]?secret/i.test(str)) {
+    AWS_SECRET_KEY_RE.lastIndex = 0;
+    if (AWS_SECRET_KEY_RE.test(str)) foundTypes.add("aws_secret_key");
+  }
+  if (str.includes("://")) {
+    CREDENTIAL_URL_RE.lastIndex = 0;
+    const r = CREDENTIAL_URL_RE.test(str);
+    if (r) foundTypes.add("credential_url");
+  }
 }
 
 /**
@@ -134,7 +208,22 @@ function hasSpecificToken(str) {
     AWS_ACCESS_KEY_RE.lastIndex = 0;
     if (AWS_ACCESS_KEY_RE.test(str)) return true;
   }
-  return false;
+  const extra = new Set();
+  detectSpecificTokens(str, extra);
+  return extra.size > 0;
+}
+
+/** Pola kalimat nalar manusia ("the password is ..."), bukan assignment key: value. */
+function detectCredentialPhrase(str, foundTypes) {
+  if (typeof str !== "string" || str.length === 0) return;
+  FREE_TEXT_PHRASE_RE.lastIndex = 0;
+  let match;
+  while ((match = FREE_TEXT_PHRASE_RE.exec(str)) !== null) {
+    const candidate = match[2];
+    if (isCredentialValue(candidate, Boolean(match[1])) && !hasSpecificToken(candidate)) {
+      foundTypes.add("credential_assignment");
+    }
+  }
 }
 
 /**
@@ -142,6 +231,13 @@ function hasSpecificToken(str) {
  */
 function scanString(str, foundTypes) {
   if (typeof str !== "string" || str.length === 0) return;
+
+  // F-04: payload teks dalam data:*;base64 dipindai setelah decode.
+  const dataUri = decodeDataUriText(str);
+  if (dataUri) {
+    scanString(dataUri.text, foundTypes);
+    return;
+  }
 
   // 1. Private keys
   if (str.includes("-----BEGIN")) {
@@ -212,6 +308,12 @@ function scanString(str, foundTypes) {
       }
     }
   }
+
+  // 7. F-04: token spesifik pada teks bebas (Google, Slack, AWS secret, URL berkredensial).
+  detectSpecificTokens(str, foundTypes);
+
+  // 8. F-04: pola kalimat nalar manusia seperti "the password is ...".
+  detectCredentialPhrase(str, foundTypes);
 }
 
 /**
@@ -221,6 +323,18 @@ function scanString(str, foundTypes) {
 function redactString(str, foundTypes) {
   if (typeof str !== "string" || str.length === 0) {
     return { text: str, count: 0 };
+  }
+
+  // F-04: data URI teks di-decode, di-redaksi isinya, lalu di-encode ulang
+  // agar rahasia yang dibungkus base64 juga tersapu.
+  const dataUri = decodeDataUriText(str);
+  if (dataUri) {
+    const inner = redactString(dataUri.text, foundTypes);
+    if (inner.count === 0) return { text: str, count: 0 };
+    return {
+      text: `data:${dataUri.mime};base64,${Buffer.from(inner.text, "utf8").toString("base64")}`,
+      count: inner.count,
+    };
   }
 
   let text = str;
@@ -327,6 +441,57 @@ function redactString(str, foundTypes) {
       );
     }
   }
+
+  // 7. F-04: token spesifik pada teks bebas (Google, Slack, AWS secret, URL berkredensial).
+  if (/authorization\s*[:=]\s*(?:bearer|basic|token)\s/i.test(text)) {
+    AUTH_HEADER_RE.lastIndex = 0;
+    text = text.replace(AUTH_HEADER_RE, (full, secret) => {
+      count++;
+      foundTypes.add("authorization_header");
+      return full.replace(secret, "[REDACTED:authorization_header]");
+    });
+  }
+  if (text.includes("AIza")) {
+    GOOGLE_API_KEY_RE.lastIndex = 0;
+    text = text.replace(GOOGLE_API_KEY_RE, () => {
+      count++;
+      foundTypes.add("google_api_key");
+      return "[REDACTED:google_api_key]";
+    });
+  }
+  if (/xox[abprs]-/i.test(text)) {
+    SLACK_TOKEN_RE.lastIndex = 0;
+    text = text.replace(SLACK_TOKEN_RE, () => {
+      count++;
+      foundTypes.add("slack_token");
+      return "[REDACTED:slack_token]";
+    });
+  }
+  if (/aws[_ ]?secret/i.test(text)) {
+    AWS_SECRET_KEY_RE.lastIndex = 0;
+    text = text.replace(AWS_SECRET_KEY_RE, (full, secret) => {
+      count++;
+      foundTypes.add("aws_secret_key");
+      return full.replace(secret, "[REDACTED:aws_secret_key]");
+    });
+  }
+  if (text.includes("://")) {
+    CREDENTIAL_URL_RE.lastIndex = 0;
+    text = text.replace(CREDENTIAL_URL_RE, () => {
+      count++;
+      foundTypes.add("credential_url");
+      return "[REDACTED:credential_url]";
+    });
+  }
+  FREE_TEXT_PHRASE_RE.lastIndex = 0;
+  text = text.replace(FREE_TEXT_PHRASE_RE, (full, quote, candidate) => {
+    if (!isCredentialValue(candidate, Boolean(quote)) || hasSpecificToken(candidate)) {
+      return full;
+    }
+    count++;
+    foundTypes.add("credential_assignment");
+    return full.replace(candidate, "[REDACTED:credential_assignment]");
+  });
 
   return { text, count };
 }

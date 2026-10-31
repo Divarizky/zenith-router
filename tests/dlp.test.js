@@ -538,3 +538,93 @@ test("gateway - combo chain and fallback members receive cleaned payload (single
     setSetting("dlp_mode", "off");
   }
 });
+
+// ============================================================================
+// F-04: pola kredensial umum yang sebelumnya lolos
+// ============================================================================
+
+test("dlp F-04 - mendeteksi AWS secret, Google key, Slack token, URL berkredensial, header Authorization", () => {
+  // URL dibangun dari potongan agar tetap terbaca sebagai data tes, bukan kredensial nyata.
+  const dbUrl = ["post", "gres://", "appuser", ":", "s3cret", "-p4ss", "@db.internal", "/prod"].join("");
+  const samples = {
+    aws_secret: "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    google_api: "kunci google AIzaSyA1234567890abcdefghijklmnopqrstuv dipakai klien",
+    slack: "token bot xoxb-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx",
+    credential_url: "DATABASE koneksi postgres://dbuser:s3cret-p4ss@db.internal:5432/prod",
+    authorization_header: "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcd'",
+    database_url_property: { database_url: dbUrl },
+    private_key_property: { private_key: "-----<SECRET_bf38d18f>" },
+    authorization_property: { authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcd" },
+    sentence: "jangan lupa the password is R4hasia-Negara-99 sebelum deploy",
+  };
+
+  for (const [label, payload] of Object.entries(samples)) {
+    const scan = scanForSecrets(payload);
+    assert.strictEqual(scan.found, true, `${label} harus terdeteksi`);
+    const red = redactSecrets(payload);
+    assert.ok(red.count > 0, `${label} harus teredaksi`);
+    // Hasil redaksi tidak boleh lagi memuat nilai rahasia aslinya.
+    const serialized = typeof red.value === "string" ? red.value : JSON.stringify(red.value);
+    assert.ok(serialized.includes("[REDACTED:"), `${label} tersapu placeholder`);
+    for (const needle of [
+      "wJalrXUtnFEMI",
+      "AIzaSyA1234567890",
+      "xoxb-1234567890123",
+      "s3cret-p4ss",
+      "eyJhbGciOiJIUzI1NiJ9",
+      "MIIEowIBAAKCAQEA012345",
+      "R4hasia-Negara-99",
+    ]) {
+      assert.ok(!serialized.includes(needle), `${label} tidak menyisakan ${needle}`);
+    }
+  }
+
+  // Kontrol positif: skema lama tetap terdeteksi (regresi F-04 tidak menurunkan cakupan).
+  const oldControls = {
+    anthropic: "sk-ant-api03-abcdefghijklmnop12345",
+    openai: "sk-proj-12345678901234567890",
+  };
+  for (const [label, payload] of Object.entries(oldControls)) {
+    assert.strictEqual(scanForSecrets(payload).found, true, `${label} masih terdeteksi`);
+  }
+});
+
+test("dlp F-04 - redaksi spesifik per pola menghasilkan placeholder bertipe", () => {
+  const redAws = redactSecrets("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+  assert.ok(redAws.value.includes("[REDACTED:"), "nilai AWS secret disensor");
+  assert.ok(!redAws.value.includes("wJalrXUtnFEMI"), "secret asli tidak tersisa");
+
+  const redGoogle = redactSecrets("AIzaSyA1234567890abcdefghijklmnopqrstuv");
+  assert.ok(!redGoogle.value.includes("AIzaSyA1234567890"), "key Google disensor");
+  assert.ok(redGoogle.types.includes("google_api_key"));
+
+  const redSlack = redactSecrets("xoxb-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx");
+  assert.ok(redSlack.types.includes("slack_token"));
+
+  const redUrl = redactSecrets("postgres://dbuser:s3cret-p4ss@db.internal:5432/prod");
+  assert.ok(!redUrl.value.includes("s3cret-p4ss"), "kredensial URL disensor");
+  assert.ok(redUrl.types.includes("credential_url"));
+
+  const redAuth = redactSecrets("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0");
+  assert.ok(!redAuth.value.includes("eyJhbGciOiJIUzI1NiJ9"), "token Authorization disensor");
+  assert.ok(redAuth.types.includes("authorization_header"));
+});
+
+test("dlp F-04 - data URI teks base64 dipindai dan disensor, biner tetap dilewati", () => {
+  const b64 = Buffer.from("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "utf8").toString("base64");
+  const dataUri = `data:text/plain;base64,${b64}`;
+
+  const scan = scanForSecrets(dataUri);
+  assert.strictEqual(scan.found, true, "rahasia dalam data:text/plain;base64 terdeteksi");
+
+  const red = redactSecrets(dataUri);
+  assert.ok(red.count > 0, "payload tersapu");
+  const decoded = Buffer.from(red.value.replace(/^data:text\/plain;base64,/, ""), "base64").toString("utf8");
+  assert.ok(!decoded.includes("wJalrXUtnFEMI"), "decoded payload tidak lagi memuat secret");
+  assert.ok(decoded.includes("[REDACTED:"), "secret diganti placeholder");
+
+  // Gambar biner tetap dilewati agar tidak ada false positive dari byte acak.
+  const image = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//";
+  assert.strictEqual(scanForSecrets(image).found, false);
+  assert.strictEqual(redactSecrets(image).value, image);
+});

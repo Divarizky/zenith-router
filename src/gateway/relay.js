@@ -28,6 +28,8 @@ import { guardStream } from "../services/streamGuard.js";
 import { getSetting } from "../services/settings.js";
 import { dlpModeFrom, scanForSecrets, redactSecrets } from "../services/dlp.js";
 import { captureLine } from "../services/logger.js";
+import { hasValidAdminToken, isAdminProtected } from "../services/adminAuth.js";
+import { isLoopbackAddress } from "../security.js";
 
 // Header HTTP hanya boleh berisi ByteString (Latin1). Nama akun non-Latin1
 // di-percent-encode agar header tidak melempar error dan respons tetap terkirim.
@@ -100,6 +102,19 @@ export const claudeEnvelope = {
   }),
 };
 
+/**
+ * Header `x-zenith-no-failover: 1` untuk probing model murni: combo dan fallback
+ * dimatikan. Hanya dihormati dari loopback atau request yang membawa token admin sah.
+ */
+export function wantsNoFailover(c) {
+  if (c.req.header("x-zenith-no-failover") !== "1") return false;
+  const remote = c.env?.incoming?.socket?.remoteAddress;
+  if (remote && isLoopbackAddress(remote)) return true;
+  // hasValidAdminToken bernilai true saat proteksi admin nonaktif, jadi tidak boleh
+  // dipakai sebagai syarat otorisasi di sini. Harus ada token admin yang benar-benar dikirim.
+  return isAdminProtected() && hasValidAdminToken(c);
+}
+
 export async function relayClientRequest(c, spec) {
   let body;
   try {
@@ -143,6 +158,7 @@ export async function relayClientRequest(c, spec) {
     const routed = await routeRequest({
       model: body.model,
       body,
+      noFailover: wantsNoFailover(c),
       signal: c.req.raw.signal,
       sourceFormat: spec.sourceFormat,
       defaultFormat: spec.defaultFormat,

@@ -296,16 +296,34 @@ export function isTransportFailure(res, bodyText) {
 }
 
 /**
+ * Retry-After (RFC 9110 §10.2.3): berupa detik (delta-seconds) atau tanggal HTTP (IMF-fixdate).
+ * Mengembalikan milidetik > 0, atau null bila nilai kosong, invalid, atau tanggal sudah lampau.
+ */
+export function parseRetryAfterMs(value, nowMs = Date.now()) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+
+  const sec = Number(raw);
+  if (Number.isFinite(sec)) return sec > 0 ? sec * 1000 : null;
+
+  // IMF-fixdate wajib berakhir "GMT"; Date.parse menolak string tanpa pola ini.
+  if (!/^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(raw)) return null;
+  const targetMs = Date.parse(raw);
+  if (!Number.isFinite(targetMs)) return null;
+  const diffMs = targetMs - nowMs;
+  return diffMs > 0 ? diffMs : null;
+}
+
+/**
  * Parses Google/Antigravity and standard rate limit reset indications.
  * Antigravity reports quota exhaustion with details containing:
  * - RetryInfo: { retryDelay: "497880.916563646s" }
  * - ErrorInfo: { metadata: { quotaResetTimeStamp: "2026-10-24T22:06:11Z", quotaResetDelay: "..." } }
  */
 export function extractQuotaCooldownMs(res, bodyText, defaultDurationMs = 60000) {
-  const retryAfterSec = Number(res?.headers?.get?.("retry-after"));
-  if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
-    return retryAfterSec * 1000;
-  }
+  const retryAfter = parseRetryAfterMs(res?.headers?.get?.("retry-after"));
+  if (retryAfter !== null) return retryAfter;
 
   if (!bodyText || typeof bodyText !== "string") return defaultDurationMs;
 
@@ -405,6 +423,7 @@ export async function executeWithFallback({
   sessionPromptCacheKey = false,
   effort = undefined,
   requestId = null,
+  noFailover = false,
 }) {
   const modelId = targetModel || upstreamPayload?.model || "";
   // One client request = one attempt budget. Retries inside it reuse the id.
@@ -594,6 +613,10 @@ export async function executeWithFallback({
     captureLine(
       `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
     );
+
+    // Probing murni (x-zenith-no-failover): satu upstream call, tanpa rotasi akun
+    // dan tanpa mem-park akun. Respons gagal diteruskan apa adanya.
+    if (noFailover) return { ok: false, response: lastFailureResponse };
 
     // Model has no reasoning mode: drop reasoning_effort and retry the same account once.
     if (isReasoningRejected(res, errText) && !reasoningRetried && payload && "reasoning_effort" in payload) {

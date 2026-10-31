@@ -246,3 +246,40 @@ test("admin token - login page saat proteksi nonaktif langsung ke dashboard", as
     assert.strictEqual(res.headers.get("location"), "/dashboard");
   });
 });
+
+// F-01 regresi: password dashboard default tidak boleh membuka login saat token admin aktif.
+test("admin token F-01 - password default 123456 ditolak saat ZENITH_ADMIN_TOKEN aktif", async () => {
+  initDb(":memory:");
+  await protectedEnv(async () => {
+    const res = await app.request("/dashboard/login", {
+      method: "POST",
+      body: form({ token: "123456", next: "/dashboard" }),
+      ...remote("10.10.0.1"),
+    });
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.headers.get("set-cookie"), null, "password default tidak boleh memasang cookie");
+  });
+});
+
+test("admin token F-01 - token admin salah tetap dicatat ke limiter sebelum 403", async () => {
+  initDb(":memory:");
+  await protectedEnv(async () => {
+    const addr = "10.10.0.2";
+    let last;
+    for (let i = 0; i < 5; i++) {
+      last = await app.request("/dashboard/login", {
+        method: "POST",
+        body: form({ token: "salah", next: "/dashboard" }),
+        ...remote(addr),
+      });
+    }
+    // Percobaan ke-5 mengunci IP: respons harus 429, bukan 403 tanpa catatan.
+    assert.strictEqual(last.status, 429, "lima kegagalan token admin harus mengunci IP");
+    const locked = await app.request("/dashboard/login", {
+      method: "POST",
+      body: form({ token: ADMIN_TOKEN, next: "/dashboard" }),
+      ...remote(addr),
+    });
+    assert.strictEqual(locked.status, 429, "IP terkunci tidak boleh login walau token benar");
+  });
+});

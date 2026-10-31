@@ -59,7 +59,7 @@ export function isLoopbackHost(host) {
   return LOOPBACK_HOSTNAMES.has(h) || /^127(\.\d{1,3}){3}$/.test(h);
 }
 
-function isLoopbackAddress(address) {
+export function isLoopbackAddress(address) {
   if (!address) return false;
   const a = address.startsWith("::ffff:") ? address.slice(7) : address;
   return a === "::1" || a.startsWith("127.");

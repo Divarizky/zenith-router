@@ -183,6 +183,7 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     sessionPromptCacheKey: endpoint.sessionPromptCacheKey,
     effort,
     requestId: endpoint.requestId,
+    noFailover: Boolean(endpoint.noFailover),
   });
 
   if (!result.ok) return { ok: false, response: result.response, status: result.response.status };
@@ -382,17 +383,30 @@ async function runDefaultFallback({ endpoint, attempted, failure, origin, fallba
  * the default fallback model from Settings — once, and never onto a target the
  * request already called.
  */
-export async function routeRequest({ model, ...endpoint }) {
+export async function routeRequest({ model, noFailover = false, ...endpoint }) {
   if (!endpoint.requestId) {
     routeRequestSeq += 1;
     endpoint.requestId = `route-${routeRequestSeq}`;
   }
+  endpoint.noFailover = noFailover;
   const target = resolveTarget(model);
 
   if (!target) return { notFound: true };
 
   const attempted = new Set();
-  const fallbackId = getSetting("default_fallback_model", "").trim();
+  const fallbackId = noFailover ? "" : getSetting("default_fallback_model", "").trim();
+
+  // Probing model murni: satu model langsung, tanpa combo dan tanpa fallback.
+  if (noFailover && target.combo) {
+    captureLine(`[ROUTE] model=${model} no-failover: combo dilewati, tidak ada fallback`);
+    const member = target.combo.models.find((m) => resolveModel(m)?.provider);
+    const resolved = member ? resolveModel(member) : null;
+    if (!resolved) {
+      const message = `Combo '${model}' tidak punya anggota yang bisa dipetakan`;
+      return { ok: false, response: comboError(endpoint, "combo_exhausted", message) };
+    }
+    return attemptMember(resolved.provider, resolved.targetModel, endpoint);
+  }
 
   if (!target.combo) {
     const { provider, targetModel } = target;
@@ -402,6 +416,7 @@ export async function routeRequest({ model, ...endpoint }) {
     const attempt = await attemptMember(provider, targetModel, endpoint);
     attempted.add(identityOf({ provider, targetModel }));
     if (attempt.ok) return attempt;
+    if (noFailover) return attempt;
     // A payload the upstream itself rejects fails the same way everywhere,
     // unless the next model has credit this one ran out of.
     if (!(await shouldAdvanceToNextMember(attempt))) return attempt;
@@ -410,6 +425,7 @@ export async function routeRequest({ model, ...endpoint }) {
 
   const attempt = await runComboMembers(target.combo, endpoint, attempted);
   if (attempt.ok) return attempt;
+  if (noFailover) return attempt;
   if (!(await shouldAdvanceToNextMember(attempt))) return attempt;
   return runDefaultFallback({ endpoint, attempted, failure: attempt, origin: model, fallbackId });
 }

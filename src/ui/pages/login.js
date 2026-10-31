@@ -197,14 +197,14 @@ export async function handleDashboardLogin(c) {
 
   let isValid = false;
 
-  // 1. Cek token admin jika ZENITH_ADMIN_TOKEN terpasang
-  if (isAdminProtected() && verifyAdminToken(passwordInput)) {
-    isValid = true;
-    c.header("Set-Cookie", buildAdminCookieHeader());
-  }
-
-  // 2. Cek password dashboard normal
-  if (!isValid && verifyDashboardPassword(passwordInput)) {
+  if (isAdminProtected()) {
+    // Mode admin: hanya token admin yang sah. Password dashboard (termasuk default 123456) ditolak.
+    if (verifyAdminToken(passwordInput)) {
+      isValid = true;
+      c.header("Set-Cookie", buildAdminCookieHeader());
+    }
+  } else if (verifyDashboardPassword(passwordInput)) {
+    // Mode normal: cek password dashboard
     isValid = true;
   }
 
@@ -224,15 +224,7 @@ export async function handleDashboardLogin(c) {
     return c.redirect(next);
   }
 
-  // Jika proteksi admin aktif, kembalikan 403 Forbidden dengan pesan token admin salah
-  if (isAdminProtected()) {
-    return c.html(
-      renderDashboardLoginPage({ next, error: "Token admin salah" }),
-      403
-    );
-  }
-
-  // Gagal password biasa: catat ke limiter dan tampilkan error 401
+  // Catat kegagalan ke limiter sebelum respons apa pun, termasuk mode admin.
   const fail = recordLoginFailure(clientId);
   if (fail.locked) {
     return c.html(
@@ -241,6 +233,15 @@ export async function handleDashboardLogin(c) {
     );
   }
 
+  // Jika proteksi admin aktif, kembalikan 403 Forbidden dengan pesan token admin salah
+  if (isAdminProtected()) {
+    return c.html(
+      renderDashboardLoginPage({ next, error: "Token admin salah", remaining: fail.remaining }),
+      403
+    );
+  }
+
+  // Gagal password biasa: tampilkan error 401
   return c.html(
     renderDashboardLoginPage({
       next,

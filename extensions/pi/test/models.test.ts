@@ -6,8 +6,10 @@ import path from "node:path";
 import {
   FALLBACK_MODEL_IDS,
   parseModelIds,
+  parseModelInfos,
   readModelCache,
   selectModels,
+  toProviderModel,
   writeModelCache,
 } from "../src/models.ts";
 
@@ -57,4 +59,66 @@ test("writeModelCache menolak daftar kosong sehingga cache berisi tidak tertimpa
   writeModelCache(file, ["m1"], new Date());
   assert.equal(writeModelCache(file, [], new Date()), false);
   assert.deepEqual(readModelCache(file)?.ids, ["m1"]);
+});
+
+test("capabilities.reasoning=true menghasilkan model reasoning=true, dengan vision dan batas token dari gateway", () => {
+  const infos = parseModelInfos({
+    data: [
+      {
+        id: "cc/claude-haiku-5-5",
+        capabilities: { vision: true, reasoning: true },
+        context_length: 200_000,
+        max_completion_tokens: 64_000,
+      },
+    ],
+  });
+  assert.ok(infos);
+  const model = toProviderModel(infos[0].id, infos[0]);
+  assert.equal(model.reasoning, true, "model yang didukung reasoning harus terdaftar reasoning=true");
+  assert.deepEqual(model.input, ["text", "image"]);
+  assert.equal(model.contextWindow, 200_000);
+  assert.equal(model.maxTokens, 64_000);
+});
+
+test("capabilities.reasoning=false dan model tanpa metadata sama-sama memakai default konservatif", () => {
+  const infos = parseModelInfos({
+    data: [{ id: "tanpa-metadata" }, { id: "tanpa-reasoning", capabilities: { reasoning: false } }],
+  });
+  assert.ok(infos);
+  const plain = toProviderModel(infos[0].id, infos[0]);
+  assert.equal(plain.reasoning, false);
+  assert.deepEqual(plain.input, ["text"]);
+  assert.equal(plain.contextWindow, 128_000);
+  assert.equal(plain.maxTokens, 8_192);
+  assert.equal(toProviderModel("tanpa-info").reasoning, false);
+  assert.equal(toProviderModel(infos[1].id, infos[1]).reasoning, false);
+});
+
+test("nilai metadata yang tidak valid diabaikan, bukan diteruskan ke Pi", () => {
+  const infos = parseModelInfos({
+    data: [{ id: "rusak", capabilities: { reasoning: "ya" }, context_length: -1, max_completion_tokens: "banyak" }],
+  });
+  assert.ok(infos);
+  const model = toProviderModel(infos[0].id, infos[0]);
+  assert.equal(model.reasoning, false);
+  assert.equal(model.contextWindow, 128_000);
+  assert.equal(model.maxTokens, 8_192);
+});
+
+test("cache lama yang hanya berisi ids tetap terbaca, dengan models kosong", () => {
+  const file = path.join(tempDir(), "models.json");
+  fs.writeFileSync(file, JSON.stringify({ savedAt: "2026-10-30T00:00:00.000Z", ids: ["lama-a", "lama-b"] }));
+  const read = readModelCache(file);
+  assert.deepEqual(read?.ids, ["lama-a", "lama-b"]);
+  assert.deepEqual(read?.models, []);
+  assert.equal(toProviderModel("lama-a").reasoning, false, "cache lama harus tetap memakai default konservatif");
+});
+
+test("metadata model tersimpan di cache dan terbaca kembali bersama id-nya", () => {
+  const file = path.join(tempDir(), "models.json");
+  const models = [{ id: "m1", reasoning: true, contextWindow: 200_000 }];
+  writeModelCache(file, ["m1"], new Date(), models);
+  const read = readModelCache(file);
+  assert.deepEqual(read?.ids, ["m1"]);
+  assert.equal(toProviderModel("m1", read?.models[0]).reasoning, true);
 });

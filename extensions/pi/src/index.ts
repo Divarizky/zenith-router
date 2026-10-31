@@ -8,8 +8,8 @@ import {
   QUOTA_CHANNEL,
   resolveGatewayOrigin,
 } from "./config.ts";
-import { fetchModelIds, getJson } from "./gateway.ts";
-import { readModelCache, toProviderModel, writeModelCache } from "./models.ts";
+import { fetchModelInfos, getJson } from "./gateway.ts";
+import { readModelCache, toProviderModel, writeModelCache, type ModelInfo } from "./models.ts";
 import { parseQuotaPayload, summarizeQuota, type QuotaEntry } from "./quota.ts";
 import { createModelRefresher, type ModelRefresher } from "./refresh.ts";
 
@@ -23,15 +23,27 @@ export default function zenithRouterExtension(pi: ExtensionAPI): void {
   const origin = resolveGatewayOrigin(process.env);
   let quotaEntries: QuotaEntry[] | null = null;
 
+  // Metadata dari fetch live terakhir yang berhasil. Dipakai bersama cache sebagai sumber info model.
+  let liveInfos: ModelInfo[] = [];
+
   const refresher = createModelRefresher({
-    fetchIds: ({ signal, apiKey }) => fetchModelIds(origin, { timeoutMs: LIST_TIMEOUT_MS, signal, apiKey }),
+    fetchIds: async ({ signal, apiKey }) => {
+      // Dikosongkan dulu agar kegagalan fetch tidak memakai metadata dari fetch sebelumnya.
+      liveInfos = [];
+      liveInfos = await fetchModelInfos(origin, { timeoutMs: LIST_TIMEOUT_MS, signal, apiKey });
+      return liveInfos.map((info) => info.id);
+    },
     readCache: () => readModelCache(CACHE_FILE)?.ids ?? [],
-    writeCache: (ids) => writeModelCache(CACHE_FILE, ids, new Date()),
+    writeCache: (ids) => writeModelCache(CACHE_FILE, ids, new Date(), liveInfos),
     now: () => Date.now(),
   });
 
-  const toModels = (ids: readonly string[]): ProviderModelConfig[] =>
-    ids.map((id) => toProviderModel(id) as ProviderModelConfig);
+  const toModels = (ids: readonly string[]): ProviderModelConfig[] => {
+    const infoById = new Map<string, ModelInfo>();
+    for (const info of readModelCache(CACHE_FILE)?.models ?? []) infoById.set(info.id, info);
+    for (const info of liveInfos) infoById.set(info.id, info);
+    return ids.map((id) => toProviderModel(id, infoById.get(id)) as ProviderModelConfig);
+  };
 
   const config: ProviderConfig = {
     name: "Zenith Router",

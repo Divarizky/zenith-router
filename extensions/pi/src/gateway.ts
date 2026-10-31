@@ -1,4 +1,4 @@
-import { parseModelIds } from "./models.ts";
+import { parseModelInfos, type ModelInfo } from "./models.ts";
 
 export type GatewayErrorKind = "timeout" | "network" | "auth" | "http" | "payload";
 
@@ -61,10 +61,15 @@ export async function getJson(url: string, options: GetJsonOptions): Promise<unk
   }
 }
 
+/** Daftar model beserta metadata dari `GET /v1/models`. */
+export async function fetchModelInfos(origin: string, options: GetJsonOptions): Promise<ModelInfo[]> {
+  const payload = await getJson(`${origin}/v1/models`, options);
+  const infos = parseModelInfos(payload);
+  if (infos === null) throw new GatewayError("payload", "bentuk respons /v1/models tidak dikenali");
+  return infos;
+}
+
 /** Daftar id model dari `GET /v1/models`. */
 export async function fetchModelIds(origin: string, options: GetJsonOptions): Promise<string[]> {
-  const payload = await getJson(`${origin}/v1/models`, options);
-  const ids = parseModelIds(payload);
-  if (ids === null) throw new GatewayError("payload", "bentuk respons /v1/models tidak dikenali");
-  return ids;
+  return (await fetchModelInfos(origin, options)).map((info) => info.id);
 }

@@ -168,8 +168,8 @@ function renderTopologyPane(topology) {
       .topo-node.is-active .topo-node-rect { animation: topo-node-breathe 1.3s ease-in-out infinite; }
       /* Router core: berdenyut saat ada request berjalan. */
       @keyframes topo-router-pulse {
-        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(10, 10, 10, .18)); }
-        50% { transform: scale(1.06); filter: drop-shadow(0 0 16px rgba(10, 10, 10, .28)); }
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.06); }
       }
       @keyframes topo-router-icon {
         0%, 100% { transform: rotate(0deg) scale(1); }
@@ -177,15 +177,15 @@ function renderTopologyPane(topology) {
         75% { transform: rotate(5deg) scale(1.08); }
       }
       @keyframes topo-router-label {
-        0%, 100% { filter: drop-shadow(0 0 4px rgba(10,10,10,0.2)); }
-        50% { filter: drop-shadow(0 0 9px rgba(10,10,10,0.3)) drop-shadow(0 0 3px rgba(10,10,10,0.3)); }
+        0%, 100% { opacity: 1; }
+        50% { opacity: .82; }
       }
       .topo-router-rect-on { transform-box: fill-box; transform-origin: center; }
       .topo-router-icon { transform-box: fill-box; transform-origin: center; }
       .topo-router.is-powering .topo-router-rect-on { animation: topo-router-pulse .75s ease-in-out infinite; }
       .topo-router.is-powering .topo-router-icon { animation: topo-router-icon .45s ease-in-out infinite; }
       .topo-router.is-powering .topo-router-label { animation: topo-router-label .7s ease-in-out infinite; }
-      .topo-router-badge { filter: drop-shadow(0 0 6px rgba(10,10,10,0.25)); }
+
       /* Beam edge: core bergaris + halo berkedip, partikel mengalir di sepanjang path. */
       @keyframes topo-edge-dash { to { stroke-dashoffset: -36; } }
       @keyframes topo-edge-flicker { 0%, 100% { opacity: .85; } 40% { opacity: 1; } 55% { opacity: .55; } 70% { opacity: 1; } }
@@ -261,7 +261,9 @@ function renderTopologyPane(topology) {
         return (words.slice(0, 2).map(function (w) { return w[0]; }).join("") || "?").toUpperCase();
       }
       function esc(s) {
-        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       }
 
       var edgesG = document.createElementNS(NS, "g");

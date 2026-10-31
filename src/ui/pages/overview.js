@@ -61,7 +61,7 @@ export function renderOverviewPage(port = 20120) {
     <div class="card console-log-card" style="padding: 0; overflow: hidden; margin-bottom: 2rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-wrap: wrap; gap: 0.5rem;">
         <div style="display: flex; align-items: center; gap: 0.65rem;">
-          <h3 style="font-size: 0.95rem; margin: 0; font-weight: 600;">Console Log</h3>
+          <h3 style="font-size: 0.95rem; margin: 0; font-weight: 800;">Console Log</h3>
           <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs);">
             <span class="dot" style="width:6px;height:6px;"></span>
             Connecting...

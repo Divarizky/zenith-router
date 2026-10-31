@@ -36,7 +36,7 @@ export function renderDlpPage(port = 20120, query = {}) {
           </div>
         </div>
 
-        <div style="margin-top: 1rem; padding: 1rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;">
+        <div style="margin-top: 1rem; padding: 1rem; background: var(--surface-2); border: var(--bw) solid var(--line); border-radius: 0;">
           <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem;">Penjelasan Mode:</h4>
           <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: var(--text-muted); line-height: 1.6;">
             <li><strong>Nonaktif (Off):</strong> Default. Tidak ada pemindaian payload, request diteruskan langsung tanpa perubahan atau overhead.</li>

@@ -137,7 +137,7 @@ export function renderProxyContent(query = {}) {
   const emptyState = `
     <div style="text-align: center; padding: 3.5rem 1.5rem;">
       <div style="margin-bottom: 1rem; color: var(--text-muted); display: inline-flex;">${icon("lan", 40)}</div>
-      <p style="font-weight: 600; margin-bottom: 0.35rem; font-size: 1.05rem;">Belum ada entri proxy pool</p>
+      <p style="font-weight: 800; margin-bottom: 0.35rem; font-size: 1.05rem;">Belum ada entri proxy pool</p>
       <p class="hint" style="max-width: 420px; margin: 0 auto 1.5rem auto;">
         Tambahkan proxy pool pertama Anda, lalu hubungkan ke akun atau provider untuk mengarahkan lalu lintas.
       </p>
@@ -156,7 +156,7 @@ export function renderProxyContent(query = {}) {
 
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
       <div>
-        <h1 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem;">Proxy Pools</h1>
+        <h1 style="font-size: 1.5rem; font-weight: 800; margin-bottom: 0.25rem;">Proxy Pools</h1>
         <p class="hint" style="margin: 0;">Kelola daftar proxy pool terpusat untuk akun provider dan rotasi request.</p>
       </div>
       <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">

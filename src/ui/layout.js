@@ -1,5 +1,4 @@
 import { escapeHtml } from "./html.js";
-import { getLogoDataUri } from "./assets.js";
 import { isUsingDefaultPassword } from "../services/dashboardAuth.js";
 // Versi sidebar dibaca dari package.json, sama dengan banner CLI dan User-Agent upstream.
 import pkg from "../../package.json" with { type: "json" };
@@ -68,14 +67,12 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       </a>`
   ).join("");
 
-  const logoUri = getLogoDataUri();
-
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/png" href="${logoUri}">
+  <link rel="icon" type="image/png" href="/logo.png">
   <title>${escapeHtml(title)} &middot; Zenith Router</title>
   <style>
     /* ===== Tema Zenith Router: putih utama, neo-brutalism pastel =====
@@ -720,7 +717,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 <body>
   <header class="topbar-app">
     <div class="brand">
-      <img src="${logoUri}" alt="Zenith Router" class="brand-logo" />
+      <img src="/logo.png" alt="Zenith Router" class="brand-logo" width="34" height="34" />
       <div>
         <h1>Zenith Router</h1>
         <small>v${pkg.version}</small>

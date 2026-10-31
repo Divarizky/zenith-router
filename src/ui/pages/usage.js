@@ -8,7 +8,7 @@ import { getConnections } from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
-import { getLogoDataUri, getProviderIconPath } from "../assets.js";
+import { getProviderIconPath } from "../assets.js";
 import { buildAntigravityFamilies, familyFromDisplayName, LEVEL_DISPLAY_ORDER } from "../../services/antigravityCatalog.js";
 
 /**
@@ -80,9 +80,8 @@ function buildTopologyData(stats) {
  */
 function renderTopologyPane(topology) {
   const dataJson = escapeHtml(JSON.stringify(topology));
-  const logoUri = getLogoDataUri();
   return `
-    <div class="topology-wrap" data-topology='${dataJson}' data-logo="${escapeHtml(logoUri)}">
+    <div class="topology-wrap" data-topology='${dataJson}' data-logo="/logo.png">
       <svg class="topology-canvas" width="100%" role="img" aria-label="Router topology"></svg>
     </div>
     <style>

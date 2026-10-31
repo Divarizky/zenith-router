@@ -79,6 +79,7 @@ Alias lengkap tanpa prefix pendek juga diterima, misalnya `mistral/mistral-large
 
 - Node.js >= 22.13.0 (ESM). Modul `node:sqlite` masih memerlukan flag `--experimental-sqlite` pada rilis 22.5 sampai 22.12, jadi versi tersebut belum didukung.
 - Alamat bind default hanya menerima koneksi dari `localhost`.
+- Extension Pi untuk gateway ini ada di [`extensions/pi/`](extensions/pi/README.md).
 
 ## Instalasi
 

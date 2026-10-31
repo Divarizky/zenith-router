@@ -655,6 +655,12 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .modal-backdrop.open { display: flex; }
     .modal { background: var(--surface); border: var(--bw-thick) solid var(--line); border-radius: var(--radius-lg); padding: 1.5rem; width: 100%; max-width: 480px; box-shadow: var(--hard-lg); max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
     .modal h3 { margin-bottom: 1rem; }
+    /* Dialog konfirmasi bersama: menggantikan confirm() bawaan browser. */
+    .zr-confirm-backdrop { position: fixed; inset: 0; background: rgba(10, 10, 10, 0.55); display: none; align-items: center; justify-content: center; z-index: 1300; padding: 1rem; }
+    .zr-confirm-backdrop.open { display: flex; }
+    .zr-confirm { background: var(--surface); color: var(--text); border: var(--bw-thick) solid var(--line); box-shadow: var(--hard-lg); padding: 1.5rem; width: 100%; max-width: 440px; }
+    .zr-confirm h3 { font-size: 1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.75rem; }
+    .zr-confirm p { color: var(--text-muted); margin-bottom: 0.5rem; }
 
     /* ===== Stat ===== */
     .stat .value { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
@@ -745,6 +751,16 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     </div>
     ${content}
   </main>
+  <div class="zr-confirm-backdrop" id="zr-confirm">
+    <div class="zr-confirm" role="dialog" aria-modal="true" aria-labelledby="zr-confirm-title" aria-describedby="zr-confirm-msg">
+      <h3 id="zr-confirm-title">Konfirmasi</h3>
+      <p id="zr-confirm-msg"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="zr-confirm-cancel">Batal</button>
+        <button type="button" class="btn btn-danger" id="zr-confirm-ok">Lanjutkan</button>
+      </div>
+    </div>
+  </div>
   <script src="/zr-live.js" data-once></script>
   <script data-once>
     window.addEventListener('pageshow', function(event) {
@@ -877,15 +893,95 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       }
     });
 
-    // Confirm a bulk action; controls tied with form="..." are part of form.elements.
-    function confirmSelected(form, name, label) {
-      var n = 0;
-      for (var i = 0; i < form.elements.length; i++) {
-        var el = form.elements[i];
-        if (el.name === name && el.checked) n++;
+    // Konfirmasi bersama. Pemicu: <form data-confirm="pesan"> atau tombol submit dengan
+    // atribut yang sama. data-confirm-selected="field" + data-confirm-noun="label" menghitung
+    // baris yang dicentang. Submit yang dibatalkan tidak dikirim ke server.
+    (function () {
+      var dialog = document.getElementById('zr-confirm');
+      if (!dialog) return;
+      var titleEl = document.getElementById('zr-confirm-title');
+      var msgEl = document.getElementById('zr-confirm-msg');
+      var okBtn = document.getElementById('zr-confirm-ok');
+      var cancelBtn = document.getElementById('zr-confirm-cancel');
+      var pending = null;
+
+      function open(opts, onOk) {
+        pending = { onOk: onOk, returnTo: document.activeElement };
+        titleEl.textContent = opts.title || 'Konfirmasi';
+        msgEl.textContent = opts.message || '';
+        okBtn.textContent = opts.confirmLabel || 'Lanjutkan';
+        okBtn.className = opts.danger === false ? 'btn btn-primary' : 'btn btn-danger';
+        dialog.classList.add('open');
+        // Aksi destruktif: fokus awal di Batal. Aksi biasa: fokus di tombol lanjut.
+        (opts.danger === false ? okBtn : cancelBtn).focus();
       }
-      return n > 0 && confirm('Hapus ' + n + ' ' + label + '?');
-    }
+      function close(ok) {
+        var st = pending;
+        pending = null;
+        dialog.classList.remove('open');
+        if (st && st.returnTo && st.returnTo.focus && document.body.contains(st.returnTo)) st.returnTo.focus();
+        if (ok && st) st.onOk();
+      }
+      window.zrConfirmOpen = open;
+
+      okBtn.addEventListener('click', function () { close(true); });
+      cancelBtn.addEventListener('click', function () { close(false); });
+      dialog.addEventListener('click', function (e) { if (e.target === dialog) close(false); });
+      document.addEventListener('keydown', function (e) {
+        if (!pending) return;
+        if (e.key === 'Escape') { e.preventDefault(); close(false); return; }
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey && document.activeElement === cancelBtn) { e.preventDefault(); okBtn.focus(); }
+        else if (!e.shiftKey && document.activeElement === okBtn) { e.preventDefault(); cancelBtn.focus(); }
+      });
+      document.addEventListener('focusin', function (e) {
+        if (pending && !dialog.contains(e.target)) cancelBtn.focus();
+      });
+
+      document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form || form.tagName !== 'FORM') return;
+        // Submit yang sudah dikonfirmasi lewat requestSubmit: biarkan zr-live menanganinya.
+        if (form.zrConfirmed) { form.zrConfirmed = false; return; }
+        var submitter = e.submitter || null;
+        var owner = submitter && submitter.hasAttribute('data-confirm') ? submitter : form;
+        var message = owner.getAttribute('data-confirm');
+        var selectedField = submitter && submitter.getAttribute('data-confirm-selected');
+        if (selectedField) {
+          var n = 0;
+          for (var i = 0; i < form.elements.length; i++) {
+            var el = form.elements[i];
+            if (el.name === selectedField && el.checked) n++;
+          }
+          if (n === 0) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+          message = 'Hapus ' + n + ' ' + (submitter.getAttribute('data-confirm-noun') || 'item') + '?';
+        }
+        if (message === null) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        open({
+          title: owner.getAttribute('data-confirm-title') || 'Konfirmasi',
+          message: message,
+          confirmLabel: owner.getAttribute('data-confirm-ok') || 'Hapus',
+          danger: true
+        }, function () {
+          form.zrConfirmed = true;
+          if (submitter) form.requestSubmit(submitter); else form.requestSubmit();
+        });
+      }, true);
+
+      // Salin kunci baru: tombol dengan data-copy-target menyalin teks elemen tersebut.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('[data-copy-target]') : null;
+        if (!btn) return;
+        var src = document.getElementById(btn.getAttribute('data-copy-target'));
+        if (!src || !navigator.clipboard) { btn.textContent = 'Gagal menyalin'; return; }
+        navigator.clipboard.writeText(src.textContent.trim()).then(
+          function () { btn.textContent = 'Tersalin'; },
+          function () { btn.textContent = 'Gagal menyalin'; }
+        );
+      });
+    })();
 
     // Toggle lihat/sembunyi password pada input berkait
     document.addEventListener('click', function(e) {
@@ -937,7 +1033,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     }, 2500);
 
     function startUpgrade(info) {
-      if (!window.confirm("Upgrade ke " + info.tag + "? Database akan dibackup, berkas di-checkout, lalu server restart. Lanjutkan?")) return;
+      var message = "Upgrade ke " + info.tag + "? Database akan dibackup, berkas di-checkout, lalu server restart. Lanjutkan?";
+      window.zrConfirmOpen({ title: "Upgrade Zenith Router", message: message, confirmLabel: "Upgrade", danger: false }, function () { runUpgrade(info); });
+    }
+    function runUpgrade(info) {
       showUpgradeOverlay("Server sedang upgrade ke " + info.tag + "\u2026");
       fetch("/api/version/upgrade", {
         method: "POST",

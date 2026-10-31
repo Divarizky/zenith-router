@@ -257,7 +257,13 @@ test("GET /dashboard - a new release renders the badge with its upgrade button",
 
   const badge = fakeEl({ id: "update-badge" });
   const timers = [];
-  const win = { addEventListener() {}, confirm: () => true, alert() {}, location: { search: "", reload() {} } };
+  const win = {
+    addEventListener() {},
+    confirm: () => true,
+    zrConfirmOpen: (_opts, onOk) => onOk(),
+    alert() {},
+    location: { search: "", reload() {} },
+  };
   const sandbox = {
     window: win,
     document: {

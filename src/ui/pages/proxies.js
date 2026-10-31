@@ -95,7 +95,7 @@ function renderProxyRow(pool) {
         >
           ${icon("edit", 15)}
         </button>
-        <form action="/dashboard/proxies/delete" method="POST" onsubmit="return confirm('Hapus proxy ini dari daftar?')" style="margin: 0;">
+        <form action="/dashboard/proxies/delete" method="POST" data-confirm="Hapus proxy ini dari daftar?" style="margin: 0;">
           <input type="hidden" name="id" value="${pool.id}" />
           <button type="submit" class="btn btn-sm btn-icon btn-danger" title="Hapus proxy">
             ${icon("trash", 15)}
@@ -193,7 +193,7 @@ export function renderProxyContent(query = {}) {
           <button type="submit" class="btn btn-sm btn-ghost" formaction="/dashboard/proxies/bulk-disable" data-requires-selection="proxies" disabled>
             Nonaktifkan Terpilih (<span data-selected-count="proxies">0</span>)
           </button>
-          <button type="submit" class="btn btn-sm btn-danger" formaction="/dashboard/proxies/bulk-delete" data-requires-selection="proxies" disabled onclick="return confirm('Hapus semua proxy terpilih yang tidak dipakai akun?')">
+          <button type="submit" class="btn btn-sm btn-danger" formaction="/dashboard/proxies/bulk-delete" data-requires-selection="proxies" disabled data-confirm="Hapus semua proxy terpilih yang tidak dipakai akun?">
             Hapus Terpilih (<span data-selected-count="proxies">0</span>)
           </button>
         </form>`

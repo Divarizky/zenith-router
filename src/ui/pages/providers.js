@@ -895,7 +895,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           ${isSession ? `<td>${sessionHealthCell(c)}</td>` : ""}
           <td class="actions">
             ${sessionForms}
-            <form action="/dashboard/providers/accounts/delete" method="POST">
+            <form action="/dashboard/providers/accounts/delete" method="POST" data-confirm="Hapus akun ini dari daftar?">
               ${hidden}
               <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
             </form>
@@ -961,7 +961,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
             </form>
             ${
               custom
-                ? `<form action="/dashboard/providers/models/custom/delete" method="POST">
+                ? `<form action="/dashboard/providers/models/custom/delete" method="POST" data-confirm="Hapus model kustom ini?">
               <input type="hidden" name="id" value="${escapeHtml(customId)}" />
               <input type="hidden" name="provider" value="${id}" />
               <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
@@ -1129,7 +1129,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         <div class="btn-row">
           ${
             hasImported
-              ? `<form action="/dashboard/providers/models/import/clear" method="POST" style="margin: 0;" onsubmit="return confirm('Hapus semua model hasil import?')">
+              ? `<form action="/dashboard/providers/models/import/clear" method="POST" style="margin: 0;" data-confirm="Hapus semua model hasil import?">
             <input type="hidden" name="provider" value="${id}" />
             <button type="submit" class="btn btn-danger btn-sm">Bersihkan Impor</button>
           </form>`
@@ -1163,7 +1163,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
           ${
             hasImported
-              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled onclick="return confirmSelected(document.getElementById('models-bulk-form'), 'model_ids', 'model hasil import')">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>`
+              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled data-confirm-selected="model_ids" data-confirm-noun="model hasil import">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>`
               : ""
           }
         </div>

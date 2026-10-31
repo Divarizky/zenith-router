@@ -320,7 +320,7 @@ test("GET /dashboard/combos - a hand written legacy row cannot inject markup thr
 
   assert.ok(!html.includes("<img src=x"), "tag mentah tidak boleh sampai ke HTML");
   assert.ok(html.includes("&lt;img src=x"), "nama tetap tampil, asal ter-escape");
-  const handler = html.match(/onsubmit="return confirm\([^)]*\)"/g) || [];
+  const handler = html.match(/data-confirm="[^"]*"/g) || [];
   assert.ok(handler.length > 0);
   for (const h of handler) assert.ok(!h.includes("onerror"), `handler tidak boleh memuat data: ${h}`);
 });

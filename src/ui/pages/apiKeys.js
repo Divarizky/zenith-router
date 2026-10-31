@@ -22,7 +22,11 @@ function renderNewKeyNotice(newKey, port) {
       <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
         Ini satu-satunya waktu kunci penuh ditampilkan. Zenith Router hanya menyimpan hash SHA-256.
       </p>
-      <code style="display: block; padding: 0.75rem; word-break: break-all; font-size: 0.95rem;">${escapeHtml(newKey.key)}</code>
+      <p role="note" style="font-size: 0.9rem; font-weight: 800; margin-bottom: 0.75rem;">
+        Kunci ini tidak bisa dilihat lagi setelah halaman ini ditutup. Salin dan simpan sekarang.
+      </p>
+      <code id="new-api-key" style="display: block; padding: 0.75rem; word-break: break-all; font-size: 0.95rem;">${escapeHtml(newKey.key)}</code>
+      <button type="button" class="btn btn-sm" style="margin-top: 0.6rem;" data-copy-target="new-api-key">Salin kunci</button>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem;">
         Kirim sebagai <code>Authorization: Bearer &lt;key&gt;</code> or <code>x-api-key: &lt;key&gt;</code> to <code>${baseUrl}/v1</code>.
       </p>
@@ -131,7 +135,7 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
                     k.is_active === 1 ? "Nonaktifkan" : "Aktifkan"
                   }</button>
                 </form>
-                <form action="/dashboard/keys/delete" method="POST">
+                <form action="/dashboard/keys/delete" method="POST" data-confirm="Hapus API key ini? Klien yang memakainya langsung tidak bisa mengakses router.">
                   <input type="hidden" name="id" value="${escapeHtml(k.id)}" />
                   <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
                 </form>

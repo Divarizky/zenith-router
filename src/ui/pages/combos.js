@@ -54,7 +54,7 @@ function renderComboCard(combo) {
             <button type="submit" class="btn btn-ghost">${combo.enabled === 1 ? "Nonaktifkan" : "Aktifkan"}</button>
           </form>
           <form action="/dashboard/combos/delete" method="POST"
-                onsubmit="return confirm('Hapus combo ini beserta definisinya?')">
+                data-confirm="Hapus combo ini beserta definisinya?">
             <input type="hidden" name="name" value="${name}" />
             <button type="submit" class="btn btn-danger">Hapus</button>
           </form>

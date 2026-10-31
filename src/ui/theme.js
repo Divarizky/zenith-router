@@ -1,0 +1,85 @@
+// Token desain bersama untuk layout dashboard dan halaman login.
+// Tema terang adalah :root, tema gelap memakai [data-theme="dark"].
+export const THEME_TOKENS_CSS = `
+:root {
+  --bg: #fafafa;
+  --surface: #fafafa;
+  --surface-2: #f0f0f0;
+  --surface-3: #e2e2e2;
+  --border: #0a0a0a;
+  --border-subtle: #636363;
+  --text: #0a0a0a;
+  --text-muted: #262626;
+  --text-subtle: #636363;
+  --accent: #93c5fd;
+  --accent-hover: #7db1f9;
+  --accent-soft: rgba(147, 197, 253, 0.22);
+  --accent-pink: #ffb3d9;
+  --accent-pink-hover: #fa92c7;
+  --accent-pink-soft: rgba(255, 179, 217, 0.25);
+  --success: #6ee7b7;
+  --warning: #fde047;
+  --danger: #fca5a5;
+  --danger-hover: #ef4444;
+  --info: #7dd3fc;
+  --radius: 0px;
+  --radius-lg: 0px;
+  --bw: 2px;
+  --bw-thick: 3px;
+  --shadow-ink: #0a0a0a;
+  --line: #0a0a0a;
+  --logo-tile: #ffffff;
+  --logo-tile-line: #0a0a0a;
+  --traffic: #3b82f6;
+  --traffic-soft: rgba(59, 130, 246, 0.35);
+  --traffic-core: #1e3a8a;
+  --hard: 5px 5px 0 var(--shadow-ink);
+  --hard-sm: 3px 3px 0 var(--shadow-ink);
+  --hard-lg: 8px 8px 0 var(--shadow-ink);
+  --grid-line: rgba(10, 10, 10, 0.045);
+  --outline-green: #15803d;
+  --link: #0369a1;
+  --link-hover: #025e8a;
+  --focus-ring: #0a0a0a;
+  --icon-reasoning: #db2777;
+  --icon-vision: #0284c7;
+  --bg-hover: #f0f0f0;
+}
+
+/* ===== Tema gelap =====
+   Token dibalik: latar gelap, teks terang, garis & bayangan keras terang.
+   Aksen pastel sengaja tetap terang, jadi teks di atasnya tetap hitam. */
+[data-theme="dark"] {
+  --bg: #101013;
+  --surface: #17171b;
+  --surface-2: #202027;
+  --surface-3: #2b2b34;
+  --border: #f4f4f7;
+  --border-subtle: #9a9aa6;
+  --text: #f4f4f7;
+  --text-muted: #cfcfd6;
+  --text-subtle: #9a9aa6;
+  --accent-soft: rgba(147, 197, 253, 0.16);
+  --accent-pink-soft: rgba(255, 179, 217, 0.18);
+  --success: #34d399;
+  --warning: #facc15;
+  --danger: #f87171;
+  --danger-hover: #dc2626;
+  --info: #38bdf8;
+  --shadow-ink: #f4f4f7;
+  --line: #f4f4f7;
+  --logo-tile: #ffffff;
+  --logo-tile-line: #f4f4f7;
+  --focus-ring: #f4f4f7;
+  --traffic: #7dd3fc;
+  --traffic-soft: rgba(125, 211, 252, 0.35);
+  --traffic-core: #e0f2fe;
+  --grid-line: rgba(244, 244, 247, 0.06);
+  --outline-green: #4ade80;
+  --link: #7dd3fc;
+  --link-hover: #bae6fd;
+  --icon-reasoning: #f472b6;
+  --icon-vision: #38bdf8;
+  --bg-hover: #26262e;
+}
+`;

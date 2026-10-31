@@ -6,6 +6,12 @@ import { setCustomQuotaFetcher } from "../src/services/quota.js";
 import { getSetting, setSetting } from "../src/services/settings.js";
 import { app } from "../src/index.js";
 
+function form(fields) {
+  const body = new FormData();
+  for (const [key, value] of Object.entries(fields)) body.append(key, String(value));
+  return body;
+}
+
 test("GET /dashboard/usage - renders Usage Analytics page with model breakdown", async () => {
   initDb(":memory:");
 
@@ -441,13 +447,27 @@ test("Dashboard usage - kartu kuota menampilkan pill 'Kuota Habis' saat limit ha
 
 test("POST /dashboard/settings/password/reset - mereset password ke default 123456 dan redirect", async () => {
   const { initDb } = await import("../src/db/index.js");
-  const { setDashboardPassword, isUsingDefaultPassword } = await import("../src/services/dashboardAuth.js");
+  const { setDashboardPassword, isUsingDefaultPassword, verifyDashboardPassword } = await import("../src/services/dashboardAuth.js");
   initDb(":memory:");
   setDashboardPassword("kunciRahasiaBaru", "123456");
   assert.strictEqual(isUsingDefaultPassword(), false);
 
-  const res = await app.request("/dashboard/settings/password/reset", { method: "POST" });
+  // Tanpa password lama: reset ditolak, setting tidak berubah.
+  const rejected = await app.request(
+    "/dashboard/settings/password/reset",
+    { method: "POST", body: form({}) }
+  );
+  assert.strictEqual(rejected.status, 302);
+  assert.ok(rejected.headers.get("location").startsWith("/dashboard/settings?pw_error="), "reset tanpa re-autentikasi ditolak");
+  assert.strictEqual(isUsingDefaultPassword(), false, "password lama masih berlaku setelah reset ditolak");
+
+  // Dengan password lama yang benar: reset diterima.
+  const res = await app.request(
+    "/dashboard/settings/password/reset",
+    { method: "POST", body: form({ current_password: "kunciRahasiaBaru" }) }
+  );
   assert.strictEqual(res.status, 302);
   assert.strictEqual(res.headers.get("location"), "/dashboard/settings?reset=1#password");
   assert.strictEqual(isUsingDefaultPassword(), true);
+  assert.strictEqual(verifyDashboardPassword("123456"), true);
 });

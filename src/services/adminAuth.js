@@ -1,11 +1,15 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { getCookie } from "hono/cookie";
+import { getSessionSecret } from "./dashboardAuth.js";
 
 export const ADMIN_COOKIE_NAME = "zenith_admin_token";
 export const ADMIN_LOGIN_PATH = "/dashboard/login";
 export const ADMIN_LOGOUT_PATH = "/dashboard/logout";
-// Tujuh hari: dashboard dipakai berulang, token admin tidak berputar sendiri.
-const ADMIN_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+// F-03: cookie browser tidak lagi berisi token admin mentah berumur panjang.
+// Isinya token turunan bertanda HMAC yang kedaluwarsa sendiri dan mati ikut
+// saat secret sesi dirotasi (logout-all atau ganti password).
+const ADMIN_COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60;
+const ADMIN_DERIVED_PREFIX = "zadm1";
 
 /**
  * Token admin control plane dari env ZENITH_ADMIN_TOKEN.
@@ -50,7 +54,9 @@ function adminTokenCandidates(c) {
 export function hasValidAdminToken(c) {
   const expected = getAdminToken();
   if (!expected) return true;
-  return adminTokenCandidates(c).some((candidate) => tokenEquals(candidate, expected));
+  if (adminTokenCandidates(c).some((candidate) => tokenEquals(candidate, expected))) return true;
+  // Cookie browser berisi token turunan, bukan token admin mentah.
+  return verifyAdminSessionToken(String(getCookie(c, ADMIN_COOKIE_NAME) || "").trim());
 }
 
 export function verifyAdminToken(candidate) {
@@ -59,8 +65,36 @@ export function verifyAdminToken(candidate) {
   return typeof candidate === "string" && candidate.length > 0 && tokenEquals(candidate, expected);
 }
 
+/**
+ * Token turunan untuk cookie browser: HMAC atas waktu kedaluwarsa dengan
+ * secret sesi. Tidak memuat token admin mentah; kedaluwarsa 12 jam.
+ */
+export function createAdminSessionToken() {
+  const exp = Math.floor(Date.now() / 1000) + ADMIN_COOKIE_MAX_AGE_SECONDS;
+  const body = Buffer.from(String(exp)).toString("base64url");
+  const sig = createHmac("sha256", getSessionSecret()).update(body).digest("base64url");
+  return `${ADMIN_DERIVED_PREFIX}.${body}.${sig}`;
+}
+
+export function verifyAdminSessionToken(token) {
+  if (typeof token !== "string" || !token) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== ADMIN_DERIVED_PREFIX) return false;
+  const [, body, sig] = parts;
+  try {
+    const expected = createHmac("sha256", getSessionSecret()).update(body).digest("base64url");
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
+    const exp = Number(Buffer.from(body, "base64url").toString("utf8"));
+    return Number.isFinite(exp) && exp > Math.floor(Date.now() / 1000);
+  } catch {
+    return false;
+  }
+}
+
 export function buildAdminCookieHeader() {
-  return `${ADMIN_COOKIE_NAME}=${getAdminToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_COOKIE_MAX_AGE_SECONDS}`;
+  return `${ADMIN_COOKIE_NAME}=${createAdminSessionToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_COOKIE_MAX_AGE_SECONDS}`;
 }
 
 export function buildAdminCookieClearHeader() {

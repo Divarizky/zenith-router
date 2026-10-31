@@ -10,6 +10,7 @@ import {
   isUsingDefaultPassword,
   recordLoginFailure,
   recordLoginSuccess,
+  revokeAllDashboardSessions,
   verifyDashboardPassword,
 } from "../../services/dashboardAuth.js";
 import {
@@ -253,8 +254,12 @@ export async function handleDashboardLogin(c) {
   );
 }
 
-/** POST /dashboard/logout: cabut cookie sesi. */
+/**
+ * POST /dashboard/logout: cabut cookie sesi sekaligus seluruh sesi lain (F-03).
+ * Epoch dinaikkan sehingga token yang sudah dicuri ikut mati.
+ */
 export async function handleDashboardLogout(c) {
+  revokeAllDashboardSessions();
   const sessionClear = buildSessionCookieClearHeader();
   const adminClear = buildAdminCookieClearHeader();
   c.header("Set-Cookie", sessionClear);

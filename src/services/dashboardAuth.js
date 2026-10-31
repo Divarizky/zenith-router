@@ -11,6 +11,8 @@ import { getSetting, setSetting } from "./settings.js";
 
 export const SESSION_COOKIE_NAME = "zenith_session";
 export const DEFAULT_INITIAL_PASSWORD = "123456";
+// F-02: password yang dipilih owner harus cukup panjang menghadapi tebak-menebak.
+export const MIN_PASSWORD_LENGTH = 12;
 export const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60; // 24 jam
 
 // Tangga penguncian: 30d, 2m, 10m, 30m setelah 5x gagal berturut-turut.
@@ -100,6 +102,23 @@ export function _setSessionSecretForTests(secret) {
   cachedSessionSecret = secret;
 }
 
+/**
+ * Ganti secret sesi dengan nilai acak baru. File data/session-secret ditimpa
+ * bila ada, sehingga proses lain juga memakai secret baru setelah restart.
+ */
+export function rotateSessionSecret() {
+  const dataDir = process.env.ZENITH_DATA_DIR || "data";
+  const file = join(dataDir, "session-secret");
+  cachedSessionSecret = null;
+  try {
+    if (existsSync(file)) {
+      const next = randomBytes(32).toString("hex");
+      writeFileSync(file, next, { mode: 0o600 });
+    }
+  } catch {}
+  return getSessionSecret();
+}
+
 /** Hash password menggunakan scrypt bawaan node:crypto (zero external dependencies). */
 export function hashPassword(plain) {
   const salt = randomBytes(16).toString("hex");
@@ -128,6 +147,32 @@ export function getInitialPassword() {
   return String(process.env.ZENITH_INITIAL_PASSWORD || DEFAULT_INITIAL_PASSWORD);
 }
 
+/**
+ * Versi sesi dashboard (F-03). Token sah hanya bila klaim `sv`-nya sama dengan
+ * epoch tersimpan. Menaikkan epoch otomatis membatalkan semua token lama.
+ */
+export function getSessionEpoch() {
+  const raw = getSetting("dashboard_session_epoch", "0");
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/** Naikkan epoch sesi: semua token yang sudah terbit ditolak setelah ini. */
+export function bumpSessionEpoch() {
+  const next = getSessionEpoch() + 1;
+  setSetting("dashboard_session_epoch", String(next));
+  return next;
+}
+
+/**
+ * Cabut seluruh sesi dashboard sekaligus: rotasi secret HMAC (token lama tidak
+ * bisa dipalsukan ulang) plus naikkan epoch (token lama ditolak verifikasi).
+ */
+export function revokeAllDashboardSessions() {
+  rotateSessionSecret();
+  return bumpSessionEpoch();
+}
+
 /** Cek apakah dashboard masih memakai password default (perlu banner peringatan). */
 export function isUsingDefaultPassword() {
   const storedHash = getSetting("dashboard_password_hash", null);
@@ -149,30 +194,48 @@ export function verifyDashboardPassword(input) {
   return input === getInitialPassword();
 }
 
-/** Ganti password dashboard. Wajib menyertakan currentPassword bila sudah ada hash di DB. */
-export function setDashboardPassword(newPlain, currentPlain = null) {
-  if (typeof newPlain !== "string" || newPlain.length < 4) {
-    throw new Error("Password baru minimal 4 karakter");
+/**
+ * Validasi penggantian password tanpa menyimpan apa pun (F-02).
+ * Password lama selalu wajib: ada hash di DB atau masih password default.
+ */
+export function checkPasswordChange(newPlain, currentPlain) {
+  if (typeof newPlain !== "string" || newPlain.length < MIN_PASSWORD_LENGTH) {
+    return { ok: false, error: `Password baru minimal ${MIN_PASSWORD_LENGTH} karakter` };
   }
   const storedHash = getSetting("dashboard_password_hash", null);
   if (storedHash) {
-    if (!currentPlain || !verifyPasswordHash(currentPlain, storedHash)) {
-      throw new Error("Password lama salah");
+    if (typeof currentPlain !== "string" || !verifyPasswordHash(currentPlain, storedHash)) {
+      return { ok: false, error: "Password lama salah" };
     }
-  } else {
-    // Masih memakai password default, validasi terhadap default
-    if (currentPlain && currentPlain !== getInitialPassword()) {
-      throw new Error("Password lama salah");
-    }
+  } else if (typeof currentPlain !== "string" || currentPlain !== getInitialPassword()) {
+    return { ok: false, error: "Password lama salah" };
   }
+  return { ok: true };
+}
+
+/** Ganti password dashboard. Password lama selalu wajib (re-autentikasi). */
+export function setDashboardPassword(newPlain, currentPlain = null) {
+  const check = checkPasswordChange(newPlain, currentPlain);
+  if (!check.ok) throw new Error(check.error);
   const newHash = hashPassword(newPlain);
   setSetting("dashboard_password_hash", newHash);
+  // Password berubah: token sesi lama (termasuk yang dicuri) tidak lagi sah.
+  revokeAllDashboardSessions();
   return true;
 }
 
-/** Reset password ke default (menghapus hash di settings) untuk menu CLI atau darurat. */
-export function resetDashboardPassword() {
+/**
+ * Reset password ke awal untuk darurat. Tetap butuh password lama: siapa pun
+ * yang memegang sesi curian tidak boleh mengunci owner lewat jalur ini.
+ */
+export function resetDashboardPassword(currentPlain = null) {
+  const storedHash = getSetting("dashboard_password_hash", null);
+  const currentOk = storedHash
+    ? typeof currentPlain === "string" && verifyPasswordHash(currentPlain, storedHash)
+    : typeof currentPlain === "string" && currentPlain === getInitialPassword();
+  if (!currentOk) throw new Error("Password lama salah");
   setSetting("dashboard_password_hash", "");
+  revokeAllDashboardSessions();
   return true;
 }
 
@@ -192,6 +255,7 @@ export function createSessionToken(claims = {}) {
     sub: "dashboard_owner",
     iat: Math.floor(now() / 1000),
     exp: Math.floor(now() / 1000) + SESSION_MAX_AGE_SECONDS,
+    sv: getSessionEpoch(),
     ...claims,
   };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -211,6 +275,9 @@ export function verifySessionToken(token) {
 
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
     if (payload.exp && payload.exp < Math.floor(now() / 1000)) return null;
+    // F-03: token dari epoch lama (setelah logout-all / ganti password) ditolak.
+    const epoch = getSessionEpoch();
+    if (Number(payload.sv || 0) !== epoch) return null;
     return payload;
   } catch {
     return null;

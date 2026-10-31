@@ -178,12 +178,25 @@ test("admin token - login memasang cookie dan kembali ke tujuan yang diminta", a
     assert.strictEqual(ok.status, 302);
     assert.strictEqual(ok.headers.get("location"), "/dashboard/usage?tab=x");
     const cookie = ok.headers.get("set-cookie");
-    assert.ok(cookie.includes(`zenith_admin_token=${ADMIN_TOKEN}`));
+    // Cookie browser memuat token turunan berumur pendek, bukan token admin mentah (F-03).
+    assert.ok(cookie.includes("zenith_admin_token=zadm1."), "cookie admin berisi token turunan");
+    assert.ok(!cookie.includes(ADMIN_TOKEN), "token admin mentah tidak boleh masuk cookie");
     assert.ok(cookie.includes("HttpOnly"));
     assert.ok(cookie.includes("SameSite=Lax"));
 
+    // Token mentah lewat header tetap diterima (skrip non-browser).
     const follow = await app.request("/dashboard/usage?tab=x", { headers: { Cookie: `zenith_admin_token=${ADMIN_TOKEN}` } });
     assert.strictEqual(follow.status, 200);
+
+    // Token turunan yang dipasang browser juga diterima.
+    const derived = cookie.match(/zenith_admin_token=([^;]+)/);
+    assert.ok(derived, "cookie turunan terbaca");
+    const derivedRes = await app.request("/dashboard/usage?tab=x", { headers: { Cookie: `zenith_admin_token=${derived[1]}` } });
+    assert.strictEqual(derivedRes.status, 200);
+
+    // Token turunan yang diubah satu karakter ditolak.
+    const tampered = await app.request("/dashboard/usage?tab=x", { headers: { Cookie: `zenith_admin_token=${derived[1]}x` } });
+    assert.strictEqual(tampered.status, 403);
   });
 });
 

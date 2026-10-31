@@ -10,6 +10,8 @@ import {
   setLoginRequired,
   setDashboardPassword,
   resetDashboardPassword,
+  MIN_PASSWORD_LENGTH,
+  checkPasswordChange,
 } from "../../services/dashboardAuth.js";
 
 /**
@@ -156,7 +158,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
         <div class="setting-row" id="password">
           <div class="setting-info">
             <strong>Ubah Password Dashboard</strong>
-            <p class="hint">Password awal adalah <code>123456</code>. Isi kolom password baru untuk menggantinya; biarkan kosong bila tidak ingin mengubah sekarang.</p>
+            <p class="hint">Password awal adalah <code>123456</code>. Ganti memerlukan password saat ini; minimal ${MIN_PASSWORD_LENGTH} karakter untuk password baru. Reset ke default juga memerlukan password saat ini.</p>
           </div>
           <div class="setting-action setting-stack">
             <div class="field">
@@ -172,7 +174,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
             <div class="field">
               <label for="new_password" class="field-label">Password baru</label>
               <div class="input-password-wrap">
-                <input type="password" id="new_password" name="new_password" placeholder="Minimal 4 karakter" autocomplete="new-password" />
+                <input type="password" id="new_password" name="new_password" placeholder="Minimal ${MIN_PASSWORD_LENGTH} karakter" autocomplete="new-password" />
                 <button type="button" class="btn-toggle-pw" data-toggle-password="new_password" title="Lihat password" aria-label="Lihat password">
                   <span class="icon-eye">${icon("eye", 15)}</span>
                   <span class="icon-eye-off">${icon("eyeOff", 15)}</span>
@@ -180,7 +182,7 @@ export function renderSettingsPage(port = 20120, query = {}) {
               </div>
             </div>
             <div style="margin-top: 0.35rem; display: flex; justify-content: flex-end;">
-              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-danger btn-sm" onclick="return confirm('Kembalikan password dashboard ke default (123456)?');">Reset ke Default (123456)</button>
+              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-danger btn-sm" onclick="return confirm('Kembalikan password dashboard ke default (123456)? Password saat ini tetap diperlukan.');">Reset ke Default (123456)</button>
             </div>
           </div>
         </div>`,
@@ -287,6 +289,10 @@ export function renderSettingsPage(port = 20120, query = {}) {
 
 /**
  * Handle form POST /dashboard/settings
+ *
+ * Semua validasi (termasuk penggantian password) dijalankan lebih dulu; baru
+ * setelah semua lulus nilai ditulis. Dulu setting disimpan sebelum password
+ * divalidasi, sehingga password ditolak tetapi setting tetap berubah (F-02).
  */
 export async function handleSaveSettings(c) {
   const body = await c.req.parseBody();
@@ -299,6 +305,16 @@ export async function handleSaveSettings(c) {
   const comboHoldCount = String(Math.max(1, Math.trunc(Number(body.combo_round_robin_count) || 1)));
   const fallbackModel = String(body.default_fallback_model || "").trim();
 
+  // Ubah password jika new_password diisi. Divalidasi sebelum apa pun ditulis.
+  const newPassword = String(body.new_password || "").trim();
+  const currentPassword = String(body.current_password || "").trim();
+  if (newPassword) {
+    const check = checkPasswordChange(newPassword, currentPassword);
+    if (!check.ok) {
+      return c.redirect(`/dashboard/settings?pw_error=${encodeURIComponent(check.error)}`);
+    }
+  }
+
   setSetting("require_api_key", requireKey);
   setLoginRequired(requireLogin);
   setSetting("traffic_guard_enabled", trafficGuard);
@@ -306,16 +322,8 @@ export async function handleSaveSettings(c) {
   setSetting("request_jitter_enabled", requestJitter);
   setSetting("combo_round_robin_count", comboHoldCount);
   setSetting("default_fallback_model", fallbackModel);
-
-  // Ubah password jika new_password diisi
-  const newPassword = String(body.new_password || "").trim();
-  const currentPassword = String(body.current_password || "").trim();
   if (newPassword) {
-    try {
-      setDashboardPassword(newPassword, currentPassword);
-    } catch (err) {
-      return c.redirect(`/dashboard/settings?pw_error=${encodeURIComponent(err.message)}`);
-    }
+    setDashboardPassword(newPassword, currentPassword);
   }
 
   return c.redirect("/dashboard/settings?saved=1");
@@ -324,8 +332,15 @@ export async function handleSaveSettings(c) {
 /**
  * Handle form POST /dashboard/settings/password/reset
  * Mengembalikan password dashboard ke default (123456).
+ * Password lama wajib dikirim ulang (re-autentikasi, F-02).
  */
 export async function handleResetDashboardPassword(c) {
-  resetDashboardPassword();
+  const body = await c.req.parseBody();
+  const currentPassword = String(body.current_password || "").trim();
+  try {
+    resetDashboardPassword(currentPassword);
+  } catch (err) {
+    return c.redirect(`/dashboard/settings?pw_error=${encodeURIComponent(err.message)}`);
+  }
   return c.redirect("/dashboard/settings?reset=1#password");
 }

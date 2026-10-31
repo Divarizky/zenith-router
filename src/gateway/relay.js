@@ -29,6 +29,15 @@ import { getSetting } from "../services/settings.js";
 import { dlpModeFrom, scanForSecrets, redactSecrets } from "../services/dlp.js";
 import { captureLine } from "../services/logger.js";
 
+// Header HTTP hanya boleh berisi ByteString (Latin1). Nama akun non-Latin1
+// di-percent-encode agar header tidak melempar error dan respons tetap terkirim.
+function encodeAccountHeader(name) {
+  const text = String(name);
+  // ASCII printable tetap apa adanya (email tidak berubah); hanya karakter
+  // di luar rentang itu, termasuk '%', yang di-percent-encode.
+  return text.replace(/[^\x20-\x7e]|%/gu, (ch) => encodeURIComponent(ch));
+}
+
 /** Error envelope for the OpenAI-shaped clients. */
 export const openAIEnvelope = {
   invalidJson: () => ({
@@ -187,7 +196,7 @@ export async function relayClientRequest(c, spec) {
         "Connection": "keep-alive",
       };
       if (connection?.name) {
-        streamHeaders["X-Zenith-Account"] = connection.name;
+        streamHeaders["X-Zenith-Account"] = encodeAccountHeader(connection.name);
       }
 
       return guardStream(
@@ -217,7 +226,7 @@ export async function relayClientRequest(c, spec) {
     });
 
     if (connection?.name) {
-      c.header("X-Zenith-Account", connection.name);
+      c.header("X-Zenith-Account", encodeAccountHeader(connection.name));
     }
     return c.json(data, 200);
   } catch (err) {

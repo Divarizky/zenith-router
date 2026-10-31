@@ -62,7 +62,7 @@ export function capabilityIcons(capabilities) {
 export function renderLayout({ title = "Zenith Router", activeTab = "overview", content = "", port = 20120, extraScripts = "" }) {
   const navHtml = NAV.map(
     (t) => `
-      <a href="${t.href}" class="nav-link ${t.id === activeTab ? "active" : ""}">
+      <a href="${t.href}" class="nav-link ${t.id === activeTab ? "active" : ""}"${t.id === activeTab ? ' aria-current="page"' : ""}>
         ${icon(t.icon)}
         <span>${t.label}</span>
       </a>`
@@ -203,8 +203,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     }
     .brand h1 { font-size: 0.98rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; text-transform: uppercase; }
     .brand small { display: block; color: var(--text-subtle); font-size: 0.72rem; font-weight: 500; }
-    .topbar-app nav { display: flex; align-items: center; gap: 0.15rem; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-    .topbar-app nav::-webkit-scrollbar { display: none; }
+    .topbar-app nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; flex: 1 1 auto; min-width: 0; }
     .nav-link {
       display: flex; align-items: center; gap: 0.45rem;
       padding: 0.45rem 0.75rem;
@@ -219,6 +218,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .nav-link svg { flex-shrink: 0; }
     .topbar-end { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; margin-left: auto; }
     .sidebar-user { color: var(--text-subtle); font-size: 0.74rem; }
+    @media (max-width: 1100px) { .sidebar-user { display: none; } }
     .sidebar-user form { margin: 0; display: inline; }
     /* Tombol tema: ikon bulan saat terang, matahari saat gelap. */
     .theme-icon { display: none; align-items: center; justify-content: center; }
@@ -721,7 +721,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       </div>
     </div>
     <div id="update-badge"></div>
-    <nav>${navHtml}</nav>
+    <nav aria-label="Navigasi utama">${navHtml}</nav>
     <div class="topbar-end">
       <button type="button" class="btn btn-secondary btn-icon" id="theme-toggle" aria-label="Ubah tema" title="Ubah tema">
         <span class="theme-icon theme-icon-moon">${icon("moon")}</span>

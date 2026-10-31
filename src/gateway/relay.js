@@ -155,7 +155,7 @@ export async function relayClientRequest(c, spec) {
       return routed.response;
     }
 
-    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName, fallbackFrom } = routed;
+    const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName, fallbackFrom, toolNames } = routed;
     const apiKeyId = c.get("apiKeyId") || null;
 
     if (body.stream) {
@@ -164,7 +164,7 @@ export async function relayClientRequest(c, spec) {
       // already the client's protocol and only needs the usage tap.
       if (targetFormat !== spec.sourceFormat) {
         responseStream = responseStream.pipeThrough(
-          createTransformStream(targetFormat, spec.sourceFormat, targetModel, spec.transformOptions(body))
+          createTransformStream(targetFormat, spec.sourceFormat, targetModel, { ...spec.transformOptions(body), toolNames })
         );
       }
 
@@ -200,7 +200,7 @@ export async function relayClientRequest(c, spec) {
       );
     }
 
-    const { data, usage } = await spec.finalize({ upstreamRes, targetFormat, targetModel, body });
+    const { data, usage } = await spec.finalize({ upstreamRes, targetFormat, targetModel, body, toolNames });
 
     const durationMs = Date.now() - startTime;
     queueMicrotask(() => {

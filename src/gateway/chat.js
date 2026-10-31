@@ -25,8 +25,8 @@ export async function handleChat(c) {
       includeUsage: Boolean(body.stream_options?.include_usage),
     }),
     estimateInputTokens: (body) => estimateTokens(body.messages),
-    finalize: async ({ upstreamRes, targetFormat, targetModel }) => {
-      const data = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
+    finalize: async ({ upstreamRes, targetFormat, targetModel, toolNames }) => {
+      const data = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel, { toolNames });
       return { data, usage: normalizeUsage(data.usage) };
     },
   });

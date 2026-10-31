@@ -92,6 +92,8 @@ export function prepareUpstreamRequest({
     targetFormat,
     upstreamStream,
     upstreamPayload,
+    // Tool-name map of this request only (see translator/gemini.js).
+    toolNames: translatedPayload?.__toolNames,
     // The pivot body drops the client's thinking fields, so the level is read
     // from the original body and carried to the executor out of band.
     effort: effortFromRequest(sourceFormat, body),

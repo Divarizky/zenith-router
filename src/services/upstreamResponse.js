@@ -101,7 +101,7 @@ function unwrapClineEnvelope(data, targetModel) {
   return payload || data;
 }
 
-export async function upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel) {
+export async function upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel, opts = {}) {
   const src = normalizeFormat(targetFormat);
   const contentType = upstreamRes.headers.get("content-type") || "";
 
@@ -109,10 +109,10 @@ export async function upstreamResponseToOpenAI(upstreamRes, targetFormat, target
     const data = await upstreamRes.json();
     const unwrapped = unwrapClineEnvelope(data, targetModel);
     const normalized = unwrapped || data;
-    return src === FORMATS.OPENAI ? normalized : translateResponse(src, FORMATS.OPENAI, normalized, targetModel);
+    return src === FORMATS.OPENAI ? normalized : translateResponse(src, FORMATS.OPENAI, normalized, targetModel, opts);
   }
 
-  const translated = upstreamRes.body.pipeThrough(createTransformStream(src, FORMATS.OPENAI, targetModel));
+  const translated = upstreamRes.body.pipeThrough(createTransformStream(src, FORMATS.OPENAI, targetModel, opts));
   const text = await new Response(translated).text();
   try {
     return JSON.parse(text);

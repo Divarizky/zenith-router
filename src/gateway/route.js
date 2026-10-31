@@ -166,7 +166,7 @@ function prepareMember(provider, targetModel, endpoint) {
 }
 
 async function runPreparedMember(prepared, provider, targetModel, endpoint) {
-  const { targetFormat, upstreamStream, upstreamPayload, baseHeaders, executor, startTime, resolveUrl, effort } = prepared;
+  const { targetFormat, upstreamStream, upstreamPayload, baseHeaders, executor, startTime, resolveUrl, effort, toolNames } = prepared;
 
   const result = await executeWithFallback({
     provider,
@@ -196,6 +196,7 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     upstreamRes: result.upstreamRes,
     connection: result.connection,
     startTime,
+    toolNames,
   };
 }
 

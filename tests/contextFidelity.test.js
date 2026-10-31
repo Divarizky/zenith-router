@@ -803,10 +803,9 @@ test("gemini: tool turn lama tidak diberi dummy signature", () => {
 
 test("gemini: nama tool dikembalikan di respons stream", async () => {
   resetGeminiState?.();
-  // Deklarasikan dulu agar peta nama terisi.
-  translateRequest(FORMATS.OPENAI, FORMATS.GEMINI, chatForGemini(), "gemini-3.1-pro");
-
-  const stream = createTransformStream(FORMATS.GEMINI, FORMATS.OPENAI, "gemini-3.1-pro");
+  // Peta nama dibawa dari request yang sama, seperti jalur gateway.
+  const req = translateRequest(FORMATS.OPENAI, FORMATS.GEMINI, chatForGemini(), "gemini-3.1-pro");
+  const stream = createTransformStream(FORMATS.GEMINI, FORMATS.OPENAI, "gemini-3.1-pro", { toolNames: req.__toolNames });
   const chunk = {
     candidates: [
       {

@@ -90,7 +90,7 @@ export function translateRequest(sourceFormat, targetFormat, body, targetModel) 
 /**
  * Translate non-streaming response from sourceFormat to targetFormat
  */
-export function translateResponse(sourceFormat, targetFormat, data, model) {
+export function translateResponse(sourceFormat, targetFormat, data, model, opts = {}) {
   const src = normalizeFormat(sourceFormat);
   const tgt = normalizeFormat(targetFormat);
 
@@ -109,7 +109,7 @@ export function translateResponse(sourceFormat, targetFormat, data, model) {
   }
 
   if (src === FORMATS.GEMINI && tgt === FORMATS.OPENAI) {
-    return geminiToOpenAIResponse(data, model);
+    return geminiToOpenAIResponse(data, model, opts);
   }
 
   return data;
@@ -130,7 +130,7 @@ export function createTransformStream(sourceFormat, targetFormat, model, opts = 
   }
 
   if (src === FORMATS.GEMINI && tgt === FORMATS.OPENAI) {
-    return createGeminiToOpenAITransformStream(model);
+    return createGeminiToOpenAITransformStream(model, opts);
   }
 
   if (src === FORMATS.KIRO && tgt === FORMATS.OPENAI) {

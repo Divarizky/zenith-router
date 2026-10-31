@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { captureLine } from "../services/logger.js";
 
-// Original (client) tool names keyed by the sanitized wire name, so the
-// response direction can hand the client the exact name it declared. Populated
-// on every request translation; bounded to avoid unbounded growth.
+// Original (client) tool names keyed by the sanitized wire name. This map is
+// per request: it is built by openaiToGeminiRequest and handed to the response
+// side through opts.toolNames, so concurrent requests never share it.
 const TOOL_NAME_CAP = 1024;
-const ORIGINAL_TOOL_NAMES = new Map();
 
 // Thought signatures returned by Gemini, keyed by the tool_call id Zenith
 // handed the client. Read back on the next request so function calls keep
@@ -13,18 +12,18 @@ const ORIGINAL_TOOL_NAMES = new Map();
 const SIGNATURE_CAP = 512;
 const THOUGHT_SIGNATURES = new Map();
 
-function rememberToolName(sanitized, original) {
+function rememberToolName(toolNames, sanitized, original) {
   if (!sanitized || !original || sanitized === original) return;
-  if (ORIGINAL_TOOL_NAMES.has(sanitized)) return;
-  if (ORIGINAL_TOOL_NAMES.size >= TOOL_NAME_CAP) {
-    ORIGINAL_TOOL_NAMES.delete(ORIGINAL_TOOL_NAMES.keys().next().value);
+  if (toolNames.has(sanitized)) return;
+  if (toolNames.size >= TOOL_NAME_CAP) {
+    toolNames.delete(toolNames.keys().next().value);
   }
-  ORIGINAL_TOOL_NAMES.set(sanitized, original);
+  toolNames.set(sanitized, original);
 }
 
-function restoreToolName(name) {
+function restoreToolName(toolNames, name) {
   if (typeof name !== "string") return name;
-  return ORIGINAL_TOOL_NAMES.get(name) || name;
+  return toolNames?.get(name) || name;
 }
 
 // Record a thought signature Gemini returned for a tool call, keyed by the
@@ -51,7 +50,6 @@ function cachedThoughtSignature(toolCallId) {
 
 /** Reset translator module state (test hook). */
 export function resetGeminiTranslatorState() {
-  ORIGINAL_TOOL_NAMES.clear();
   THOUGHT_SIGNATURES.clear();
 }
 
@@ -263,6 +261,15 @@ export function claudeThinkingToGemini(thinking) {
 // body has no place for.
 export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = {}) {
   if (!body) return {};
+  const toolNames = new Map();
+  const result = buildGeminiRequest(body, targetModel, projectId, opts, toolNames);
+  // Non-enumerable: keeps the upstream JSON body unchanged while letting the
+  // caller pass the name map to the response translators.
+  Object.defineProperty(result, "__toolNames", { value: toolNames, enumerable: false });
+  return result;
+}
+
+function buildGeminiRequest(body, targetModel, projectId, opts, toolNames) {
 
   const contents = [];
   const systemTexts = [];
@@ -279,7 +286,7 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = 
     if (msg?.role === "assistant" && Array.isArray(msg.tool_calls)) {
       for (const call of msg.tool_calls) {
         const sanitized = sanitizeGeminiFunctionName(call.function?.name);
-        rememberToolName(sanitized, call.function?.name);
+        rememberToolName(toolNames, sanitized, call.function?.name);
         if (call.id) toolNameById.set(call.id, sanitized);
         const provided = clientThoughtSignature(call);
         const cached = typeof call.id === "string" ? cachedThoughtSignature(call.id) : undefined;
@@ -427,7 +434,7 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = 
     for (const t of body.tools) {
       if (t.type === "function" && t.function) {
         const sanitized = sanitizeGeminiFunctionName(t.function.name);
-        rememberToolName(sanitized, t.function.name);
+        rememberToolName(toolNames, sanitized, t.function.name);
         declarations.push({
           name: sanitized,
           description: t.function.description || undefined,
@@ -488,7 +495,8 @@ export function openaiToGeminiRequest(body, targetModel, projectId = "", opts = 
 /**
  * Transform Gemini / Cloud Code SSE chunks to OpenAI Chat Completion chunks
  */
-export function createGeminiToOpenAITransformStream(model = "gemini") {
+export function createGeminiToOpenAITransformStream(model = "gemini", opts = {}) {
+  const toolNames = opts.toolNames;
   let buffer = "";
   const textDecoder = new TextDecoder();
   const textEncoder = new TextEncoder();
@@ -567,7 +575,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
                             id: callId,
                             type: "function",
                             function: {
-                              name: restoreToolName(part.functionCall.name),
+                              name: restoreToolName(toolNames, part.functionCall.name),
                               arguments: JSON.stringify(part.functionCall.args || {}),
                             },
                             // Signature rides back to the client so its next
@@ -612,7 +620,7 @@ export function createGeminiToOpenAITransformStream(model = "gemini") {
 /**
  * Aggregate non-streaming Gemini response into OpenAI format
  */
-export async function geminiToOpenAIResponse(data, model = "gemini") {
+export async function geminiToOpenAIResponse(data, model = "gemini", opts = {}) {
   const payload = data.response || data;
   const candidate = payload.candidates?.[0];
   const parts = candidate?.content?.parts || [];
@@ -634,7 +642,7 @@ export async function geminiToOpenAIResponse(data, model = "gemini") {
         id: callId,
         type: "function",
         function: {
-          name: restoreToolName(p.functionCall.name),
+          name: restoreToolName(opts.toolNames, p.functionCall.name),
           arguments: JSON.stringify(p.functionCall.args || {}),
         },
       });

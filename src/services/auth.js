@@ -88,6 +88,7 @@ export function getActiveConnection(providerId) {
 
 // Trimmed from the upstream shared.js (CLAUDE_CODE_HEADERS + ANTHROPIC_BETA_BASE).
 // The CLI version lives in claudeIdentity.js; bump it when the real CLI moves.
+const REDACT_THINKING_BETA = "redact-thinking-2026-02-12";
 const CLAUDE_CODE_BETAS = [
   "claude-code-20250219",
   "oauth-2025-04-20",
@@ -96,14 +97,14 @@ const CLAUDE_CODE_BETAS = [
   "prompt-caching-scope-2026-01-05",
   "structured-outputs-2025-12-15",
   "fast-mode-2026-02-01",
-  "redact-thinking-2026-02-12",
+  REDACT_THINKING_BETA,
   "token-efficient-tools-2026-03-28",
 ];
 
 /**
  * Apply credentials from connection to request headers, based on the connection auth type
  */
-export function applyConnectionAuth(headers, connection, { claudeSessionId = null } = {}) {
+export function applyConnectionAuth(headers, connection, { claudeSessionId = null, adaptiveThinking = false } = {}) {
   if (!connection || !connection.credentials || connection.auth_type === "noauth") return headers;
 
   const creds = connection.credentials;
@@ -152,6 +153,9 @@ export function applyConnectionAuth(headers, connection, { claudeSessionId = nul
       const beta = headers["anthropic-beta"] || headers["Anthropic-Beta"];
       delete headers["Anthropic-Beta"];
       const flags = new Set([...CLAUDE_CODE_BETAS, ...String(beta || "").split(",").map((s) => s.trim()).filter(Boolean)]);
+      // The summarized thinking text is withheld while redact-thinking is sent,
+      // so only the adaptive+summarized request drops it.
+      if (adaptiveThinking) flags.delete(REDACT_THINKING_BETA);
       headers["anthropic-beta"] = [...flags].join(",");
       headers["User-Agent"] = claudeUserAgent();
       headers["X-App"] = "cli";

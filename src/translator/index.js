@@ -42,7 +42,7 @@ function normalizeDeveloperRole(body) {
 /**
  * Translate incoming request body from sourceFormat to targetFormat
  */
-export function translateRequest(sourceFormat, targetFormat, body, targetModel) {
+export function translateRequest(sourceFormat, targetFormat, body, targetModel, options = {}) {
   const src = normalizeFormat(sourceFormat);
   const tgt = normalizeFormat(targetFormat);
 
@@ -65,7 +65,7 @@ export function translateRequest(sourceFormat, targetFormat, body, targetModel) 
   }
 
   if (tgt === FORMATS.CLAUDE) {
-    return openaiToClaude(openAIBody, targetModel);
+    return openaiToClaude(openAIBody, targetModel, { adaptiveThinking: options.adaptiveThinking === true });
   }
 
   if (tgt === FORMATS.OPENAI_RESPONSES) {

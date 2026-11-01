@@ -34,6 +34,18 @@ function modelCapabilityFields(modelId, storedCaps = null) {
   if (caps.maxOutput) fields.max_completion_tokens = caps.maxOutput;
   return fields;
 }
+
+/**
+ * Thinking levels a model accepts, published as `thinking_levels` on /v1/models.
+ * Only the Claude OAuth route (`cc/`, provider id `claude`) is listed: its adaptive
+ * thinking maps effort to output_config.effort and returns summarized text at
+ * every level below. Other models omit the field, and Pi keeps its default levels.
+ */
+export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+
+function thinkingLevelFields(providerId) {
+  return providerId === "claude" ? { thinking_levels: [...CLAUDE_OAUTH_THINKING_LEVELS] } : {};
+}
 import { getConnections, getAntigravityInventoryRows } from "../db/index.js";
 import { buildAntigravityFamilies, resolveFamilyRuntime } from "../services/antigravityCatalog.js";
 
@@ -310,7 +322,7 @@ export function getAvailableModels({ all = false } = {}) {
         root: m.id,
         parent: null,
       };
-      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities));
+      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities), thinkingLevelFields(p.id));
       result.push(entry);
     }
   }
@@ -330,7 +342,7 @@ export function getAvailableModels({ all = false } = {}) {
       parent: null,
       imported: true,
     };
-    Object.assign(entry, modelCapabilityFields(im.model_id));
+    Object.assign(entry, modelCapabilityFields(im.model_id), thinkingLevelFields(provider.id));
     result.push(entry);
   }
 

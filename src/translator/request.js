@@ -11,6 +11,10 @@ function clampUnitInterval(value) {
 const REASONING_EFFORT_BUDGET = { minimal: 1024, low: 4096, medium: 8192, high: 16384 };
 const REASONING_MIN_BUDGET = 1024;
 
+// Adaptive thinking (cc/ only): reasoning_effort maps to output_config.effort.
+// Unknown values send no thinking at all.
+const CLAUDE_ADAPTIVE_EFFORT = { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
+
 // Last-resort max_tokens when neither the client nor the model table says.
 const CLAUDE_MAX_TOKENS_FALLBACK = 4096;
 
@@ -273,17 +277,27 @@ function openaiMessageToClaude(msg) {
 /**
  * Convert OpenAI request body to Anthropic Claude format
  */
-export function openaiToClaude(body, targetModel) {
+export function openaiToClaude(body, targetModel, options = {}) {
   const result = {
     model: targetModel || body.model,
     messages: [],
     max_tokens: claudeMaxTokensFor(body, targetModel),
   };
 
+  // Adaptive thinking is requested only for the Claude OAuth route (options.adaptiveThinking).
+  // Its summarized text is what the upstream returns; the enabled+budget form returns empty text.
+  const adaptiveEffort = options.adaptiveThinking && typeof body.reasoning_effort === "string"
+    ? CLAUDE_ADAPTIVE_EFFORT[body.reasoning_effort]
+    : undefined;
+  if (adaptiveEffort) {
+    result.thinking = { type: "adaptive", display: "summarized" };
+    result.output_config = { effort: adaptiveEffort };
+  }
+
   // Extended thinking has hard upstream constraints: the budget must fit
   // inside max_tokens, and sampling is locked (temperature 1, no top_p).
   // Reasoning is only requested when the client explicitly asks for it.
-  const wantsThinking = typeof body.reasoning_effort === "string" && REASONING_EFFORT_BUDGET[body.reasoning_effort];
+  const wantsThinking = !adaptiveEffort && typeof body.reasoning_effort === "string" && REASONING_EFFORT_BUDGET[body.reasoning_effort];
   // The budget must fit strictly inside max_tokens with at least one token left
   // for output, so a tiny max_tokens disables thinking rather than violating
   // the constraint upstream.
@@ -295,7 +309,7 @@ export function openaiToClaude(body, targetModel) {
   }
 
   if (body.stream !== undefined) result.stream = body.stream;
-  if (thinkingBudget) {
+  if (adaptiveEffort || thinkingBudget) {
     result.temperature = 1;
   } else {
     const temperature = clampUnitInterval(body.temperature);

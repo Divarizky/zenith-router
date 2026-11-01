@@ -166,7 +166,7 @@ function prepareMember(provider, targetModel, endpoint) {
 }
 
 async function runPreparedMember(prepared, provider, targetModel, endpoint) {
-  const { targetFormat, upstreamStream, upstreamPayload, baseHeaders, executor, startTime, resolveUrl, effort, toolNames } = prepared;
+  const { targetFormat, upstreamStream, upstreamPayload, baseHeaders, executor, startTime, resolveUrl, effort, toolNames, adaptiveThinking } = prepared;
 
   const result = await executeWithFallback({
     provider,
@@ -182,6 +182,7 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     sessionSource: endpoint.sessionSource,
     sessionPromptCacheKey: endpoint.sessionPromptCacheKey,
     effort,
+    adaptiveThinking,
     requestId: endpoint.requestId,
     noFailover: Boolean(endpoint.noFailover),
   });

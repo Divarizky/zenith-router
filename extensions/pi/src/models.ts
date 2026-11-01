@@ -21,6 +21,17 @@ export interface ModelInfo {
   readonly vision?: boolean;
   readonly contextWindow?: number;
   readonly maxTokens?: number;
+  /** Level thinking yang diumumkan gateway lewat `thinking_levels`. Undefined bila tidak diumumkan. */
+  readonly thinkingLevels?: readonly string[];
+}
+
+const THINKING_LEVEL_NAMES: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Field `thinking_levels` hanya diterima bila berupa daftar nama level yang dikenal Pi. */
+function parseThinkingLevels(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const levels = value.filter((level): level is string => typeof level === "string" && THINKING_LEVEL_NAMES.includes(level));
+  return levels.length > 0 ? [...new Set(levels)] : undefined;
 }
 
 export interface ModelCache {
@@ -37,7 +48,7 @@ function positiveNumber(value: unknown): number | undefined {
 /** Baca satu entri `{ id, capabilities, context_length, max_completion_tokens }`. */
 function parseModelInfo(item: unknown): ModelInfo | null {
   if (typeof item !== "object" || item === null) return null;
-  const entry = item as { id?: unknown; capabilities?: unknown; context_length?: unknown; max_completion_tokens?: unknown };
+  const entry = item as { id?: unknown; capabilities?: unknown; context_length?: unknown; max_completion_tokens?: unknown; thinking_levels?: unknown };
   if (typeof entry.id !== "string" || !entry.id.trim()) return null;
   const caps = typeof entry.capabilities === "object" && entry.capabilities !== null
     ? (entry.capabilities as { reasoning?: unknown; vision?: unknown })
@@ -48,6 +59,7 @@ function parseModelInfo(item: unknown): ModelInfo | null {
     ...(typeof caps.vision === "boolean" ? { vision: caps.vision } : {}),
     ...(positiveNumber(entry.context_length) !== undefined ? { contextWindow: positiveNumber(entry.context_length) } : {}),
     ...(positiveNumber(entry.max_completion_tokens) !== undefined ? { maxTokens: positiveNumber(entry.max_completion_tokens) } : {}),
+    ...(parseThinkingLevels(entry.thinking_levels) ? { thinkingLevels: parseThinkingLevels(entry.thinking_levels) } : {}),
   };
 }
 
@@ -87,6 +99,7 @@ function parseCachedModelInfo(item: unknown): ModelInfo | null {
     ...(typeof entry.vision === "boolean" ? { vision: entry.vision } : {}),
     ...(positiveNumber(entry.contextWindow) !== undefined ? { contextWindow: positiveNumber(entry.contextWindow) } : {}),
     ...(positiveNumber(entry.maxTokens) !== undefined ? { maxTokens: positiveNumber(entry.maxTokens) } : {}),
+    ...(parseThinkingLevels(entry.thinkingLevels) ? { thinkingLevels: parseThinkingLevels(entry.thinkingLevels) } : {}),
   };
 }
 
@@ -134,6 +147,8 @@ export interface ProviderModelDefinition {
   readonly cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
   readonly contextWindow: number;
   readonly maxTokens: number;
+  /** Hanya ada bila gateway mengumumkan level thinking; Pi memakai peta ini untuk membatasi level. */
+  readonly thinkingLevelMap?: Record<string, string>;
 }
 
 /**
@@ -142,6 +157,11 @@ export interface ProviderModelDefinition {
  * karena Pi tidak mengirim atau menampilkan thinking untuk model dengan `reasoning: false`.
  */
 export function toProviderModel(id: string, info?: ModelInfo): ProviderModelDefinition {
+  // Level yang diumumkan dipetakan ke namanya sendiri. xhigh/max hanya tampil bila diumumkan,
+  // karena pi-ai menyembunyikan level yang nilainya undefined.
+  const thinkingLevelMap = info?.thinkingLevels
+    ? Object.fromEntries(info.thinkingLevels.map((level) => [level, level]))
+    : undefined;
   return {
     id,
     name: id,
@@ -150,5 +170,6 @@ export function toProviderModel(id: string, info?: ModelInfo): ProviderModelDefi
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: info?.contextWindow ?? 128_000,
     maxTokens: info?.maxTokens ?? 8_192,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
   };
 }

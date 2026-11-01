@@ -422,6 +422,7 @@ export async function executeWithFallback({
   sessionSource = null,
   sessionPromptCacheKey = false,
   effort = undefined,
+  adaptiveThinking = false,
   requestId = null,
   noFailover = false,
 }) {
@@ -559,7 +560,7 @@ export async function executeWithFallback({
     // have to come from the same request body.
     const claudeSessionId =
       provider.id === "claude" ? extractClaudeSessionId(payload?.metadata?.user_id) : null;
-    applyConnectionAuth(headers, connection, { claudeSessionId });
+    applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
     const url = resolveUrl(connection);
     const proxyUrl =
       rotationProxies.length > 0 ? rotationProxies[attempt - 1] ?? null : requireResolvedProxy(connection);
@@ -721,7 +722,7 @@ export async function executeWithFallback({
           return { ok: false, response: lastFailureResponse };
         }
         connection = refreshed;
-        applyConnectionAuth(headers, connection);
+        applyConnectionAuth(headers, connection, { adaptiveThinking });
 
         try {
           releaseSlot = await acquireAccountSlot(connection, signal, { purpose });

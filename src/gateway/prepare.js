@@ -42,7 +42,8 @@ export function prepareUpstreamRequest({
     sourceFormat,
     targetFormat,
     { ...body, stream: upstreamStream },
-    targetModel
+    targetModel,
+    { adaptiveThinking: provider.id === "claude" && sourceFormat !== FORMATS.CLAUDE }
   );
 
   // Anthropic rejects a history whose tool_use/tool_result pairs do not line up
@@ -92,6 +93,9 @@ export function prepareUpstreamRequest({
     targetFormat,
     upstreamStream,
     upstreamPayload,
+    // Set only when the translator built the adaptive body (non-Claude source).
+    // A native Claude passthrough keeps its own headers.
+    adaptiveThinking: provider.id === "claude" && sourceFormat !== FORMATS.CLAUDE && upstreamPayload?.thinking?.type === "adaptive",
     // Tool-name map of this request only (see translator/gemini.js).
     toolNames: translatedPayload?.__toolNames,
     // The pivot body drops the client's thinking fields, so the level is read

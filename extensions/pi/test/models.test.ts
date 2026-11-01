@@ -122,3 +122,36 @@ test("metadata model tersimpan di cache dan terbaca kembali bersama id-nya", () 
   assert.deepEqual(read?.ids, ["m1"]);
   assert.equal(toProviderModel("m1", read?.models[0]).reasoning, true);
 });
+
+test("thinking_levels dari gateway mengisi thinkingLevelMap, xhigh dan max hanya bila diumumkan", () => {
+  const infos = parseModelInfos({
+    data: [{ id: "cc/claude-opus-5-5", capabilities: { reasoning: true }, thinking_levels: ["low", "medium", "high", "xhigh", "max"] }],
+  });
+  assert.ok(infos);
+  const model = toProviderModel(infos[0].id, infos[0]);
+  assert.deepEqual(model.thinkingLevelMap, { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" });
+});
+
+test("model tanpa thinking_levels tidak mendapat thinkingLevelMap, dan level yang tidak dikenal diabaikan", () => {
+  const infos = parseModelInfos({
+    data: [
+      { id: "tanpa-field", capabilities: { reasoning: true } },
+      { id: "level-asing", capabilities: { reasoning: true }, thinking_levels: ["turbo", "xhigh"] },
+    ],
+  });
+  assert.ok(infos);
+  assert.equal(toProviderModel(infos[0].id, infos[0]).thinkingLevelMap, undefined);
+  assert.deepEqual(toProviderModel(infos[1].id, infos[1]).thinkingLevelMap, { xhigh: "xhigh" });
+});
+
+test("cache menyimpan thinkingLevels dan membacanya kembali", () => {
+  const file = path.join(tempDir(), "models.json");
+  const infos = parseModelInfos({
+    data: [{ id: "cc/claude-sonnet-5-5", capabilities: { reasoning: true }, thinking_levels: ["low", "max"] }],
+  });
+  assert.ok(infos);
+  assert.equal(writeModelCache(file, [infos[0].id], new Date(0), infos), true);
+  const read = readModelCache(file);
+  assert.deepEqual(read?.models[0]?.thinkingLevels, ["low", "max"]);
+  assert.deepEqual(toProviderModel(read!.models[0].id, read!.models[0]).thinkingLevelMap, { low: "low", max: "max" });
+});

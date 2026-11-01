@@ -199,11 +199,11 @@ test("Migration - upgrades databases from both pre-lock designs", () => {
         created_at INTEGER NOT NULL
       );
       INSERT INTO connections (provider, name, credentials, created_at)
-        VALUES ('mistral', 'Lama', '{"api_key":"k"}', 1);
+        VALUES ('together', 'Lama', '{"api_key":"k"}', 1);
       ALTER TABLE connections ADD COLUMN cooldown_model TEXT;
       INSERT INTO connections (provider, name, credentials, cooldown_until, cooldown_model, created_at)
         VALUES ('glm', 'Terbatas', '{"api_key":"g"}', ${Date.now() + 60000}, 'glm-4-flash', 2);
-      INSERT INTO combos (name, models, created_at) VALUES ('lama', '["mistral/mistral-large-latest"]', 1);
+      INSERT INTO combos (name, models, created_at) VALUES ('lama', '["together/meta-llama/Llama-3.3-70B-Instruct-Turbo"]', 1);
     `);
     legacy.close();
 
@@ -221,13 +221,13 @@ test("Migration - upgrades databases from both pre-lock designs", () => {
     assert.strictEqual(getConnectionById(2).cooldown_until, 0, "lock model tidak boleh melebar jadi lock akun");
     const modelLock = getModelLockUntil(2, "glm-4-flash");
     assert.ok(modelLock > Date.now(), "lock model harus pindah ke tabel per-pasangan");
-    assert.strictEqual(getModelLockUntil(2, "mistral-large-latest"), null);
+    assert.strictEqual(getModelLockUntil(2, "meta-llama/Llama-3.3-70B-Instruct-Turbo"), null);
 
     // Jalankan lagi: tidak boleh gagal maupun menggandakan lock.
     initDb(tmp);
     const carried = getDb().prepare("SELECT count(*) AS n FROM connection_model_locks").get().n;
     assert.strictEqual(carried, 1);
-    assert.strictEqual(getConnections("mistral").length, 1);
+    assert.strictEqual(getConnections("together").length, 1);
   } finally {
     closeDb();
     try { rmSync(tmp, { force: true }); } catch {}
@@ -236,14 +236,14 @@ test("Migration - upgrades databases from both pre-lock designs", () => {
 
 test("Cooldown locks - neither kind of lock is ever shortened or widened", () => {
   initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "M", credentials: { api_key: "k" } });
+  const conn = addConnection({ provider: "together", name: "T", credentials: { api_key: "k" } });
 
   // Lock model yang aktif tidak boleh dipendekkan oleh deadline yang lebih singkat.
   const modelLong = Date.now() + 3600_000;
-  setConnectionCooldown(conn.id, modelLong, "mistral-large-latest");
-  setConnectionCooldown(conn.id, Date.now() + 60_000, "mistral-large-latest");
+  setConnectionCooldown(conn.id, modelLong, "meta-llama/Llama-3.3-70B-Instruct-Turbo");
+  setConnectionCooldown(conn.id, Date.now() + 60_000, "meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.ok(
-    getModelLockUntil(conn.id, "mistral-large-latest") >= modelLong - 100,
+    getModelLockUntil(conn.id, "meta-llama/Llama-3.3-70B-Instruct-Turbo") >= modelLong - 100,
     "lock model tidak boleh dipendekkan"
   );
 
@@ -251,11 +251,11 @@ test("Cooldown locks - neither kind of lock is ever shortened or widened", () =>
   // boleh menyempitkannya jadi lock satu model.
   const accountLong = Date.now() + 600_000;
   setConnectionCooldown(conn.id, accountLong);
-  setConnectionCooldown(conn.id, Date.now() + 60_000, "mistral-small-latest");
+  setConnectionCooldown(conn.id, Date.now() + 60_000, "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo");
   assert.ok(getConnectionById(conn.id).cooldown_until >= accountLong - 100, "lock akun harus bertahan");
-  assert.ok(getModelLockUntil(conn.id, "mistral-small-latest") > Date.now());
+  assert.ok(getModelLockUntil(conn.id, "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo") > Date.now());
   assert.strictEqual(
-    getModelLockUntil(conn.id, "mistral-code-latest"),
+    getModelLockUntil(conn.id, "deepseek-ai/DeepSeek-R1"),
     null,
     "model yang tidak kena error tidak ikut terkunci"
   );
@@ -263,9 +263,9 @@ test("Cooldown locks - neither kind of lock is ever shortened or widened", () =>
   // Lock yang sudah lewat waktu tidak lagi menghalangi apa pun (dan deadline
   // lampau memang tidak bisa menghapus lock yang masih aktif — itu bagian dari
   // aturan tidak pernah dipendekkan).
-  setConnectionCooldown(conn.id, Date.now() - 1000, "mistral-code-latest");
-  assert.strictEqual(getModelLockUntil(conn.id, "mistral-code-latest"), null);
-  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "lock aktif tetap utuh");
+  setConnectionCooldown(conn.id, Date.now() - 1000, "deepseek-ai/DeepSeek-R1");
+  assert.strictEqual(getModelLockUntil(conn.id, "deepseek-ai/DeepSeek-R1"), null);
+  assert.ok(getModelLockUntil(conn.id, "meta-llama/Llama-3.3-70B-Instruct-Turbo") > Date.now(), "lock aktif tetap utuh");
 });
 
 test("Antigravity inventory - replace per account, union across active accounts", async () => {

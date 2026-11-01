@@ -7,7 +7,7 @@ import { initDb, addConnection, getConnections, getModelLockUntil } from "../src
 import { isConnectionInCooldown } from "../src/services/auth.js";
 import { clearConsoleLogs, getConsoleLogs } from "../src/services/logger.js";
 
-const MODEL_ID = "mistral-large-latest";
+const MODEL_ID = "meta-llama/Llama-3.3-70B-Instruct-Turbo";
 const URL_DEMO = "https://api.example.test/v1/chat/completions";
 const BODY = JSON.stringify({ model: "m", messages: [] });
 
@@ -120,7 +120,7 @@ test("transport - a client that hung up gets 499 client_closed and is not report
 
 test("fallback - a transport failure leaves the account usable", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "[REDACTED:credential_assignment]" } });
   setCustomExecutor({
     async execute() {
       return new Response(
@@ -133,10 +133,10 @@ test("fallback - a transport failure leaves the account usable", async () => {
     const res = await app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "mistral/mistral-large-latest", messages: [{ role: "user", content: "halo" }] }),
+      body: JSON.stringify({ model: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", messages: [{ role: "user", content: "halo" }] }),
     });
     assert.strictEqual(res.status, 502);
-    const [conn] = getConnections("mistral");
+    const [conn] = getConnections("together");
     assert.strictEqual(isConnectionInCooldown(conn, MODEL_ID), false, "kegagalan jaringan tidak mengunci model");
     assert.strictEqual(getModelLockUntil(conn.id, MODEL_ID), null);
   } finally {
@@ -146,7 +146,7 @@ test("fallback - a transport failure leaves the account usable", async () => {
 
 test("fallback - a 502 that is not a transport failure still cools the account down", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "[REDACTED:credential_assignment]" } });
   setCustomExecutor({
     async execute() {
       return new Response(JSON.stringify({ error: { message: "bad gateway from upstream", type: "upstream_error" } }), {
@@ -159,14 +159,14 @@ test("fallback - a 502 that is not a transport failure still cools the account d
     app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "mistral/mistral-large-latest", messages: [{ role: "user", content: "halo" }] }),
+      body: JSON.stringify({ model: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", messages: [{ role: "user", content: "halo" }] }),
     });
   try {
     await chat();
-    assert.strictEqual(getConnections("mistral")[0].cooldown_until > Date.now(), false, "satu 502 belum memarkir akun");
+    assert.strictEqual(getConnections("together")[0].cooldown_until > Date.now(), false, "satu 502 belum memarkir akun");
     // A second manual attempt is what parks the account.
     await chat();
-    const [conn] = getConnections("mistral");
+    const [conn] = getConnections("together");
     assert.strictEqual(isConnectionInCooldown(conn, MODEL_ID), true);
   } finally {
     setCustomExecutor(null);
@@ -175,7 +175,7 @@ test("fallback - a 502 that is not a transport failure still cools the account d
 
 test("fallback - a client that hung up is not logged as a failover nor cools the account", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "[REDACTED:credential_assignment]" } });
   clearConsoleLogs();
   const client = new AbortController();
   setCustomExecutor({
@@ -192,10 +192,10 @@ test("fallback - a client that hung up is not logged as a failover nor cools the
     await app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "mistral/mistral-large-latest", messages: [{ role: "user", content: "halo" }] }),
+      body: JSON.stringify({ model: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", messages: [{ role: "user", content: "halo" }] }),
       signal: client.signal,
     });
-    const [conn] = getConnections("mistral");
+    const [conn] = getConnections("together");
     assert.strictEqual(isConnectionInCooldown(conn, MODEL_ID), false);
     const lines = getConsoleLogs().map((entry) => (typeof entry === "string" ? entry : JSON.stringify(entry)));
     assert.strictEqual(lines.filter((line) => line.includes("[FAILOVER]")).length, 0);

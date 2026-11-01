@@ -4,7 +4,7 @@ import { app } from "../src/index.js";
 import { getAvailableModels, getProvider } from "../src/providers/index.js";
 import { initDb } from "../src/db/index.js";
 
-test("Provider Registry - contains 21 core providers", () => {
+test("Provider Registry - contains core providers", () => {
   const providers = [
     "claude",
     "codex",
@@ -16,8 +16,6 @@ test("Provider Registry - contains 21 core providers", () => {
     "kilocode",
     "nvidia",
     "cline",
-    "mistral",
-    "cloudflare-ai",
     "openrouter",
     "llm7",
     "together",
@@ -50,16 +48,6 @@ test("Provider Registry - nvidia and cline use standard OpenAI transport", () =>
 });
 
 test("Provider Registry - new providers use expected configs", () => {
-  const mis = getProvider("mistral");
-  assert.strictEqual(mis.category, "apikey");
-  assert.strictEqual(mis.freeModelSync, "replace");
-  assert.strictEqual(mis.transport.baseUrl, "https://api.mistral.ai/v1/chat/completions");
-  assert.ok(mis.models.some((m) => m.id === "mistral-large-latest"));
-
-  const cf = getProvider("cloudflare-ai");
-  assert.strictEqual(cf.category, "apikey");
-  assert.ok(cf.transport.baseUrl.includes("{accountId}"));
-
   const or = getProvider("openrouter");
   assert.strictEqual(or.category, "apikey");
   assert.strictEqual(or.transport.baseUrl, "https://openrouter.ai/api/v1/chat/completions");
@@ -143,8 +131,6 @@ test("Provider Registry - getAvailableModels aggregates model list with provider
   assert.ok(modelIds.some((id) => id.startsWith("claude/") || id.startsWith("cc/")), "Must contain Claude model");
   assert.ok(modelIds.some((id) => id.startsWith("nv/")), "Must contain NVIDIA model");
   assert.ok(modelIds.some((id) => id.startsWith("cl/")), "Must contain Cline model");
-  assert.ok(modelIds.some((id) => id.startsWith("mis/")), "Must contain Mistral model");
-  assert.ok(modelIds.some((id) => id.startsWith("cf/")), "Must contain Cloudflare model");
   assert.ok(modelIds.some((id) => id.startsWith("or/")), "Must contain OpenRouter model");
   assert.ok(modelIds.some((id) => id.startsWith("llm7/")), "Must contain LLM7 model");
   assert.ok(modelIds.some((id) => id.startsWith("together/")), "Must contain Together model");

@@ -8,12 +8,12 @@ import { setSetting } from "../src/services/settings.js";
 import { resetComboRotation } from "../src/gateway/route.js";
 import { isConnectionFullyCooledDown } from "../src/services/auth.js";
 
-const MISTRAL_URL = "api.mistral.ai";
+const TOGETHER_URL = "api.together.xyz";
 const GLM_URL = "api.z.ai";
 
 function seedChain() {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
 }
 
@@ -39,7 +39,7 @@ function upstreamError(status, message) {
 function chainCombo(name = "antai-utama") {
   return createCombo({
     name,
-    models: ["mistral/mistral-large-latest", "glm/glm-4-flash"],
+    models: ["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "glm/glm-4-flash"],
   });
 }
 
@@ -51,7 +51,7 @@ test("combo chain - a rate limited member hands the request to the next member",
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -69,7 +69,7 @@ test("combo chain - a rate limited member hands the request to the next member",
   const data = await res.json();
   assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
   assert.strictEqual(calls.length, 2);
-  assert.ok(calls[0].includes(MISTRAL_URL));
+  assert.ok(calls[0].includes(TOGETHER_URL));
   assert.ok(calls[1].includes(GLM_URL));
   setCustomExecutor(null);
 });
@@ -108,7 +108,7 @@ test("combo chain - a 400 that ran out of credit advances to the next member", a
       calls.push(url);
       // The same 400 status a malformed prompt produces, but the body says the
       // first account has no money left rather than that the request is wrong.
-      if (url.includes(MISTRAL_URL)) return upstreamError(400, "insufficient credits on this account");
+      if (url.includes(TOGETHER_URL)) return upstreamError(400, "insufficient credits on this account");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -155,7 +155,7 @@ test("combo chain - an exhausted chain answers 503 with the last member's error"
 
   setCustomExecutor({
     async execute({ url }) {
-      return url.includes(MISTRAL_URL)
+      return url.includes(TOGETHER_URL)
         ? upstreamError(429, "rate limit reached")
         : upstreamError(503, "upstream sedang sibuk");
     },
@@ -185,7 +185,7 @@ test("combo chain - the Anthropic endpoint routes a combo and returns the Anthro
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -213,7 +213,7 @@ test("combo chain - the Responses endpoint routes a combo", async () => {
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -241,7 +241,7 @@ test("combo chain - streaming reaches the client only after a member succeeds", 
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return new Response(
         'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo"},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -293,7 +293,7 @@ test("combo chain - a rate limit sent inside an HTTP 200 stream hands a streamin
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return sseError("Rate limit exceeded for free model");
+      if (url.includes(TOGETHER_URL)) return sseError("Rate limit exceeded for free model");
       return sseOk("dari anggota kedua");
     },
   });
@@ -310,9 +310,9 @@ test("combo chain - a rate limit sent inside an HTTP 200 stream hands a streamin
   assert.doesNotMatch(text, /Rate limit exceeded/, "error anggota pertama tidak boleh sampai ke klien");
   assert.strictEqual(calls.length, 2, "anggota kedua harus dicoba");
 
-  const conn = getDb().prepare("SELECT id FROM connections WHERE provider = 'mistral'").get();
+  const conn = getDb().prepare("SELECT id FROM connections WHERE provider = 'together'").get();
   assert.strictEqual(
-    getModelLockUntil(conn.id, "mistral-large-latest"),
+    getModelLockUntil(conn.id, "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"),
     null,
     "satu limit dalam stream belum mengunci model"
   );
@@ -328,7 +328,7 @@ test("combo chain - a rate limit sent inside an HTTP 200 stream hands a streamin
   assert.strictEqual(retry.status, 200);
   await retry.text();
   assert.strictEqual(calls.length, 2, "percobaan kedua juga mencoba anggota pertama");
-  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "kegagalan kedua mengunci model");
+  assert.ok(getModelLockUntil(conn.id, "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8") > Date.now(), "kegagalan kedua mengunci model");
   setCustomExecutor(null);
 });
 
@@ -338,7 +338,7 @@ test("combo chain - a rate limit sent inside an HTTP 200 stream hands a non-stre
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return sseError("Rate limit exceeded for free model");
+      if (url.includes(TOGETHER_URL)) return sseError("Rate limit exceeded for free model");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -371,7 +371,7 @@ test("combo chain - an error event in the stream of a plain model request answer
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "mistral/mistral-large-latest",
+      model: "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
       messages: [{ role: "user", content: "halo" }],
       stream: true,
     }),
@@ -398,7 +398,7 @@ test("combo chain - a healthy stream with a leading keep-alive comment reaches t
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "mistral/mistral-large-latest",
+      model: "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
       messages: [{ role: "user", content: "halo" }],
       stream: true,
     }),
@@ -467,7 +467,7 @@ test("combo chain - a plain model request is untouched", async () => {
   setCustomExecutor({
     async execute({ url }) {
       urls.push(url);
-      return okOpenAI("dari mistral langsung");
+      return okOpenAI("dari together langsung");
     },
   });
 
@@ -475,14 +475,14 @@ test("combo chain - a plain model request is untouched", async () => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "mistral/mistral-large-latest",
+      model: "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
       messages: [{ role: "user", content: "halo" }],
     }),
   });
 
   assert.strictEqual(res.status, 200);
   assert.strictEqual(urls.length, 1);
-  assert.ok(urls[0].includes(MISTRAL_URL));
+  assert.ok(urls[0].includes(TOGETHER_URL));
   setCustomExecutor(null);
 });
 
@@ -491,15 +491,15 @@ test("combo chain - a plain model request is untouched", async () => {
 // provider found no connection left and the chain died early.
 test("combo chain - a rate limited member does not block the next member of the same provider", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
-  createCombo({ name: "dua-mistral", models: ["mistral/mistral-large-latest", "mistral/mistral-small-latest"] });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
+  createCombo({ name: "dua-together", models: ["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"] });
 
   const seen = [];
   setCustomExecutor({
     async execute({ url, body }) {
       const model = JSON.parse(body).model;
       seen.push(model);
-      if (model.includes("large")) return upstreamError(429, "rate limit reached");
+      if (model.includes("Maverick")) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari model kedua");
     },
   });
@@ -507,32 +507,32 @@ test("combo chain - a rate limited member does not block the next member of the 
   const res = await app.request("/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "dua-mistral", messages: [{ role: "user", content: "halo" }] }),
+    body: JSON.stringify({ model: "dua-together", messages: [{ role: "user", content: "halo" }] }),
   });
 
   assert.strictEqual(res.status, 200);
   const payload = await res.json();
   assert.strictEqual(payload.choices[0].message.content, "dari model kedua");
   assert.strictEqual(seen.length, 2, "kedua anggota harus dicoba");
-  assert.ok(seen[0].includes("large"));
-  assert.ok(seen[1].includes("small"));
+  assert.ok(seen[0].includes("Maverick"));
+  assert.ok(seen[1].includes("3.1-8B"));
 
   // The lock is remembered per (connection, model), so the account still serves
   // other models right away while the rate limited one stays parked. It takes a
   // second failed attempt before the model is parked at all.
   const conn = getDb().prepare("SELECT id FROM connections").get();
-  assert.strictEqual(getModelLockUntil(conn.id, "mistral-large-latest"), null, "satu 429 belum mengunci model");
+  assert.strictEqual(getModelLockUntil(conn.id, "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"), null, "satu 429 belum mengunci model");
 
   const again = await app.request("/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "dua-mistral", messages: [{ role: "user", content: "halo" }] }),
+    body: JSON.stringify({ model: "dua-together", messages: [{ role: "user", content: "halo" }] }),
   });
   assert.strictEqual(again.status, 200);
   await again.json();
-  assert.ok(getModelLockUntil(conn.id, "mistral-large-latest") > Date.now(), "model yang kena 429 harus terkunci");
+  assert.ok(getModelLockUntil(conn.id, "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8") > Date.now(), "model yang kena 429 harus terkunci");
   assert.strictEqual(
-    getModelLockUntil(conn.id, "mistral-small-latest"),
+    getModelLockUntil(conn.id, "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"),
     null,
     "model lain di akun yang sama harus tetap bebas"
   );
@@ -548,7 +548,7 @@ test("combo chain - a bare 500 hands the request to the next member", async () =
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(500, "internal server error");
+      if (url.includes(TOGETHER_URL)) return upstreamError(500, "internal server error");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -572,7 +572,7 @@ test("combo chain - a billing rejection hands the request to the next member", a
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(402, "credit exhausted");
+      if (url.includes(TOGETHER_URL)) return upstreamError(402, "credit exhausted");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -590,13 +590,13 @@ test("combo chain - a billing rejection hands the request to the next member", a
 
 test("combo chain - a broken credential still parks the whole account", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
-  createCombo({ name: "antai-utama", models: ["mistral/mistral-large-latest", "glm/glm-4-flash"] });
+  createCombo({ name: "antai-utama", models: ["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "glm/glm-4-flash"] });
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(401, "invalid api key");
+      if (url.includes(TOGETHER_URL)) return upstreamError(401, "invalid api key");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -608,7 +608,7 @@ test("combo chain - a broken credential still parks the whole account", async ()
   });
 
   assert.strictEqual(res.status, 200);
-  let conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("mistral");
+  let conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("together");
   assert.ok(!(conn.cooldown_until > Date.now()), "401 pertama belum mengunci akun");
 
   const retry = await app.request("/v1/chat/completions", {
@@ -618,10 +618,10 @@ test("combo chain - a broken credential still parks the whole account", async ()
   });
   assert.strictEqual(retry.status, 200);
   await retry.json();
-  conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("mistral");
+  conn = getDb().prepare("SELECT id, cooldown_until FROM connections WHERE provider = ?").get("together");
   assert.ok(conn.cooldown_until > Date.now(), "401 tanpa model harus mengunci seluruh koneksi setelah dua percobaan");
   assert.strictEqual(
-    getModelLockUntil(conn.id, "mistral-large-latest"),
+    getModelLockUntil(conn.id, "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"),
     null,
     "kunci akun tidak menyimpan kunci model"
   );
@@ -636,7 +636,7 @@ test("combo chain - an unreachable member hands the request to the next member",
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) throw new Error("ECONNRESET: socket hang up");
+      if (url.includes(TOGETHER_URL)) throw new Error("ECONNRESET: socket hang up");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -654,19 +654,19 @@ test("combo chain - an unreachable member hands the request to the next member",
 
 test("combo chain - the last error is reported when every member is unreachable", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
-  createCombo({ name: "dua-mistral", models: ["mistral/mistral-large-latest", "mistral/mistral-small-latest"] });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
+  createCombo({ name: "dua-together", models: ["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"] });
 
   setCustomExecutor({
     async execute() {
-      throw new Error("ENOTFOUND api.mistral.ai");
+      throw new Error("ENOTFOUND api.together.xyz");
     },
   });
 
   const res = await app.request("/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "dua-mistral", messages: [{ role: "user", content: "halo" }] }),
+    body: JSON.stringify({ model: "dua-together", messages: [{ role: "user", content: "halo" }] }),
   });
 
   assert.strictEqual(res.status, 503);
@@ -684,7 +684,7 @@ test("combo chain - the Anthropic endpoint reports an exhausted chain in Anthrop
 
   setCustomExecutor({
     async execute({ url }) {
-      return url.includes(MISTRAL_URL)
+      return url.includes(TOGETHER_URL)
         ? upstreamError(429, "rate limit reached")
         : upstreamError(503, "upstream sedang sibuk");
     },
@@ -715,7 +715,7 @@ test("combo chain - an unreachable member is reported in the endpoint's own erro
 
   setCustomExecutor({
     async execute() {
-      throw new Error("ECONNRESET api.mistral.ai");
+      throw new Error("ECONNRESET api.together.xyz");
     },
   });
 
@@ -742,7 +742,7 @@ test("combo chain - the chat endpoint keeps the OpenAI error shape for an exhaus
 
   setCustomExecutor({
     async execute({ url }) {
-      return url.includes(MISTRAL_URL)
+      return url.includes(TOGETHER_URL)
         ? upstreamError(429, "rate limit reached")
         : upstreamError(503, "upstream sedang sibuk");
     },
@@ -804,7 +804,7 @@ test("combo chain - a client that walks away stops the chain without writing loc
     async execute({ url }) {
       calls.push(url);
       controller.abort();
-      return url.includes(MISTRAL_URL) ? upstreamError(429, "rate limit reached") : okOpenAI("tidak boleh tercapai");
+      return url.includes(TOGETHER_URL) ? upstreamError(429, "rate limit reached") : okOpenAI("tidak boleh tercapai");
     },
   });
 
@@ -824,7 +824,7 @@ test("combo chain - a client that walks away stops the chain without writing loc
     0,
     "abort bukan alasan menulis lock"
   );
-  const conn = getDb().prepare("SELECT cooldown_until FROM connections WHERE provider = 'mistral'").get();
+  const conn = getDb().prepare("SELECT cooldown_until FROM connections WHERE provider = 'together'").get();
   assert.strictEqual(conn.cooldown_until, 0, "abort bukan alasan mengunci akun");
   setCustomExecutor(null);
 });
@@ -839,7 +839,7 @@ test("combo chain - a forbidden member still hands the request to the next membe
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(403, "model is not in your tier");
+      if (url.includes(TOGETHER_URL)) return upstreamError(403, "model is not in your tier");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -865,7 +865,7 @@ test("combo chain - a removed member model still hands the request to the next m
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(404, "model has been removed");
+      if (url.includes(TOGETHER_URL)) return upstreamError(404, "model has been removed");
       return okOpenAI("dari anggota kedua");
     },
   });
@@ -889,7 +889,7 @@ test("combo chain - the Anthropic endpoint streams only the winning member's chu
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return new Response(
         'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo-dari-kedua"},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -922,7 +922,7 @@ test("combo chain - the Responses endpoint streams only the winning member's chu
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return new Response(
         'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo-dari-kedua"},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -949,7 +949,7 @@ test("combo chain - the usage row names the member that served", async () => {
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari anggota kedua", { prompt_tokens: 11, completion_tokens: 13 });
     },
   });
@@ -975,8 +975,8 @@ test("combo chain - the usage row names the member that served", async () => {
   assert.strictEqual(row.output_tokens, 13);
 
   // Request biasa tidak punya combo untuk dicatat. Provider lain dipakai supaya
-  // lock model bekas 429 anggota mistral tidak menghalangi (mistral terkunci
-  // 60 detik untuk mistral-large-latest sejak request combo di atas).
+  // lock model bekas 429 anggota together tidak menghalangi (together terkunci
+  // 60 detik untuk modelnya sejak request combo di atas).
   const plain = await app.request("/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -996,7 +996,7 @@ test("combo chain - the usage row names the member that served", async () => {
 
 function seedRotation(models) {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
   const combo = createCombo({ name: "gilir", strategy: "round-robin", models });
   resetComboRotation();
@@ -1026,38 +1026,38 @@ async function hitCombo(times) {
 }
 
 test("combo chain - round robin starts each request at the next member", async () => {
-  seedRotation(["mistral/mistral-large-latest", "mistral/mistral-small-latest", "glm/glm-4-flash"]);
+  seedRotation(["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "glm/glm-4-flash"]);
 
   const served = await hitCombo(4);
 
   assert.deepStrictEqual(served, [
-    "mistral-large-latest",
-    "mistral-small-latest",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
     "glm-4-flash",
-    "mistral-large-latest",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
   ]);
 });
 
 test("combo chain - a hold count of two keeps the same member for two requests", async () => {
-  seedRotation(["mistral/mistral-large-latest", "mistral/mistral-small-latest"]);
+  seedRotation(["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"]);
   setSetting("combo_round_robin_count", "2");
 
   const served = await hitCombo(5);
 
   assert.deepStrictEqual(served, [
-    "mistral-large-latest",
-    "mistral-large-latest",
-    "mistral-small-latest",
-    "mistral-small-latest",
-    "mistral-large-latest",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
   ]);
 });
 
 test("combo chain - changing the hold count applies to the next request", async () => {
   seedRotation([
-    "mistral/mistral-large-latest",
-    "mistral/mistral-small-latest",
-    "mistral/mistral-codestral-latest",
+    "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
   ]);
 
   // Batas default 1: request pertama memakai anggota pertama lalu rotasi maju.
@@ -1068,8 +1068,8 @@ test("combo chain - changing the hold count applies to the next request", async 
   // lalu rotasi maju ke anggota ketiga.
   const served = await hitCombo(3);
   assert.strictEqual(served[0], served[1], "batas baru harus membuat anggota bertahan dua request");
-  assert.strictEqual(served[0], "mistral-small-latest");
-  assert.strictEqual(served[2], "mistral-codestral-latest");
+  assert.strictEqual(served[0], "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo");
+  assert.strictEqual(served[2], "meta-llama/Llama-3.3-70B-Instruct-Turbo");
 });
 
 test("combo chain - a fallback combo always starts at the first member", async () => {
@@ -1096,15 +1096,15 @@ test("combo chain - a fallback combo always starts at the first member", async (
   }
   setCustomExecutor(null);
 
-  assert.deepStrictEqual(served, ["mistral-large-latest", "mistral-large-latest"]);
+  assert.deepStrictEqual(served, ["meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"]);
 });
 
 test("combo chain - rotation advances one step even when the starting member fails", async () => {
-  seedRotation(["mistral/mistral-large-latest", "glm/glm-4-flash"]);
+  seedRotation(["together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "glm/glm-4-flash"]);
 
   // 404, bukan 429: kegagalan anggota tidak boleh meninggalkan lock yang
   // memblokir anggota yang sama di request berikutnya.
-  let failModel = "mistral-large-latest";
+  let failModel = "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8";
   const served = [];
   setCustomExecutor({
     async execute({ body }) {
@@ -1130,22 +1130,22 @@ test("combo chain - rotation advances one step even when the starting member fai
   await hit();
   setCustomExecutor(null);
 
-  // Request 1 mulai di mistral (gagal) → glm melayani; kursor maju satu langkah.
-  // Request 2 mulai di glm (gagal) → mistral melayani. Rotasi maju per request,
+  // Request 1 mulai di together (gagal) → glm melayani; kursor maju satu langkah.
+  // Request 2 mulai di glm (gagal) → together melayani. Rotasi maju per request,
   // bukan per anggota yang dilewati.
-  assert.deepStrictEqual(served, ["glm-4-flash", "mistral-large-latest"]);
+  assert.deepStrictEqual(served, ["glm-4-flash", "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"]);
 });
 
 // --- auto-switch vision ---
 
 test("combo chain - an image request starts at a member that can read images", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
-  // codestral teks saja, mistral-large vision, glm-4-flash teks saja.
+  // Llama-3.3 teks saja, Llama-4-Maverick vision, glm-4-flash teks saja.
   createCombo({
     name: "antai-gambar",
-    models: ["mistral/mistral-codestral-latest", "mistral/mistral-large-latest", "glm/glm-4-flash"],
+    models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "glm/glm-4-flash"],
   });
 
   const served = [];
@@ -1174,17 +1174,17 @@ test("combo chain - an image request starts at a member that can read images", a
   ]);
   setCustomExecutor(null);
 
-  assert.strictEqual(served[0], "mistral-codestral-latest", "request teks memakai urutan tersimpan");
-  assert.strictEqual(served[1], "mistral-large-latest", "request gambar lompat ke anggota vision");
+  assert.strictEqual(served[0], "meta-llama/Llama-3.3-70B-Instruct-Turbo", "request teks memakai urutan tersimpan");
+  assert.strictEqual(served[1], "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "request gambar lompat ke anggota vision");
 });
 
 test("combo chain - an Anthropic image block also reaches the vision member", async () => {
   initDb(":memory:");
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   createCombo({
     name: "antai-gambar-claude",
-    models: ["glm/glm-4-flash", "mistral/mistral-large-latest"],
+    models: ["glm/glm-4-flash", "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"],
   });
 
   setCustomExecutor({
@@ -1213,17 +1213,17 @@ test("combo chain - an Anthropic image block also reaches the vision member", as
 
   assert.strictEqual(res.status, 200);
   const payload = await res.json();
-  assert.match(payload.content[0].text, /mistral-large-latest/, "anggota vision yang melayani");
+  assert.match(payload.content[0].text, /Llama-4-Maverick/, "anggota vision yang melayani");
   setCustomExecutor(null);
 });
 
 test("combo chain - a text mention of image_url does not reorder the chain", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
   createCombo({
     name: "antai-teks",
-    models: ["mistral/mistral-codestral-latest", "mistral/mistral-large-latest"],
+    models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"],
   });
 
   const served = [];
@@ -1247,5 +1247,5 @@ test("combo chain - a text mention of image_url does not reorder the chain", asy
   await res.json();
   setCustomExecutor(null);
 
-  assert.strictEqual(served[0], "mistral-codestral-latest", "teks biasa tidak boleh memicu pengurutan vision");
+  assert.strictEqual(served[0], "meta-llama/Llama-3.3-70B-Instruct-Turbo", "teks biasa tidak boleh memicu pengurutan vision");
 });

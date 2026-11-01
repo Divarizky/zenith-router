@@ -246,7 +246,7 @@ test("Account Priority - gateway answers from #2 on a 429 and returns to #1 afte
   }
 });
 
-function mistralChat(model, extra = {}) {
+function togetherChat(model, extra = {}) {
   return app.request("/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -260,44 +260,13 @@ const okCompletion = () =>
     headers: { "Content-Type": "application/json" },
   });
 
-test("Mistral - maps or drops OpenAI-only fields Mistral rejects with 422", async () => {
+test("Failover - model with a 0/minute limit fails alone without cooling down the account", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
-
-  let sent = null;
-  setCustomExecutor({
-    async execute({ body }) {
-      sent = JSON.parse(body);
-      return okCompletion();
-    },
-  });
-
-  const res = await mistralChat("mis/ministral-3b-latest", {
-    store: false,
-    user: "u1",
-    seed: 7,
-    max_completion_tokens: 64,
-    verbosity: "low",
-    parallel_tool_calls: true,
-  });
-  assert.strictEqual(res.status, 200);
-  for (const key of ["store", "user", "seed", "max_completion_tokens", "verbosity"]) {
-    assert.ok(!(key in sent), `${key} is not sent to Mistral`);
-  }
-  assert.strictEqual(sent.max_tokens, 64);
-  assert.strictEqual(sent.random_seed, 7);
-  assert.strictEqual(sent.parallel_tool_calls, true, "fields Mistral accepts pass through");
-
-  setCustomExecutor(null);
-});
-
-test("Mistral - model with a 0/minute limit fails alone without cooling down the account", async () => {
-  initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   setCustomExecutor({
     async execute({ body }) {
-      if (JSON.parse(body).model === "mistral-medium-latest") {
+      if (JSON.parse(body).model === "meta-llama/Llama-3.3-70B-Instruct-Turbo") {
         return new Response(JSON.stringify({ object: "error", message: "Rate limit exceeded", type: "rate_limited", code: "1300" }), {
           status: 429,
           headers: { "Content-Type": "application/json", "x-ratelimit-limit-req-minute": "0" },
@@ -307,24 +276,24 @@ test("Mistral - model with a 0/minute limit fails alone without cooling down the
     },
   });
 
-  const denied = await mistralChat("mis/mistral-medium-latest");
+  const denied = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(denied.status, 403, "a limit that never clears is not reported as retryable 429");
   const err = await denied.json();
   assert.strictEqual(err.error.code, "model_not_available");
-  assert.ok(err.error.message.includes("mistral-medium-latest"));
+  assert.ok(err.error.message.includes("meta-llama/Llama-3.3-70B-Instruct-Turbo"));
 
-  const acc = getConnections("mistral").find((c) => c.id === conn.id);
+  const acc = getConnections("together").find((c) => c.id === conn.id);
   assert.ok(!(acc.cooldown_until > Date.now()), "account is not cooled down");
 
-  const other = await mistralChat("mis/ministral-3b-latest");
+  const other = await togetherChat("tg/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo");
   assert.strictEqual(other.status, 200, "other models on the same account keep working");
 
   setCustomExecutor(null);
 });
 
-test("Mistral - 403 tier_not_allowed does not lock the account for 10 minutes", async () => {
+test("Failover - 403 tier_not_allowed does not lock the account for 10 minutes", async () => {
   initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   setCustomExecutor({
     async execute() {
@@ -335,9 +304,9 @@ test("Mistral - 403 tier_not_allowed does not lock the account for 10 minutes", 
     },
   });
 
-  const res = await mistralChat("mis/mistral-large-latest");
+  const res = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(res.status, 403);
-  const acc = getConnections("mistral").find((c) => c.id === conn.id);
+  const acc = getConnections("together").find((c) => c.id === conn.id);
   assert.ok(!(acc.cooldown_until > Date.now()), "account is not cooled down");
 
   setCustomExecutor(null);
@@ -345,10 +314,10 @@ test("Mistral - 403 tier_not_allowed does not lock the account for 10 minutes", 
 
 test("Failover - 503 while every account cools down reports Retry-After", async () => {
   initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
   setConnectionCooldown(conn.id, Date.now() + 42_000);
 
-  const res = await mistralChat("mis/ministral-3b-latest");
+  const res = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(res.status, 503);
   const retryAfter = Number(res.headers.get("retry-after"));
   assert.ok(retryAfter > 0 && retryAfter <= 42, `Retry-After is the remaining cooldown, got ${retryAfter}`);
@@ -357,69 +326,69 @@ test("Failover - 503 while every account cools down reports Retry-After", async 
   assert.ok(err.error.message.includes(`retry in ${retryAfter}s`));
 });
 
-const mistral429 = (headers) =>
+const upstream429 = (headers) =>
   new Response(JSON.stringify({ object: "error", message: "Rate limit exceeded", type: "rate_limited", code: "1300" }), {
     status: 429,
     headers: { "Content-Type": "application/json", ...headers },
   });
 
-test("Mistral - request larger than the tokens/minute limit fails as 413 without cooling down the account", async () => {
+test("Failover - request larger than the tokens/minute limit fails as 413 without cooling down the account", async () => {
   initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   setCustomExecutor({
     async execute({ body }) {
-      if (JSON.parse(body).model === "magistral-small-latest") {
-        return mistral429({ "x-ratelimit-limit-tokens-minute": "20000", "x-ratelimit-remaining-tokens-minute": "20000" });
+      if (JSON.parse(body).model === "meta-llama/Llama-3.3-70B-Instruct-Turbo") {
+        return upstream429({ "x-ratelimit-limit-tokens-minute": "20000", "x-ratelimit-remaining-tokens-minute": "20000" });
       }
       return okCompletion();
     },
   });
 
-  const res = await mistralChat("mis/magistral-small-latest");
+  const res = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(res.status, 413);
   const err = await res.json();
   assert.strictEqual(err.error.code, "request_too_large");
   assert.ok(err.error.message.includes("20000 tokens/minute"));
 
-  const acc = getConnections("mistral").find((c) => c.id === conn.id);
+  const acc = getConnections("together").find((c) => c.id === conn.id);
   assert.ok(!(acc.cooldown_until > Date.now()), "account is not cooled down");
-  assert.strictEqual((await mistralChat("mis/ministral-14b-latest")).status, 200, "other models keep working");
+  assert.strictEqual((await togetherChat("tg/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")).status, 200, "other models keep working");
 
   setCustomExecutor(null);
 });
 
-test("Mistral - 429 with a partly used token budget is still a normal rate limit", async () => {
+test("Failover - 429 with a partly used token budget is still a normal rate limit", async () => {
   initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   setCustomExecutor({
     async execute() {
-      return mistral429({ "x-ratelimit-limit-tokens-minute": "20000", "x-ratelimit-remaining-tokens-minute": "1200" });
+      return upstream429({ "x-ratelimit-limit-tokens-minute": "20000", "x-ratelimit-remaining-tokens-minute": "1200" });
     },
   });
 
-  const first = await mistralChat("mis/magistral-small-latest");
+  const first = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(first.status, 429);
-  const acc = () => getConnections("mistral").find((c) => c.id === conn.id);
+  const acc = () => getConnections("together").find((c) => c.id === conn.id);
   assert.ok(
-    !(getModelLockUntil(acc().id, "magistral-small-latest") > Date.now()),
+    !(getModelLockUntil(acc().id, "meta-llama/Llama-3.3-70B-Instruct-Turbo") > Date.now()),
     "satu 429 belum mengunci model"
   );
 
-  const second = await mistralChat("mis/magistral-small-latest");
+  const second = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(second.status, 429);
   assert.ok(
-    getModelLockUntil(acc().id, "magistral-small-latest") > Date.now(),
+    getModelLockUntil(acc().id, "meta-llama/Llama-3.3-70B-Instruct-Turbo") > Date.now(),
     "a real rate limit still locks the account for that model after two attempts"
   );
 
   setCustomExecutor(null);
 });
 
-test("Mistral - model without reasoning: drops reasoning_effort, retries once, and remembers it", async () => {
+test("Failover - model without reasoning: drops reasoning_effort, retries once, and remembers it", async () => {
   initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   const bodies = [];
   setCustomExecutor({
@@ -436,16 +405,16 @@ test("Mistral - model without reasoning: drops reasoning_effort, retries once, a
     },
   });
 
-  const first = await mistralChat("mis/codestral-2508", { reasoning_effort: "high" });
+  const first = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo", { reasoning_effort: "high" });
   assert.strictEqual(first.status, 200);
   assert.strictEqual(bodies.length, 2, "one failed attempt, one retry");
   assert.ok(!("reasoning_effort" in bodies[1]));
 
-  const acc = getConnections("mistral").find((c) => c.id === conn.id);
+  const acc = getConnections("together").find((c) => c.id === conn.id);
   assert.ok(!(acc.cooldown_until > Date.now()), "no cooldown for a parameter error");
 
   bodies.length = 0;
-  const second = await mistralChat("mis/codestral-2508", { reasoning_effort: "high" });
+  const second = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo", { reasoning_effort: "high" });
   assert.strictEqual(second.status, 200);
   assert.strictEqual(bodies.length, 1, "known model is sent without reasoning_effort up front");
   assert.ok(!("reasoning_effort" in bodies[0]));
@@ -453,85 +422,37 @@ test("Mistral - model without reasoning: drops reasoning_effort, retries once, a
   setCustomExecutor(null);
 });
 
-test("Mistral - model refused for the tier by every account is disabled and hidden from /v1/models", async () => {
+test("Failover - model refused for the tier by every account is disabled and hidden from /v1/models", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   setCustomExecutor({
     async execute() {
-      return mistral429({ "x-ratelimit-limit-req-minute": "0" });
+      return upstream429({ "x-ratelimit-limit-req-minute": "0" });
     },
   });
 
-  assert.strictEqual((await mistralChat("mis/ministral-8b-latest")).status, 403);
+  assert.strictEqual((await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo")).status, 403);
 
   const models = await (await app.request("/v1/models")).json();
-  assert.ok(!models.data.some((m) => m.id === "mis/ministral-8b-latest"), "disabled model is not listed");
-  assert.ok(models.data.some((m) => m.id === "mis/ministral-3b-latest"), "other models stay listed");
+  assert.ok(!models.data.some((m) => m.id === "together/meta-llama/Llama-3.3-70B-Instruct-Turbo"), "disabled model is not listed");
+  assert.ok(models.data.some((m) => m.id === "together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"), "other models stay listed");
 
-  const again = await mistralChat("mis/ministral-8b-latest");
+  const again = await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.notStrictEqual(again.status, 503, "a disabled model is not reported as a connection problem");
 
   setCustomExecutor(null);
 });
 
-test("Mistral - tool call ids from other models are remapped to 9 alphanumeric characters", async () => {
+test("Failover - 403 labs_not_enabled does not cool down the account", async () => {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
-
-  const bodies = [];
-  setCustomExecutor({
-    async execute({ body }) {
-      bodies.push(JSON.parse(body));
-      return okCompletion();
-    },
-  });
-
-  const history = {
-    messages: [
-      { role: "user", content: "list files" },
-      {
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          { id: "call_1047952", type: "function", function: { name: "ls", arguments: "{}" } },
-          { id: "AbC123xyz", type: "function", function: { name: "pwd", arguments: "{}" } },
-        ],
-      },
-      { role: "tool", tool_call_id: "call_1047952", content: "a.txt" },
-      { role: "tool", tool_call_id: "AbC123xyz", content: "/home" },
-    ],
-  };
-  const send = () =>
-    app.request("/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "mis/ministral-3b-latest", ...history }),
-    });
-
-  assert.strictEqual((await send()).status, 200);
-  const [, assistant, tool1, tool2] = bodies[0].messages;
-  const mapped = assistant.tool_calls[0].id;
-  assert.match(mapped, /^[a-zA-Z0-9]{9}$/);
-  assert.strictEqual(tool1.tool_call_id, mapped, "tool result follows its call");
-  assert.strictEqual(assistant.tool_calls[1].id, "AbC123xyz", "valid ids are kept");
-  assert.strictEqual(tool2.tool_call_id, "AbC123xyz");
-
-  assert.strictEqual((await send()).status, 200);
-  assert.strictEqual(bodies[1].messages[1].tool_calls[0].id, mapped, "mapping is stable across requests");
-
-  setCustomExecutor(null);
-});
-
-test("Mistral - 403 labs_not_enabled does not cool down the account", async () => {
-  initDb(":memory:");
-  const conn = addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mk" } });
+  const conn = addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
 
   setCustomExecutor({
     async execute({ body }) {
-      if (JSON.parse(body).model === "labs-leanstral-1-5") {
+      if (JSON.parse(body).model === "meta-llama/Llama-3.3-70B-Instruct-Turbo") {
         return new Response(
-          JSON.stringify({ object: "error", message: "Model labs-leanstral-1-5 is a Labs model. To use Labs models, an admin must enable them.", type: "labs_not_enabled" }),
+          JSON.stringify({ object: "error", message: "Model is a Labs model. To use Labs models, an admin must enable them.", type: "labs_not_enabled" }),
           { status: 403, headers: { "Content-Type": "application/json" } }
         );
       }
@@ -539,10 +460,10 @@ test("Mistral - 403 labs_not_enabled does not cool down the account", async () =
     },
   });
 
-  assert.strictEqual((await mistralChat("mis/labs-leanstral-1-5")).status, 403);
-  const acc = getConnections("mistral").find((c) => c.id === conn.id);
+  assert.strictEqual((await togetherChat("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo")).status, 403);
+  const acc = getConnections("together").find((c) => c.id === conn.id);
   assert.ok(!(acc.cooldown_until > Date.now()), "account is not cooled down");
-  assert.strictEqual((await mistralChat("mis/ministral-3b-latest")).status, 200, "other models keep working");
+  assert.strictEqual((await togetherChat("tg/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")).status, 200, "other models keep working");
 
   setCustomExecutor(null);
 });

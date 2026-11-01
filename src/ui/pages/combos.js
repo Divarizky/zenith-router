@@ -155,7 +155,7 @@ export function renderCombosContent(query = {}) {
               id="combo-models"
               name="models"
               rows="4"
-              placeholder="mistral/mistral-large-latest&#10;glm/glm-4-flash"
+              placeholder="together/meta-llama/Llama-3-70b-chat-hf&#10;glm/glm-4-flash"
             ></textarea>
             <ul class="combo-selected"></ul>
           </div>

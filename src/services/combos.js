@@ -67,7 +67,7 @@ export function canonicalizeMember(raw) {
   if (slashIdx === -1 && colonIdx === -1) {
     const nested = getComboByName(value);
     if (nested) return { error: `"${value}" adalah combo di dalam combo, belum didukung` };
-    return { error: `tulis anggota "${value}" sebagai provider/model, misalnya "mistral/mistral-large-latest"` };
+    return { error: `tulis anggota "${value}" sebagai provider/model, misalnya "together/meta-llama/Llama-3-70b-chat-hf"` };
   }
 
   const sepIdx = slashIdx === -1 ? colonIdx : slashIdx;

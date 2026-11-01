@@ -19,14 +19,14 @@ initDb(":memory:");
 test("combos - stores a combo with its members in canonical provider/model form", () => {
   const created = createCombo({
     name: "backup-pair",
-    models: ["mistral:mistral-large-latest", "glm/glm-4-flash"],
+    models: ["openrouter:auto", "glm/glm-4-flash"],
   });
 
   assert.strictEqual(created.name, "backup-pair");
   assert.strictEqual(created.strategy, "fallback");
   assert.strictEqual(created.enabled, 1);
   assert.deepStrictEqual(created.models, [
-    "mistral/mistral-large-latest",
+    "openrouter/auto",
     "glm/glm-4-flash",
   ]);
 
@@ -36,10 +36,10 @@ test("combos - stores a combo with its members in canonical provider/model form"
 });
 
 test("combos - keeps the order the user arranged", () => {
-  createCombo({ name: "ordered", models: ["glm/glm-4-flash", "mistral/mistral-large-latest"] });
+  createCombo({ name: "ordered", models: ["glm/glm-4-flash", "together/meta-llama/Llama-3.3-70B-Instruct-Turbo"] });
   assert.deepStrictEqual(getComboByName("ordered").models, [
     "glm/glm-4-flash",
-    "mistral/mistral-large-latest",
+    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
   ]);
 });
 
@@ -58,7 +58,7 @@ test("combos - rejects malformed, oversized, and duplicate names", () => {
 
   createCombo({ name: "unique-one", models: ["glm/glm-4-flash"] });
   assert.throws(
-    () => createCombo({ name: "unique-one", models: ["mistral/mistral-large-latest"] }),
+    () => createCombo({ name: "unique-one", models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo"] }),
     /dipakai/i
   );
 });
@@ -93,7 +93,7 @@ function seedChain(name = "antai-utama") {
   initDb(":memory:");
   return createCombo({
     name,
-    models: ["mistral/mistral-large-latest", "glm/glm-4-flash", "ollama/gpt-oss:20b"],
+    models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "glm/glm-4-flash", "ollama/gpt-oss:20b"],
   });
 }
 
@@ -103,12 +103,12 @@ test("combos - updateCombo stores the new member order and bumps updated_at", as
   await new Promise((r) => setTimeout(r, 2));
 
   const updated = updateCombo("antai-utama", {
-    models: ["glm/glm-4-flash", "mistral/mistral-large-latest", "ollama/gpt-oss:20b"],
+    models: ["glm/glm-4-flash", "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "ollama/gpt-oss:20b"],
   });
 
   assert.deepStrictEqual(updated.models, [
     "glm/glm-4-flash",
-    "mistral/mistral-large-latest",
+    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
     "ollama/gpt-oss:20b",
   ]);
   assert.deepStrictEqual(getComboByName("antai-utama").models, updated.models);
@@ -129,7 +129,7 @@ test("combos - updateCombo keeps the definition untouched when validation fails"
     /model-hantu/
   );
   assert.deepStrictEqual(getComboByName("antai-utama").models, [
-    "mistral/mistral-large-latest",
+    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
     "glm/glm-4-flash",
     "ollama/gpt-oss:20b",
   ]);
@@ -137,7 +137,7 @@ test("combos - updateCombo keeps the definition untouched when validation fails"
 
 test("combos - updateCombo refuses a combo inside a combo", () => {
   seedChain("rantai-luar");
-  createCombo({ name: "rantai-dalam", models: ["mistral/mistral-small-latest"] });
+  createCombo({ name: "rantai-dalam", models: ["together/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"] });
 
   assert.throws(
     () => updateCombo("rantai-luar", { models: ["rantai-dalam", "glm/glm-4-flash"] }),
@@ -150,7 +150,7 @@ test("combos - moveComboMember swaps one member and refuses to fall off the chai
   seedChain();
 
   const moved = moveComboMember("antai-utama", 2, "up");
-  assert.deepStrictEqual(moved.models, ["mistral/mistral-large-latest", "ollama/gpt-oss:20b", "glm/glm-4-flash"]);
+  assert.deepStrictEqual(moved.models, ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "ollama/gpt-oss:20b", "glm/glm-4-flash"]);
 
   assert.deepStrictEqual(moveComboMember("antai-utama", 0, "up").models, moved.models);
   assert.deepStrictEqual(
@@ -210,12 +210,12 @@ test("combos - a strategy-only edit works even when a stored member no longer re
   // registry, atau modelnya masuk daftar nonaktif.
   getDb()
     .prepare(`UPDATE combos SET models = ?, strategy = 'fallback' WHERE name = 'antai-utama'`)
-    .run(JSON.stringify(["tongtong/model-lama", "mistral/mistral-large-latest"]));
+    .run(JSON.stringify(["tongtong/model-lama", "together/meta-llama/Llama-3.3-70B-Instruct-Turbo"]));
 
   const updated = updateCombo("antai-utama", { strategy: "fallback" });
 
   assert.strictEqual(updated.strategy, "fallback");
-  assert.deepStrictEqual(updated.models, ["tongtong/model-lama", "mistral/mistral-large-latest"]);
+  assert.deepStrictEqual(updated.models, ["tongtong/model-lama", "together/meta-llama/Llama-3.3-70B-Instruct-Turbo"]);
 });
 
 test("combos - editing the chain still revalidates every submitted member", () => {
@@ -227,7 +227,7 @@ test("combos - editing the chain still revalidates every submitted member", () =
   );
   assert.deepStrictEqual(
     getComboByName("antai-utama").models,
-    ["mistral/mistral-large-latest", "glm/glm-4-flash", "ollama/gpt-oss:20b"],
+    ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "glm/glm-4-flash", "ollama/gpt-oss:20b"],
     " rantai lama harus utuh setelah penolakan"
   );
 });
@@ -262,7 +262,7 @@ test("combos - canonicalizeMember keeps an explicit provider prefix, guesses are
   // dengan dua titik di nama modelnya.
   assert.strictEqual(canonicalizeMember("ollama/gpt-oss:20b").member, "ollama/gpt-oss:20b");
   // Alias provider tetap bekerja.
-  assert.strictEqual(canonicalizeMember("mis/mistral-code-latest").member, "mistral/mistral-code-latest");
+  assert.strictEqual(canonicalizeMember("tg/meta-llama/Llama-3.3-70B-Instruct-Turbo").member, "together/meta-llama/Llama-3.3-70B-Instruct-Turbo");
 });
 
 test("combos - createCombo rejects a member that would die at the upstream", () => {
@@ -277,7 +277,7 @@ test("combos - round-robin is a storable strategy both ways", () => {
 
   const created = createCombo({
     name: "gilir",
-    models: ["mistral/mistral-large-latest"],
+    models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo"],
     strategy: "round-robin",
   });
   assert.strictEqual(created.strategy, "round-robin");
@@ -302,11 +302,11 @@ test("combos - rename keeps chain, strategy, and status under the new name", () 
 
 test("combos - rename to a name another combo owns is refused", () => {
   createCombo({ name: "lama-dua", models: ["glm/glm-4-flash"] });
-  createCombo({ name: "terpakai-dua", models: ["mistral/mistral-large-latest"] });
+  createCombo({ name: "terpakai-dua", models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo"] });
 
   assert.throws(() => renameCombo("lama-dua", "terpakai-dua"), /sudah dipakai/);
   assert.strictEqual(getComboByName("lama-dua").models[0], "glm/glm-4-flash", "combo asli tak berubah");
-  assert.strictEqual(getComboByName("terpakai-dua").models[0], "mistral/mistral-large-latest");
+  assert.strictEqual(getComboByName("terpakai-dua").models[0], "together/meta-llama/Llama-3.3-70B-Instruct-Turbo");
 });
 
 test("combos - renaming to its own name is a no-op, not an error", () => {

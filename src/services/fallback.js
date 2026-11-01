@@ -141,7 +141,7 @@ function attachSlotRelease(res, releaseSlot) {
 /**
  * Failures tied to this model or this request, not to the account. Waiting
  * never fixes them, and cooling the account down would also block every other
- * model on it, so callers skip the cooldown. Mistral reports them as:
+ * model on it, so callers skip the cooldown. Upstreams report them as:
  * - 429 with a 0 requests/minute or tokens/minute limit: model is outside the tier.
  * - 429 with the token budget still untouched (remaining == limit): the request
  *   alone is larger than the model's tokens/minute limit.

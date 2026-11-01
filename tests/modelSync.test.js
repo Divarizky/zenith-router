@@ -81,18 +81,6 @@ const OPENROUTER = {
   },
 };
 
-const MISTRAL = {
-  payload: {
-    data: [
-      // Real /v1/models shape: no pricing fields, free-ness comes from capabilities.
-      { id: "mistral-large-latest", name: "Mistral Large 3", capabilities: { completion_chat: true } },
-      { id: "devstral-latest", name: "Devstral 2", capabilities: { completion_chat: true } },
-      { id: "mistral-embed", capabilities: { completion_chat: false } },
-      { id: "mistral-retired-latest", capabilities: { completion_chat: true }, deprecation: "2026-01-01" },
-    ],
-  },
-};
-
 const OLLAMA = {
   payload: {
     data: [
@@ -317,28 +305,23 @@ test("xkiro sync - public free model list merges free models without requiring a
   assert.ok(routed.includes("xkr/minimax/minimax-m3:free"));
 });
 
-test("conditional sync - glm and mistral require connection, sync when account is added", async (t) => {
+test("conditional sync - glm requires connection, sync when account is added", async (t) => {
   t.after(() => setCustomExecutor(null));
   initDb(":memory:");
 
   // Without connection
   assert.deepStrictEqual(await syncFreeModels("glm"), { code: "no_account", count: 0 });
-  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "no_account", count: 0 });
 
   // With connection
   addConnection({ provider: "glm", name: "GLM", credentials: { api_key: "glm-key" } });
-  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
 
   mockUpstream({
     "api.z.ai": { payload: { data: [{ id: "glm-4.7-flash" }, { id: "glm-5.1" }] } },
-    "api.mistral.ai": MISTRAL,
   });
 
   assert.deepStrictEqual(await syncFreeModels("glm"), { code: "synced", count: 1 });
-  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
   const routed = ids();
   assert.ok(routed.includes("glm/glm-4.7-flash"));
-  assert.ok(routed.includes("mis/mistral-large-latest"));
 });
 
 test("sync - only providers with freeModelSync; disabled toggles still apply", async (t) => {
@@ -378,13 +361,12 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "freebuff",
     "glm",
     "kilocode",
-    "mistral",
     "ollama",
     "opencode",
     "openrouter",
     "xkiro",
   ]);
-  // 7 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff, glm, dan mistral return no_account tanpa calls
+  // 7 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff dan glm return no_account tanpa calls
   assert.strictEqual(calls.length, 8);
 
   disableModel("opencode", "exo-free");
@@ -439,76 +421,4 @@ test("dashboard - Sync Now redirects with a notice and the page shows synced row
   html = await (await app.request(failed.headers.get("location"))).text();
   assert.ok(html.includes("Sinkron gagal (HTTP 502)"));
   assert.ok(html.includes("gagal:"));
-});
-
-test("mistral sync - drops models the account tier refuses, checked with a zero-token request", async (t) => {
-  t.after(() => setCustomExecutor(null));
-  initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
-
-  const probes = [];
-  setCustomExecutor({
-    execute: async (req) => {
-      if (req.url.endsWith("/v1/models")) {
-        const data = ["ministral-3b-2512", "mistral-medium-latest", "mistral-large-latest", "mistral-small-2603", "labs-leanstral-1-5"].map((id) => ({
-          id,
-          capabilities: { completion_chat: true },
-        }));
-        return new Response(JSON.stringify({ data }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      const body = JSON.parse(req.body);
-      probes.push(body);
-      const err = (status, extra = {}, msg = "Rate limit exceeded") =>
-        new Response(JSON.stringify({ object: "error", message: msg }), {
-          status,
-          headers: { "Content-Type": "application/json", ...extra },
-        });
-      if (body.model === "mistral-medium-latest") return err(429, { "x-ratelimit-limit-req-minute": "0" });
-      if (body.model === "mistral-large-latest") return err(403, {}, "tier_not_allowed: not available in your subscription tier");
-      if (body.model === "labs-leanstral-1-5") return err(403, {}, "Model labs-leanstral-1-5 is a Labs model. labs_not_enabled");
-      // A transient failure must not drop a model.
-      if (body.model === "mistral-small-2603") return err(503);
-      return err(400, {}, "messages must not be empty");
-    },
-  });
-
-  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
-  assert.ok(probes.every((b) => Array.isArray(b.messages) && b.messages.length === 0), "probes carry no messages");
-
-  const routed = ids();
-  assert.ok(routed.includes("mis/ministral-3b-2512"));
-  assert.ok(routed.includes("mis/mistral-small-2603"));
-  assert.ok(!routed.includes("mis/mistral-medium-latest"), "0/minute model is not listed");
-  assert.ok(!routed.includes("mis/mistral-large-latest"), "tier_not_allowed model is not listed");
-  assert.ok(!routed.includes("mis/labs-leanstral-1-5"), "Labs model not enabled for the org is not listed");
-  assert.ok(!routed.includes("mis/devstral-latest"), "static fallback list is replaced after sync");
-});
-
-test("mistral sync - stores the reasoning/vision capabilities the API reports", async (t) => {
-  t.after(() => setCustomExecutor(null));
-  initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral", credentials: { api_key: "mis-key" } });
-
-  setCustomExecutor({
-    execute: async (req) => {
-      if (req.url.endsWith("/v1/models")) {
-        const data = [
-          { id: "ministral-14b-latest", capabilities: { completion_chat: true, vision: true, reasoning: false } },
-          { id: "codestral-2508", capabilities: { completion_chat: true, vision: false, reasoning: false } },
-        ];
-        return new Response(JSON.stringify({ data }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return new Response(JSON.stringify({ message: "messages must not be empty" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    },
-  });
-
-  assert.deepStrictEqual(await syncFreeModels("mistral"), { code: "synced", count: 2 });
-
-  const rows = listSyncedModels("mistral");
-  const byId = Object.fromEntries(rows.map((r) => [r.model_id, r.capabilities]));
-  assert.deepEqual(JSON.parse(byId["ministral-14b-latest"]), { vision: true, reasoning: false });
-  assert.deepEqual(JSON.parse(byId["codestral-2508"]), { vision: false, reasoning: false });
 });

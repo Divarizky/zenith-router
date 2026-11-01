@@ -26,7 +26,7 @@ export { FORMATS, normalizeFormat };
 
 /**
  * OpenAI clients (Pi, newer SDKs) send the system prompt as role "developer".
- * Most OpenAI-compatible upstreams (Mistral, Groq, ...) only accept "system",
+ * Most OpenAI-compatible upstreams (Groq, Together, ...) only accept "system",
  * and the translators below only look for "system", so map it once here.
  */
 function normalizeDeveloperRole(body) {

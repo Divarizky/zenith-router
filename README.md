@@ -60,10 +60,8 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 | `glm` | Zai GLM Coding | OAuth / device code | Ya |
 | `kc` | Kilo Code Free Tier | OAuth / device code | — |
 | `fb` | Freebuff | OAuth / import lokal | — |
-| `mis` | Mistral AI | API key | — |
 | `or` | OpenRouter | API key | Ya |
 | `oc` | OpenCode Free | Free tier | — |
-| `cf` | Cloudflare Workers AI | API key | — |
 | `nv` | NVIDIA NIM | API key | — |
 | `ovh` | OVHcloud AI Endpoints | Free tier | — |
 | `tg` | Together AI | API key | — |
@@ -71,7 +69,7 @@ Zenith Router berjalan lokal, tanpa akun cloud, tanpa telemetry, dan tanpa depen
 | `l7` | LLM7 | API key | — |
 | `dsw` | DeepSeek Web Chat | Token sesi web | — |
 
-Alias lengkap tanpa prefix pendek juga diterima, misalnya `mistral/mistral-large-latest`.
+Alias lengkap tanpa prefix pendek juga diterima, misalnya `together/meta-llama/Llama-3-70b-chat-hf`.
 
 `dsw` tidak memakai API resmi DeepSeek. Provider ini membaca token dari sesi chat.deepseek.com, tidak aktif sampai Anda menambahkan akun sendiri, dan memakai akun tersebut dengan risiko pemblokiran. Rincian ada di [Provider DeepSeek Web](#provider-deepseek-web-chat).
 
@@ -280,7 +278,7 @@ Halaman Overview, Providers, Usage & Quota, Token Saver, API Keys, dan Settings.
 
 - Kuota dihitung dari endpoint resmi masing-masing provider, jadi angka dan cakupannya berbeda-beda. Beberapa pengambil kuota dibangun dari referensi implementasi pihak lain dan belum diverifikasi terhadap seluruh jenis akun.
 - Provider tanpa sumber data kuota tidak muncul di halaman Kuota.
-- Kemampuan model untuk provider yang tidak mempublikasikan metadata diambil dari tabel pola dan bisa tidak selalu akurat. Provider yang mempublikasikannya, seperti Mistral, selalu memakai data API.
+- Kemampuan model untuk provider yang tidak mempublikasikan metadata diambil dari tabel pola dan bisa tidak selalu akurat.
 - Daftar model gratis hasil sinkronisasi dibatasi model yang benar-benar bisa dipanggil pada akun tersebut. Provider gratis yang menolak model di luar tier akan mengosongkan sebagian daftarnya.
 - **Login sekali klik** hanya berjalan pada browser berbasis Chromium yang terpasang di mesin gateway dan butuh jendela yang bisa dibuka; di server tanpa GUI, tempel token manual.
 - Provider `dsw` bergantung pada antarmuka web DeepSeek yang tidak berdokumentasi. Perubahan endpoint, format PoW, atau kebijakan akun di sisi DeepSeek dapat menghentikan provider ini tanpa perubahan di sisi gateway.

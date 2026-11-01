@@ -172,12 +172,6 @@ export function applyConnectionAuth(headers, connection, { claudeSessionId = nul
   // Anthropic API keys go in x-api-key; Bearer is reserved for OAuth tokens there
   if (connection.provider === "claude") {
     headers["x-api-key"] = apiKey;
-  } else if (
-    (connection.provider === "cloudflare-ai" || connection.provider === "cloudflare") &&
-    apiKey.includes(":")
-  ) {
-    const token = apiKey.split(":")[1];
-    headers["Authorization"] = `Bearer ${token}`;
   } else {
     headers["Authorization"] = `Bearer ${apiKey}`;
   }

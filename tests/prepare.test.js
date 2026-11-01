@@ -207,7 +207,7 @@ test("prepare - lets the per-request token saver header disable compaction", () 
 });
 
 test("POST /v1/messages - never asks the upstream for a usage chunk", async () => {  initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
 
   let capturedBody = null;
   setCustomExecutor({
@@ -224,7 +224,7 @@ test("POST /v1/messages - never asks the upstream for a usage chunk", async () =
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "mistral/mistral-large-latest",
+      model: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
       max_tokens: 64,
       stream: true,
       messages: [{ role: "user", content: "Hello" }],
@@ -234,7 +234,7 @@ test("POST /v1/messages - never asks the upstream for a usage chunk", async () =
 
   assert.strictEqual(res.status, 200);
   await res.text();
-  assert.strictEqual(capturedBody.model, "mistral-large-latest");
+  assert.strictEqual(capturedBody.model, "meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.strictEqual(capturedBody.stream, true);
   assert.strictEqual("stream_options" in capturedBody, false);
   setCustomExecutor(null);

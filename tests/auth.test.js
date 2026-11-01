@@ -25,20 +25,13 @@ test("auth service - returns virtual connection for noAuth provider only", () =>
   assert.strictEqual(getActiveConnection("kiro"), null);
 });
 
-test("auth service - handles cloudflare accountId:apiToken split in applyConnectionAuth", () => {
-  const h1 = applyConnectionAuth({}, {
-    provider: "cloudflare-ai",
-    auth_type: "apikey",
-    credentials: { api_key: "acc123:tokenXYZ" },
-  });
-  assert.strictEqual(h1["Authorization"], "Bearer tokenXYZ");
-
-  const h2 = applyConnectionAuth({}, {
+test("auth service - applies Bearer authorization for standard apikey providers", () => {
+  const h = applyConnectionAuth({}, {
     provider: "openrouter",
     auth_type: "apikey",
     credentials: { api_key: "sk-or-v1-abc" },
   });
-  assert.strictEqual(h2["Authorization"], "Bearer sk-or-v1-abc");
+  assert.strictEqual(h["Authorization"], "Bearer sk-or-v1-abc");
 });
 
 test("auth service - always picks the #1 account, regardless of last use", () => {

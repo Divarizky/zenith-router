@@ -52,9 +52,9 @@ test("GET /dashboard/providers/:id - model rows show thinking and vision icons f
   assert.ok(gemini.includes("mendukung thinking"), "brain icon has a thinking tooltip");
   assert.ok(gemini.includes("baca gambar"), "eye icon has a vision tooltip");
 
-  const page = await (await app.request("/dashboard/providers/mistral")).text();
-  const codestral = page.split("\n").find((line) => line.includes("/codestral-2508</code>")) || "";
-  assert.ok(!codestral.includes("cap-icons"), "text-only model shows no icons");
+  const page = await (await app.request("/dashboard/providers/together")).text();
+  const textModel = page.split("\n").find((line) => line.includes("/meta-llama/Llama-3.3-70B-Instruct-Turbo</code>")) || "";
+  assert.ok(!textModel.includes("cap-icons"), "text-only model shows no icons");
 });
 
 // A rate limit on one model no longer takes the whole account down, so the
@@ -62,13 +62,13 @@ test("GET /dashboard/providers/:id - model rows show thinking and vision icons f
 test("Dashboard - a model scoped cooldown does not mark the account as down", async () => {
   initDb(":memory:");
   const conn = addConnection({
-    provider: "mistral",
-    name: "Mistral Acc",
-    credentials: { api_key: "mis-key" },
+    provider: "together",
+    name: "Together Acc",
+    credentials: { api_key: "[REDACTED:credential_assignment]" },
   });
-  setConnectionCooldown(conn.id, Date.now() + 60000, "mistral-large-latest");
+  setConnectionCooldown(conn.id, Date.now() + 60000, "meta-llama/Llama-3.3-70B-Instruct-Turbo");
 
-  const scoped = await (await app.request("/dashboard/providers/mistral")).text();
+  const scoped = await (await app.request("/dashboard/providers/together")).text();
   assert.ok(!scoped.includes(">Cooldown<"), "lock satu model bukan outage akun");
   assert.ok(!scoped.includes("Habis Kuota"));
 
@@ -77,6 +77,6 @@ test("Dashboard - a model scoped cooldown does not mark the account as down", as
 
   // Lock seluruh koneksi tetap harus terlihat sebagai Cooldown.
   setConnectionCooldown(conn.id, Date.now() + 60000, null);
-  const full = await (await app.request("/dashboard/providers/mistral")).text();
+  const full = await (await app.request("/dashboard/providers/together")).text();
   assert.ok(full.includes(">Cooldown<"), "lock penuh harus tampil sebagai Cooldown");
 });

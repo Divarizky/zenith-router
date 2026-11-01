@@ -118,12 +118,12 @@ test("POST proxies/add - invalid proxies are rejected with a reason and the list
 test("Provider detail - manual proxy password is masked in the account row", async () => {
   initDb(":memory:");
   addConnection({
-    provider: "mistral",
+    provider: "together",
     name: "Bermesin Proksi",
     credentials: { api_key: "k" },
     proxy_url: "http://bob:hush-pass@10.9.9.9:3128",
   });
-  let res = await app.request("/dashboard/providers/mistral");
+  let res = await app.request("/dashboard/providers/together");
   if (res.status >= 300 && res.status < 400) {
     res = await app.request(res.headers.get("location"));
   }
@@ -152,7 +152,7 @@ test("Migration - legacy database gains proxy storage while manual proxy stays i
         created_at INTEGER NOT NULL
       );
       INSERT INTO connections (provider, name, credentials, proxy_url, created_at)
-        VALUES ('mistral', 'Lawas', '{"api_key":"k"}', 'http://bob:hush-pass@10.9.9.9:3128', 1);
+        VALUES ('together', 'Lawas', '{"api_key":"k"}', 'http://bob:hush-pass@10.9.9.9:3128', 1);
     `);
     legacy.close();
 

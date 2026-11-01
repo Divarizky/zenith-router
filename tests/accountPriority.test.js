@@ -63,13 +63,13 @@ test("Account priority - an upgraded database numbers each provider in creation 
 test("Account priority - new accounts join the bottom of their own provider", () => {
   initDb(":memory:");
   addConnection({ provider: "glm", name: "G1", credentials: { api_key: "1" } });
-  addConnection({ provider: "mistral", name: "M1", credentials: { api_key: "m" } });
+  addConnection({ provider: "together", name: "T1", credentials: { api_key: "t" } });
   addConnection({ provider: "glm", name: "G2", credentials: { api_key: "2" } });
   const g3 = addConnection({ provider: "glm", name: "G3", credentials: { api_key: "3" } });
 
   assert.strictEqual(g3.priority, 3);
   assert.deepStrictEqual(order("glm"), [["G1", 1], ["G2", 2], ["G3", 3]]);
-  assert.deepStrictEqual(order("mistral"), [["M1", 1]]);
+  assert.deepStrictEqual(order("together"), [["T1", 1]]);
 });
 
 test("Account priority - deleting an account closes the gap and keeps the order", () => {
@@ -77,12 +77,12 @@ test("Account priority - deleting an account closes the gap and keeps the order"
   const g1 = addConnection({ provider: "glm", name: "G1", credentials: { api_key: "1" } });
   const g2 = addConnection({ provider: "glm", name: "G2", credentials: { api_key: "2" } });
   addConnection({ provider: "glm", name: "G3", credentials: { api_key: "3" } });
-  addConnection({ provider: "mistral", name: "M1", credentials: { api_key: "m" } });
+  addConnection({ provider: "together", name: "T1", credentials: { api_key: "t" } });
   moveConnection(g2.id, "up"); // G2, G1, G3
 
   assert.strictEqual(deleteConnection(g1.id), true);
   assert.deepStrictEqual(order("glm"), [["G2", 1], ["G3", 2]]);
-  assert.deepStrictEqual(order("mistral"), [["M1", 1]], "provider lain tidak tersentuh");
+  assert.deepStrictEqual(order("together"), [["T1", 1]], "provider lain tidak tersentuh");
 
   const g4 = addConnection({ provider: "glm", name: "G4", credentials: { api_key: "4" } });
   assert.strictEqual(g4.priority, 3, "akun baru tetap di bawah setelah penghapusan");
@@ -93,7 +93,7 @@ test("Account priority - move swaps neighbours and refuses to pass either end", 
   const g1 = addConnection({ provider: "glm", name: "G1", credentials: { api_key: "1" } });
   const g2 = addConnection({ provider: "glm", name: "G2", credentials: { api_key: "2" } });
   const g3 = addConnection({ provider: "glm", name: "G3", credentials: { api_key: "3" } });
-  const m1 = addConnection({ provider: "mistral", name: "M1", credentials: { api_key: "m" } });
+  const t1 = addConnection({ provider: "together", name: "T1", credentials: { api_key: "t" } });
 
   assert.strictEqual(moveConnection(g3.id, "up"), true);
   assert.deepStrictEqual(order("glm"), [["G1", 1], ["G3", 2], ["G2", 3]]);
@@ -102,11 +102,11 @@ test("Account priority - move swaps neighbours and refuses to pass either end", 
 
   assert.strictEqual(moveConnection(g3.id, "up"), false, "#1 tidak bisa naik");
   assert.strictEqual(moveConnection(g2.id, "down"), false, "nomor terakhir tidak bisa turun");
-  assert.strictEqual(moveConnection(m1.id, "up"), false, "akun tunggal tidak punya tetangga");
+  assert.strictEqual(moveConnection(t1.id, "up"), false, "akun tunggal tidak punya tetangga");
   assert.strictEqual(moveConnection(g1.id, "sideways"), false);
   assert.strictEqual(moveConnection(9999, "up"), false);
   assert.deepStrictEqual(order("glm"), [["G3", 1], ["G1", 2], ["G2", 3]], "langkah yang ditolak tidak mengubah apa pun");
-  assert.deepStrictEqual(order("mistral"), [["M1", 1]]);
+  assert.deepStrictEqual(order("together"), [["T1", 1]]);
 });
 
 test("Account priority - an inactive account keeps its number", () => {
@@ -153,7 +153,7 @@ test("POST /dashboard/providers/accounts/move - reorders and redirects to the ac
   // The provider field is a hint only; the redirect follows the account itself.
   const res = await app.request("/dashboard/providers/accounts/move", {
     method: "POST",
-    body: form({ id: g2.id, provider: "mistral", direction: "up" }),
+    body: form({ id: g2.id, provider: "together", direction: "up" }),
   });
   assert.strictEqual(res.status, 302);
   assert.strictEqual(res.headers.get("location"), "/dashboard/providers/glm?notice=account_moved");

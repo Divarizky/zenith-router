@@ -8,8 +8,6 @@ import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
 import nvidia from "./registry/nvidia.js";
 import cline from "./registry/cline.js";
-import mistral from "./registry/mistral.js";
-import cloudflareAi from "./registry/cloudflare-ai.js";
 import openrouter from "./registry/openrouter.js";
 import llm7 from "./registry/llm7.js";
 import together from "./registry/together.js";
@@ -86,8 +84,6 @@ const REGISTRY = [
   kilocode,
   nvidia,
   cline,
-  mistral,
-  cloudflareAi,
   openrouter,
   llm7,
   together,

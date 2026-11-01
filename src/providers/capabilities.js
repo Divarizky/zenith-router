@@ -4,7 +4,7 @@
  * plus the token limits published on /v1/models.
  *
  * Resolution, first match wins, merged over DEFAULT_CAPABILITIES:
- *   1. storedCaps — provider API data captured during model sync (Mistral sends
+ *   1. storedCaps — provider API data captured during model sync (e.g.
  *      capabilities.reasoning / capabilities.vision). Authoritative, always wins.
  *   2. PATTERN_CAPABILITIES — glob on the model id, ordered specific -> generic.
  *   3. nothing — no pattern matched and the provider sent no data. Resolved to
@@ -80,8 +80,7 @@ const PATTERN_CAPABILITIES = [
   { pattern: "*o3*", caps: { vision: true, reasoning: true, contextWindow: 200000, maxOutput: 100000 } },
 
   // ── Mistral family ────────────────────────────────────────────────
-  // Synced Mistral models prefer the API data; these entries cover the builtin
-  // fallback list and any other gateway reselling the same model ids.
+  // Covers gateways offering Mistral model ids.
   { pattern: "*magistral*", caps: { vision: true, reasoning: true, contextWindow: 262144, maxOutput: 64000 } },
   { pattern: "*pixtral*", caps: { vision: true, contextWindow: 128000 } },
   { pattern: "*ministral*", caps: { vision: true, contextWindow: 262144 } },
@@ -186,7 +185,7 @@ function matchesAny(id, entries) {
  * Read a capabilities blob out of a provider API payload. Only explicit
  * booleans are kept, so a provider that omits the field leaves that capability
  * to the pattern table instead of silently declaring it false.
- * Mistral shape: { capabilities: { reasoning: bool, vision: bool } }.
+ * Expected shape: { capabilities: { reasoning: bool, vision: bool } }.
  */
 export function capabilitiesFromApi(model) {
   const c = model?.capabilities;

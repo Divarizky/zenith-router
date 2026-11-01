@@ -143,7 +143,7 @@ test("Provider detail pages link to the vendor API key page", async () => {
   const expected = {
     xkiro: "https://xkiro.com/dashboard/api/keys",
     openrouter: "https://openrouter.ai/keys",
-    mistral: "https://console.mistral.ai/api-keys",
+    together: "https://api.together.ai/settings/api-keys",
     glm: "https://z.ai/manage-apikey/apikey-list",
   };
   for (const [id, url] of Object.entries(expected)) {

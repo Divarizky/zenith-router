@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { resolveCapabilities, capabilitiesFromApi, DEFAULT_CAPABILITIES } from "../src/providers/capabilities.js";
 
 test("capabilities - stored provider data wins over the pattern table", () => {
-  // Mistral's API says codestral-2508 has no vision; the pattern table would only
+  // Provider API says codestral-2508 has no vision; the pattern table would only
   // say "text model" too, so use a model where the two disagree.
   assert.deepEqual(resolveCapabilities("codestral-2508", { vision: false, reasoning: false }), {
     vision: false,

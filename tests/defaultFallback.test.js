@@ -6,14 +6,14 @@ import { setCustomExecutor } from "../src/executors/base.js";
 import { createCombo, setComboEnabled } from "../src/services/combos.js";
 import { setSetting, getSetting } from "../src/services/settings.js";
 
-const MISTRAL_URL = "api.mistral.ai";
+const TOGETHER_URL = "api.together.xyz";
 const GLM_URL = "api.z.ai";
-const PRIMARY = "mistral/mistral-large-latest";
+const PRIMARY = "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8";
 const FALLBACK = "glm/glm-4-flash";
 
 function seed() {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "[REDACTED:credential_assignment]" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
 }
 
@@ -52,7 +52,7 @@ test("default fallback - failure on a plain model switches to the configured mod
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("jawaban dari fallback");
     },
   });
@@ -62,7 +62,7 @@ test("default fallback - failure on a plain model switches to the configured mod
   const data = await res.json();
   assert.strictEqual(data.choices[0].message.content, "jawaban dari fallback");
   assert.strictEqual(calls.length, 2, `model utama lalu fallback, dapat ${JSON.stringify(calls)}`);
-  assert.ok(calls[0].includes(MISTRAL_URL));
+  assert.ok(calls[0].includes(TOGETHER_URL));
   assert.ok(calls[1].includes(GLM_URL));
   setCustomExecutor(null);
 });
@@ -73,7 +73,7 @@ test("default fallback - a switched request records the requested model as its o
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback", { prompt_tokens: 21, completion_tokens: 34 });
     },
   });
@@ -156,7 +156,7 @@ test("default fallback - an exhausted combo hands the request to the fallback mo
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback");
     },
   });
@@ -178,7 +178,7 @@ test("default fallback - the configured fallback may itself be a combo", async (
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari combo cadangan");
     },
   });
@@ -205,7 +205,7 @@ test("default fallback - later requests skip a primary account that is still in 
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback");
     },
   });
@@ -241,7 +241,7 @@ test("default fallback - the streaming path fails over and records the origin to
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return new Response(
         'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo"},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -358,8 +358,8 @@ test("default fallback - a 422 payload error never reaches the fallback", async 
 
 test("default fallback - a fallback combo still starts at a vision member for an image", async () => {
   seed();
-  // codestral hanya teks, mistral-large bisa membaca gambar.
-  createCombo({ name: "cadangan-gambar", models: ["mistral/mistral-codestral-latest", "mistral/mistral-large-latest"] });
+  // Llama-3.3 hanya teks, Llama-4-Maverick bisa membaca gambar.
+  createCombo({ name: "cadangan-gambar", models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"] });
   setSetting("default_fallback_model", "cadangan-gambar");
 
   const served = [];
@@ -384,7 +384,7 @@ test("default fallback - a fallback combo still starts at a vision member for an
 
   assert.strictEqual(res.status, 200);
   await res.json();
-  assert.strictEqual(served[0], "mistral-large-latest", "anggota vision didahulukan pada combo fallback");
+  assert.strictEqual(served[0], "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "anggota vision didahulukan pada combo fallback");
   setCustomExecutor(null);
 });
 
@@ -396,7 +396,7 @@ test("default fallback - the primary is tried again once its accounts recover", 
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback");
     },
   });
@@ -412,7 +412,7 @@ test("default fallback - the primary is tried again once its accounts recover", 
   calls.length = 0;
   await (await chatRequest()).json();
   assert.strictEqual(calls.length, 2, "model utama dicoba lebih dulu setelah pulih");
-  assert.ok(calls[0].includes(MISTRAL_URL), `urutan panggilan: ${JSON.stringify(calls)}`);
+  assert.ok(calls[0].includes(TOGETHER_URL), `urutan panggilan: ${JSON.stringify(calls)}`);
   setCustomExecutor(null);
 });
 
@@ -422,7 +422,7 @@ test("default fallback - both targets failing returns the last error and records
 
   setCustomExecutor({
     async execute({ url }) {
-      return upstreamError(url.includes(MISTRAL_URL) ? 429 : 500, "upstream sedang bermasalah");
+      return upstreamError(url.includes(TOGETHER_URL) ? 429 : 500, "upstream sedang bermasalah");
     },
   });
 
@@ -441,7 +441,7 @@ test("default fallback - Recent Requests shows the requested model as the origin
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback");
     },
   });
@@ -465,7 +465,7 @@ test("default fallback - Recent Requests keeps the requested combo as origin", a
 
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari combo cadangan");
     },
   });
@@ -490,7 +490,7 @@ test("default fallback - the Messages endpoint fails over the same way", async (
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback");
     },
   });
@@ -521,7 +521,7 @@ test("default fallback - the Responses endpoint fails over the same way", async 
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return okOpenAI("dari fallback");
     },
   });
@@ -548,7 +548,7 @@ test("default fallback - the Messages streaming path fails over too", async () =
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return new Response(
         'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo"},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -583,7 +583,7 @@ test("default fallback - the Responses streaming path fails over too", async () 
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      if (url.includes(MISTRAL_URL)) return upstreamError(429, "rate limit reached");
+      if (url.includes(TOGETHER_URL)) return upstreamError(429, "rate limit reached");
       return new Response(
         'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"halo"},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -634,7 +634,7 @@ test("settings - the fallback dropdown lists inactive, combos, and active provid
   assert.ok(html.includes("<option value=\"\" selected>Nonaktif</option>"), "opsi nonaktif jadi pilihan awal");
   assert.ok(html.includes(">rantai-aktif</option>"), "combo aktif masuk daftar");
   assert.ok(!html.includes(">rantai-mati</option>"), "combo nonaktif tidak masuk daftar");
-  assert.ok(html.includes(">mis/mistral-large-latest</option>"), "model provider berkoneksi aktif masuk daftar");
+  assert.ok(html.includes(">together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8</option>"), "model provider berkoneksi aktif masuk daftar");
   assert.ok(html.includes(">glm/glm-4-flash</option>"));
   assert.ok(html.includes("<optgroup label=\"Combo\">"), "combo dikelompokkan");
 });

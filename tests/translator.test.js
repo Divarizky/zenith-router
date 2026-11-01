@@ -164,14 +164,14 @@ test("POST /v1/chat/completions - cross-vendor routing to Claude upstream with t
 
 test("Translator Request - maps role developer to system for OpenAI-compatible upstreams", () => {
   const body = {
-    model: "mis/mistral-large-latest",
+    model: "tg/meta-llama/Llama-3.3-70B-Instruct-Turbo",
     messages: [
       { role: "developer", content: "You are a coding assistant." },
       { role: "user", content: "Hi" },
     ],
   };
 
-  const passthrough = translateRequest("openai", "openai", body, "mistral-large-latest");
+  const passthrough = translateRequest("openai", "openai", body, "meta-llama/Llama-3.3-70B-Instruct-Turbo");
   assert.deepStrictEqual(passthrough.messages.map((m) => m.role), ["system", "user"]);
   assert.strictEqual(passthrough.messages[0].content, "You are a coding assistant.");
   assert.strictEqual(body.messages[0].role, "developer", "input body is not mutated");

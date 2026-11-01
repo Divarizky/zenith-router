@@ -39,7 +39,7 @@ test("confirm dialog is a labelled modal with cancel as the safe default", async
 test("destructive forms declare their confirmation message", async () => {
   initDb(":memory:");
   addProxyPool({ name: "uji", url: "http://127.0.0.1:9" });
-  createCombo({ name: "uji-combo", models: ["mistral/mistral-large-latest"] });
+  createCombo({ name: "uji-combo", models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo"] });
   const pages = [
     ["/dashboard/proxies", "Hapus proxy ini dari daftar?"],
     ["/dashboard/providers?tab=combos", "Hapus combo ini beserta definisinya?"],

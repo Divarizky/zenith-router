@@ -14,7 +14,7 @@ function form(fields) {
 
 function seed() {
   initDb(":memory:");
-  addConnection({ provider: "mistral", name: "Mistral Acc", credentials: { api_key: "mis-key" } });
+  addConnection({ provider: "together", name: "Together Acc", credentials: { api_key: "together-key" } });
   addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
 }
 
@@ -32,12 +32,12 @@ test("GET /dashboard/combos - lists stored combos with their members", async () 
   seed();
   await app.request("/dashboard/combos/create", {
     method: "POST",
-    body: form({ name: "antai-utama", models: "mistral/mistral-large-latest\nglm/glm-4-flash" }),
+    body: form({ name: "antai-utama", models: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo\nglm/glm-4-flash" }),
   });
 
   const html = await (await app.request("/dashboard/providers?tab=combos")).text();
   assert.ok(html.includes("antai-utama"));
-  assert.ok(html.includes("mistral/mistral-large-latest"));
+  assert.ok(html.includes("together/meta-llama/Llama-3.3-70B-Instruct-Turbo"));
   assert.ok(html.includes("glm/glm-4-flash"));
 
   const cardHtml = html.split('<div class="card combo-card">')[1] || "";
@@ -84,7 +84,7 @@ test("POST /dashboard/combos/create then POST /v1 - the dashboard combo is what 
   seed();
   const created = await app.request("/dashboard/combos/create", {
     method: "POST",
-    body: form({ name: "antai-utama", models: "mistral/mistral-large-latest\nglm/glm-4-flash" }),
+    body: form({ name: "antai-utama", models: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo\nglm/glm-4-flash" }),
   });
   assert.strictEqual(created.status, 302);
 
@@ -92,7 +92,7 @@ test("POST /dashboard/combos/create then POST /v1 - the dashboard combo is what 
   setCustomExecutor({
     async execute({ url }) {
       urls.push(url);
-      if (url.includes("api.mistral.ai")) {
+      if (url.includes("api.together.xyz")) {
         return new Response(JSON.stringify({ error: { message: "rate limit reached" } }), {
           status: 429,
           headers: { "Content-Type": "application/json" },
@@ -119,7 +119,7 @@ test("POST /dashboard/combos/create then POST /v1 - the dashboard combo is what 
   assert.strictEqual(res.status, 200);
   const data = await res.json();
   assert.strictEqual(data.choices[0].message.content, "dilayani anggota kedua");
-  assert.deepStrictEqual(urls.map((u) => u.includes("api.mistral.ai") ? "mistral" : "glm"), ["mistral", "glm"]);
+  assert.deepStrictEqual(urls.map((u) => u.includes("api.together.xyz") ? "together" : "glm"), ["together", "glm"]);
   setCustomExecutor(null);
 });
 
@@ -127,7 +127,7 @@ async function post(path, fields) {
   return app.request(path, { method: "POST", body: form(fields), redirect: "manual" });
 }
 
-async function createChain(name = "antai-utama", models = "mistral/mistral-large-latest\nglm/glm-4-flash") {
+async function createChain(name = "antai-utama", models = "together/meta-llama/Llama-3.3-70B-Instruct-Turbo\nglm/glm-4-flash") {
   seed();
   await post("/dashboard/combos/create", { name, models });
 }
@@ -153,13 +153,13 @@ test("POST /dashboard/combos/reorder - the new order is what the next request us
   assert.strictEqual(moved.status, 302);
   assert.deepStrictEqual(
     listCombos()[0].models,
-    ["glm/glm-4-flash", "mistral/mistral-large-latest"]
+    ["glm/glm-4-flash", "together/meta-llama/Llama-3.3-70B-Instruct-Turbo"]
   );
 
   const urls = [];
   setCustomExecutor({
     async execute({ url }) {
-      urls.push(url.includes("api.mistral.ai") ? "mistral" : "glm");
+      urls.push(url.includes("api.together.xyz") ? "together" : "glm");
       return new Response(
         JSON.stringify({
           id: "chatcmpl_ok",
@@ -193,13 +193,13 @@ test("POST /dashboard/combos/update - rewriting the chain is refused and the lis
 
   assert.strictEqual(res.status, 302);
   assert.match(res.headers.get("location"), /error=1/);
-  assert.deepStrictEqual(listCombos()[0].models, ["mistral/mistral-large-latest", "glm/glm-4-flash"]);
+  assert.deepStrictEqual(listCombos()[0].models, ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "glm/glm-4-flash"]);
   assert.strictEqual(listCombos().length, 1, "tidak boleh ada combo baru yang tersesat");
 });
 
 test("POST /dashboard/combos/toggle - a disabled combo stops routing but keeps its definition", async () => {
   seed();
-  await post("/dashboard/combos/create", { name: "antai-utama", models: "mistral/mistral-large-latest\nglm/glm-4-flash" });
+  await post("/dashboard/combos/create", { name: "antai-utama", models: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo\nglm/glm-4-flash" });
   await post("/dashboard/combos/create", { name: "cadangan", models: "glm/glm-4-flash" });
 
   const modelsBefore = JSON.parse(await (await app.request("/v1/models")).text());
@@ -252,12 +252,12 @@ test("POST /dashboard/combos/delete - the definition is gone and the name no lon
 });
 
 test("POST /dashboard/combos/create - a chain cannot point at another combo", async () => {
-  await createChain("rantai-luar", "mistral/mistral-large-latest");
+  await createChain("rantai-luar", "together/meta-llama/Llama-3.3-70B-Instruct-Turbo");
   await post("/dashboard/combos/create", { name: "rantai-dalam", models: "glm/glm-4-flash" });
 
   const res = await post("/dashboard/combos/create", {
     name: "rantai-luar-tambahan",
-    models: "rantai-dalam\nmistral/mistral-large-latest",
+    models: "rantai-dalam\ntogether/meta-llama/Llama-3.3-70B-Instruct-Turbo",
   });
 
   assert.strictEqual(res.status, 302);
@@ -363,13 +363,13 @@ test("POST /dashboard/combos/update - a stray space around the strategy is forgi
 });
 
 test("GET /v1/models - a combo entry rolls up capabilities and the smallest context window", async () => {
-  await createChain("antai-utama", "mistral/mistral-large-latest\nglm/glm-4-flash\nollama/gpt-oss:20b");
+  await createChain("antai-utama", "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8\nglm/glm-4-flash\nollama/gpt-oss:20b");
 
   const models = JSON.parse(await (await app.request("/v1/models")).text());
   const entry = models.data.find((m) => m.id === "antai-utama");
 
   assert.strictEqual(entry.owned_by, "combo");
-  // mistral-large vision+256k, glm-4 reasoning+200k, gpt-oss reasoning+128k.
+  // Llama-4-Maverick vision+1000k, glm-4 reasoning+128k, gpt-oss reasoning+128k.
   assert.deepStrictEqual(entry.capabilities, { vision: true, reasoning: true });
   assert.strictEqual(entry.context_length, 128000, "ukuran konteks adalah anggota tersempit");
   assert.strictEqual(entry.combo, true);
@@ -551,7 +551,7 @@ test("POST /dashboard/combos/rename - the combo answers to its new name there", 
   seed();
   await app.request("/dashboard/combos/create", {
     method: "POST",
-    body: form({ name: "antai-utama", models: "mistral/mistral-large-latest\nglm/glm-4-flash" }),
+    body: form({ name: "antai-utama", models: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo\nglm/glm-4-flash" }),
   });
 
   const res = await post("/dashboard/combos/rename", { name: "antai-utama", new_name: "antai-baru" });
@@ -561,13 +561,13 @@ test("POST /dashboard/combos/rename - the combo answers to its new name there", 
   const combos = listCombos();
   assert.strictEqual(combos.length, 1, "rename bukan create");
   assert.strictEqual(combos[0].name, "antai-baru");
-  assert.deepStrictEqual(combos[0].models, ["mistral/mistral-large-latest", "glm/glm-4-flash"]);
+  assert.deepStrictEqual(combos[0].models, ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "glm/glm-4-flash"]);
 
   // Nama baru adalah kunci routing: request memakai nama baru harus terlayani,
   // nama lama tidak dikenali lagi.
   setCustomExecutor({
     async execute({ url }) {
-      if (url.includes("api.mistral.ai")) {
+      if (url.includes("api.together.xyz")) {
         return new Response(JSON.stringify({ error: { message: "rate limit reached" } }), {
           status: 429,
           headers: { "Content-Type": "application/json" },
@@ -604,7 +604,7 @@ test("POST /dashboard/combos/rename - a taken name is refused and both combos su
   seed();
   await app.request("/dashboard/combos/create", {
     method: "POST",
-    body: form({ name: "antai-utama", models: "mistral/mistral-large-latest" }),
+    body: form({ name: "antai-utama", models: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo" }),
   });
   await app.request("/dashboard/combos/create", {
     method: "POST",

@@ -53,7 +53,8 @@ test("Provider Registry - new providers use expected configs", () => {
   assert.strictEqual(or.transport.baseUrl, "https://openrouter.ai/api/v1/chat/completions");
 
   const l7 = getProvider("llm7");
-  assert.strictEqual(l7.category, "apikey");
+  assert.strictEqual(l7.category, "free");
+  assert.strictEqual(l7.noAuth, true);
   assert.strictEqual(l7.transport.baseUrl, "https://api.llm7.io/v1/chat/completions");
 
   const fb = getProvider("freebuff");

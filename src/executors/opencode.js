@@ -537,6 +537,9 @@ export class OpencodeExecutor extends BaseExecutor {
     // Executor headers are built by the gateway and never carry client headers,
     // so the conversation identity arrives as sessionKey (src/gateway/session.js).
     const session = translateOpencodeSession(sessionKey || "default", "desktop");
+    const traceId = randomBytes(16).toString("hex");
+    const spanId = randomBytes(8).toString("hex");
+    const parentSpanId = randomBytes(8).toString("hex");
 
     const opencodeHeaders = {
       ...headers,
@@ -545,8 +548,13 @@ export class OpencodeExecutor extends BaseExecutor {
       "x-opencode-client": "cli",
       ...opencodeSessionHeaders(session),
       "x-opencode-project": "global",
+      b3: headers["b3"] || `${traceId}-${spanId}-1-${parentSpanId}`,
+      traceparent: headers["traceparent"] || `00-${traceId}-${spanId}-01`,
       Accept: "text/event-stream",
     };
+    if (headers["x-opencode-request"]) {
+      opencodeHeaders["x-opencode-request"] = headers["x-opencode-request"];
+    }
 
     let res = await super.execute({
       url: finalUrl,

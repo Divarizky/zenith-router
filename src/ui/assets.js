@@ -14,6 +14,9 @@ export function getProviderIconPath(providerId) {
   try {
     const file = path.join(PROVIDERS_DIR, `${id}.png`);
     if (fs.existsSync(file)) return `/providers/${id}.png`;
+    const baseId = id === "kilo-free" ? "kilocode" : id;
+    const fallbackFile = path.join(PROVIDERS_DIR, `${baseId}.png`);
+    if (fs.existsSync(fallbackFile)) return `/providers/${baseId}.png`;
   } catch {}
   return null;
 }

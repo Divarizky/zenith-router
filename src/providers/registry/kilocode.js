@@ -1,6 +1,6 @@
 export default {
   id: "kilocode",
-  name: "Kilo Code Free Tier",
+  name: "Kilo Code",
   alias: ["kc", "kilocode"],
   category: "oauth",
   // Kilo's free models are synced and added to the list below, like the upstream kiloFreeModels.

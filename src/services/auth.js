@@ -105,7 +105,14 @@ const CLAUDE_CODE_BETAS = [
  * Apply credentials from connection to request headers, based on the connection auth type
  */
 export function applyConnectionAuth(headers, connection, { claudeSessionId = null, adaptiveThinking = false } = {}) {
-  if (!connection || !connection.credentials || connection.auth_type === "noauth") return headers;
+  if (!connection) return headers;
+  if (connection.auth_type === "noauth") {
+    if (connection.provider === "llm7" && !headers["Authorization"]) {
+      headers["Authorization"] = "Bearer unused";
+    }
+    return headers;
+  }
+  if (!connection.credentials) return headers;
 
   const creds = connection.credentials;
 

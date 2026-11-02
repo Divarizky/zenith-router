@@ -155,10 +155,29 @@ const IMPORTERS = {
     modes: ["all"],
     parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.display_name || m.id, isFree: false })),
   },
+  "kilo-free": {
+    url: "https://api.kilo.ai/api/gateway/models",
+    public: true,
+    modes: ["all"],
+    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
+  },
   llm7: {
     url: "https://api.llm7.io/v1/models",
+    public: true,
     modes: ["all"],
-    parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: false })),
+    headers: { Authorization: "Bearer unused" },
+    parse: (json) => {
+      const list = listOf(json);
+      const turboModels = list
+        .filter((m) => m.tier === "turbo" || payloadSaysFree(m))
+        .map((m) => ({ id: m.id, name: m.name || m.id, isFree: true }));
+      // default dan fast adalah alias gratis bawaan di endpoint chat
+      const builtins = [
+        { id: "default", name: "LLM7 Default", isFree: true },
+        { id: "fast", name: "LLM7 Fast", isFree: true },
+      ];
+      return [...builtins, ...turboModels];
+    },
   },
   ollama: {
     url: "https://ollama.com/v1/models",

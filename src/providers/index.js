@@ -10,6 +10,7 @@ import nvidia from "./registry/nvidia.js";
 import cline from "./registry/cline.js";
 import openrouter from "./registry/openrouter.js";
 import llm7 from "./registry/llm7.js";
+import kiloFree from "./registry/kilo-free.js";
 import together from "./registry/together.js";
 import freebuff from "./registry/freebuff.js";
 import ollama from "./registry/ollama.js";
@@ -94,6 +95,7 @@ const REGISTRY = [
   glm,
   opencode,
   kilocode,
+  kiloFree,
   nvidia,
   cline,
   openrouter,

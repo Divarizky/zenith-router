@@ -241,7 +241,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
       white-space: nowrap;
     }
-    .pill-success, .pill-lime { background: var(--accent-lime, #ccff00); border: 1.5px solid #000000; color: #000000; font-weight: 800; }
+    .pill-success { background: var(--success); border: 1.5px solid var(--line); color: #0a0a0a; font-weight: 800; }
+    .pill-lime { background: var(--accent-lime); border: 1.5px solid #000000; color: #000000; font-weight: 800; }
     .pill-warning { background: var(--warning); border: 1.5px solid var(--line); color: #0a0a0a; }
     .pill-danger { background: var(--danger); border: 1.5px solid var(--line); color: #0a0a0a; }
     .pill-info { background: var(--info); border: 1.5px solid var(--line); color: #0a0a0a; }
@@ -250,7 +251,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .pill-muted { background: transparent; border: 1.5px solid var(--line); color: var(--text-muted); }
     .pill .dot, .pill svg { flex-shrink: 0; }
     .dot { display: inline-block; width: 8px; height: 8px; background: currentColor; }
-    .dot-success { background: var(--accent-lime, #ccff00); border: 1.5px solid #000000; border-radius: 50%; }
+    .dot-success { background: var(--success); border-radius: 50%; }
     .pill-success .dot-success, .pill-lime .dot-success { background: #000000; border: none; }
     .dot-warning { background: var(--warning); }
     .dot-danger { background: var(--danger); }

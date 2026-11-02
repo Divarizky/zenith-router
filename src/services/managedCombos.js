@@ -21,6 +21,25 @@ function toId(m) {
 }
 
 /**
+ * Menentukan apakah kandidat model termasuk model gratis.
+ * Model dianggap gratis bila:
+ * 1. ID-nya berakhiran `:free`, atau
+ * 2. Provider pemiliknya (`owned_by`, atau prefix sebelum `/` pada ID) berkategori `free` atau `noAuth: true`.
+ */
+export function isFreeModel(modelMeta) {
+  const id = toId(modelMeta);
+  if (!id) return false;
+  if (id.toLowerCase().endsWith(":free")) return true;
+
+  const ownerRaw =
+    (typeof modelMeta === "object" && modelMeta !== null && modelMeta.owned_by) ||
+    (id.includes("/") ? id.slice(0, id.indexOf("/")) : "");
+  const provider = getProvider(String(ownerRaw));
+  if (!provider) return false;
+  return provider.category === "free" || provider.noAuth === true;
+}
+
+/**
  * Memfilter apakah model memenuhi kriteria agentic gate:
  * 1. Mendukung function / tool calling (`toolsUnsupported !== true`).
  * 2. Memiliki context length minimal 100.000 token (`AGENTIC_MIN_CONTEXT`).
@@ -203,9 +222,10 @@ export function assembleManagedCombos({
   const activeCandidates = [];
   const cooldownCandidates = [];
 
+  // Seluruh super-combo hanya boleh berisi model gratis.
   for (const c of candidates) {
     const id = toId(c);
-    if (!id) continue;
+    if (!id || !isFreeModel(c)) continue;
     const latency = getModelLatency(id, c, latencyMap);
     if (isModelInCooldown(id, c, latency, signals)) {
       cooldownCandidates.push(c);

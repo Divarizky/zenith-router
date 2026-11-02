@@ -7,6 +7,7 @@ import {
   assembleManagedCombos,
   syncManagedCombos,
   saveCombo,
+  isFreeModel,
 } from "../src/services/managedCombos.js";
 import { getComboByName, listCombos } from "../src/services/combos.js";
 import { QUOTA_LATENCY_SENTINEL } from "../src/services/modelHealth.js";
@@ -111,17 +112,17 @@ test("deriveTierLists - fallback aman menambahkan model dari pool aktif jika tie
 
 test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, dan zenith-cooldown", () => {
   const candidates = [
-    { id: "ag/claude-3-7-sonnet", contextLength: 1000000 },
-    { id: "ag/gemini-3.1-pro", contextLength: 1048576 },
-    { id: "fb/gpt-4o-mini", contextLength: 128000 },
-    { id: "fb/llama-3-1-8b", contextLength: 128000 },
-    { id: "ag/qwen-2.5-coder-32b", contextLength: 1000000 },
+    { id: "ag/claude-3-7-sonnet", owned_by: "llm7", contextLength: 1000000 },
+    { id: "ag/gemini-3.1-pro", owned_by: "llm7", contextLength: 1048576 },
+    { id: "fb/gpt-4o-mini", owned_by: "llm7", contextLength: 128000 },
+    { id: "fb/llama-3-1-8b", owned_by: "llm7", contextLength: 128000 },
+    { id: "ag/qwen-2.5-coder-32b", owned_by: "llm7", contextLength: 1000000 },
     // Model context kecil (tidak lolos agentic gate)
-    { id: "provider/old-small-model", contextLength: 32000 },
+    { id: "provider/old-small-model", owned_by: "llm7", contextLength: 32000 },
     // Model tanpa tools (tidak lolos agentic gate)
-    { id: "provider/raw-text-model", contextLength: 200000, toolsUnsupported: true },
+    { id: "provider/raw-text-model", owned_by: "llm7", contextLength: 200000, toolsUnsupported: true },
     // Model terkena kuota / rate limit
-    { id: "ag/claude-3-5-sonnet", contextLength: 200000 },
+    { id: "ag/claude-3-5-sonnet", owned_by: "llm7", contextLength: 200000 },
   ];
 
   const latencyMap = {
@@ -166,10 +167,10 @@ test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, da
 
 test("assembleManagedCombos - mendeteksi cooldown dari signals 429 atau quotaModels", () => {
   const candidates = [
-    { id: "model-active-1", contextLength: 128000 },
-    { id: "model-active-2", contextLength: 128000 },
-    { id: "model-quota-1", contextLength: 128000 },
-    { id: "model-quota-2", contextLength: 128000 },
+    { id: "model-active-1", owned_by: "llm7", contextLength: 128000 },
+    { id: "model-active-2", owned_by: "llm7", contextLength: 128000 },
+    { id: "model-quota-1", owned_by: "llm7", contextLength: 128000 },
+    { id: "model-quota-2", owned_by: "llm7", contextLength: 128000 },
   ];
 
   const result = assembleManagedCombos({
@@ -191,11 +192,11 @@ test("assembleManagedCombos - mendeteksi cooldown dari signals 429 atau quotaMod
 
 test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 4 combo ke SQLite", async () => {
   const candidates = [
-    { id: "test-smart-1", contextLength: 200000, capabilities: { reasoning: true } },
-    { id: "test-smart-2", contextLength: 200000, capabilities: { reasoning: true } },
-    { id: "test-fast-1", contextLength: 128000 },
-    { id: "test-fast-2", contextLength: 128000 },
-    { id: "test-cooldown-1", contextLength: 128000, status: "quota" },
+    { id: "test-smart-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true } },
+    { id: "test-smart-2", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true } },
+    { id: "test-fast-1", owned_by: "llm7", contextLength: 128000 },
+    { id: "test-fast-2", owned_by: "llm7", contextLength: 128000 },
+    { id: "test-cooldown-1", owned_by: "llm7", contextLength: 128000, status: "quota" },
   ];
 
   const syncResult = await syncManagedCombos({ candidates });
@@ -231,4 +232,30 @@ test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 4 combo ke SQL
   saveCombo("zenith-free", ["updated-model-1", "updated-model-2"]);
   const updatedFree = getComboByName("zenith-free");
   assert.deepEqual(updatedFree.models, ["updated-model-1", "updated-model-2"]);
+});
+
+test("isFreeModel - hanya model dari provider gratis atau berakhiran :free yang dianggap gratis", () => {
+  // Provider gratis keyless (noAuth / category free) lewat owned_by atau prefix ID
+  assert.equal(isFreeModel({ id: "poll/openai-fast", owned_by: "pollinations" }), true);
+  assert.equal(isFreeModel("llm7/default"), true);
+  // Model berbayar / berbasis akun tidak boleh lolos
+  assert.equal(isFreeModel({ id: "claude-3-7-sonnet", owned_by: "claude" }), false);
+  assert.equal(isFreeModel("openrouter/gpt-4o"), false);
+  // Suffix :free menandai model gratis walaupun owner tidak dikenal
+  assert.equal(isFreeModel({ id: "vendor/some-model:free" }), true);
+  // Input kosong / owner tidak dikenal ditolak
+  assert.equal(isFreeModel(null), false);
+  assert.equal(isFreeModel({ id: "unknown-provider/model-x" }), false);
+});
+
+test("assembleManagedCombos - super-combo hanya memuat model gratis", () => {
+  const candidates = [
+    { id: "poll/openai-fast", owned_by: "pollinations", contextLength: 128000 },
+    { id: "claude-3-7-sonnet", owned_by: "claude", contextLength: 200000 },
+  ];
+  const result = assembleManagedCombos({ candidates });
+  for (const name of ["zenith-free", "zenith-smart", "zenith-fast", "zenith-cooldown"]) {
+    assert.equal(result[name].includes("claude-3-7-sonnet"), false, `${name} tidak boleh memuat model berbayar`);
+  }
+  assert.ok(result["zenith-free"].includes("poll/openai-fast"));
 });

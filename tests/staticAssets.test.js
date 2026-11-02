@@ -3,6 +3,7 @@ import assert from "node:assert";
 import os from "node:os";
 import { initDb } from "../src/db/index.js";
 import { app } from "../src/index.js";
+import { getProviderIconPath } from "../src/ui/assets.js";
 
 test("provider icons resolve from any working directory", async (t) => {
   const originalCwd = process.cwd();
@@ -29,7 +30,7 @@ test("usage page ships icon URLs for linked providers", async () => {
   assert.ok(html.includes("/providers/"));
 });
 
-test("providers list and detail render a brand icon for every provider", async () => {
+test("providers list and detail render a brand icon or text fallback for every provider", async () => {
   initDb(":memory:");
   const { getAllProviders } = await import("../src/providers/index.js");
   const providers = getAllProviders();
@@ -38,7 +39,12 @@ test("providers list and detail render a brand icon for every provider", async (
   assert.strictEqual(list.status, 200);
   const html = await list.text();
   for (const p of providers) {
-    assert.ok(html.includes(`src="/providers/${p.id}.png"`), `missing icon for ${p.id}`);
+    // Provider tanpa PNG memakai badge inisial (provider-icon-fb) sebagai fallback teks.
+    if (getProviderIconPath(p.id)) {
+      assert.ok(html.includes(`src="/providers/${p.id}.png"`), `missing icon for ${p.id}`);
+    } else {
+      assert.ok(!html.includes(`src="/providers/${p.id}.png"`), `unexpected icon src for ${p.id}`);
+    }
     assert.ok(html.includes(`href="/dashboard/providers/${p.id}"`), `missing card for ${p.id}`);
   }
 

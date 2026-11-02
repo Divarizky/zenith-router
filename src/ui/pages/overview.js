@@ -23,21 +23,25 @@ export function renderOverviewPage(port = 20120) {
   const content = `
     <div class="grid">
       <div class="card stat">
+        <span class="stat-index">01</span>
         <div class="label">Status Gateway</div>
         <div class="value" style="font-size: 1.5rem;">Aktif</div>
         <div class="sub">Port ${port}</div>
       </div>
       <div class="card stat">
+        <span class="stat-index">02</span>
         <div class="label">Koneksi Aktif</div>
         <div class="value">${activeCount} <span style="font-size: 1rem; color: var(--text-muted);">/ ${connections.length}</span></div>
         <div class="sub">Akun terkonfigurasi</div>
       </div>
       <div class="card stat">
+        <span class="stat-index">03</span>
         <div class="label">Token Dipakai (Hari Ini)</div>
         <div class="value">${usageToday.summary.total_tokens.toLocaleString()}</div>
         <div class="sub">${usageToday.summary.total_requests} permintaan</div>
       </div>
       <div class="card stat">
+        <span class="stat-index">04</span>
         <div class="label">Model Tersedia</div>
         <div class="value">${models.length}</div>
         <div class="sub"><a href="/dashboard/providers" style="color: inherit;">Kelola di Penyedia</a></div>
@@ -47,7 +51,7 @@ export function renderOverviewPage(port = 20120) {
 
     <div class="card" style="margin-bottom: 1.5rem;">
       <h3>Client Integration Endpoints</h3>
-      <table style="margin-top: 0.5rem;">
+      <table class="endpoint-table" style="margin-top: 0.5rem;">
         <tbody>
           <tr><td style="width: 160px;"><strong>OpenAI Chat</strong></td><td><code>${baseUrl}/v1/chat/completions</code></td></tr>
           <tr><td><strong>Claude Messages</strong></td><td><code>${baseUrl}/v1/messages</code></td></tr>
@@ -59,9 +63,9 @@ export function renderOverviewPage(port = 20120) {
 
     <!-- Live Console Log Card -->
     <div class="card console-log-card" style="padding: 0; overflow: hidden; margin-bottom: 2rem;">
-      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-wrap: wrap; gap: 0.5rem;">
+      <div class="window-header" style="flex-wrap: wrap;" aria-label="Console Log">
         <div style="display: flex; align-items: center; gap: 0.65rem;">
-          <h3 style="font-size: 0.95rem; margin: 0; font-weight: 800;">Console Log</h3>
+          <span class="window-title">CONSOLE.LOG</span>
           <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs);">
             <span class="dot" style="width:6px;height:6px;"></span>
             Connecting...
@@ -84,6 +88,7 @@ export function renderOverviewPage(port = 20120) {
             Clear
           </button>
         </div>
+        <div class="window-controls" aria-hidden="true"><span>_</span><span>&#9633;</span><span class="wc-close">&#10005;</span></div>
       </div>
 
       <div

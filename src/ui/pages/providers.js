@@ -1032,6 +1032,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     }
 
     <div class="card">
+      <div class="window-header window-header-card" aria-hidden="true">
+        <span class="window-title">${escapeHtml(p.id)}</span>
+        <div class="window-controls"><span>_</span><span>&#9633;</span><span class="wc-close">&#10005;</span></div>
+      </div>
       <div class="provider-card-head">
         <div class="provider-title">
           ${providerIconHtml(p, 40)}

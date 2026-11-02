@@ -322,23 +322,30 @@ export function renderProvidersPage(port = 20120, query = {}) {
     const cards = providers
       .map((p) => {
         const stats = accountStats(byProvider.get(p.id) || []);
+        const modelCount = countProviderModels(
+          p,
+          allImported.filter((m) => m.provider === p.id),
+          allCustom.filter((m) => m.provider === p.id)
+        );
         return `
       <a class="card provider-card" href="${providerUrl(p.id)}">
-        <div class="provider-card-head">
-          <div class="provider-title">
-            ${providerIconHtml(p, 32)}
-            <div class="provider-text">
-              <h3>${escapeHtml(p.name)}</h3>
-              <p class="hint"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${countProviderModels(
-                p,
-                allImported.filter((m) => m.provider === p.id),
-                allCustom.filter((m) => m.provider === p.id)
-              )} model</p>
-            </div>
+        <div class="provider-matrix-left">
+          <div class="provider-logo-box">
+            ${providerIconHtml(p, 36)}
           </div>
-          ${statusPill(p, stats, byProvider.get(p.id) || [])}
+          <span class="provider-prefix-badge"><code>${escapeHtml(primaryAlias(p))}/</code></span>
         </div>
-        ${s.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
+        <div class="provider-matrix-right">
+          <div class="provider-matrix-head">
+            <h3 class="provider-name">${escapeHtml(p.name)}</h3>
+            <span class="provider-model-count">${modelCount} MODEL</span>
+          </div>
+          <div class="provider-matrix-meta">
+            ${statusPill(p, stats, byProvider.get(p.id) || [])}
+            ${freeTierPills(p.id)}
+          </div>
+          <span class="sr-only" style="display:none"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${modelCount} model</span>
+        </div>
       </a>`;
       })
       .join("");

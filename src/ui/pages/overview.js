@@ -63,11 +63,11 @@ export function renderOverviewPage(port = 20120) {
 
     <!-- Live Console Log Card -->
     <div class="card console-log-card" style="padding: 0; overflow: hidden; margin-bottom: 2rem;">
-      <div class="window-header" style="flex-wrap: wrap;" aria-label="Console Log">
+      <div class="window-header window-header-lime" style="flex-wrap: wrap;" aria-label="Console Log">
         <div style="display: flex; align-items: center; gap: 0.65rem;">
-          <span class="window-title">CONSOLE.LOG</span>
+          <span class="window-title" style="color: #000000; font-weight: 900;">CONSOLE.LOG</span>
           <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs);">
-            <span class="dot" style="width:6px;height:6px;"></span>
+            <span class="dot dot-success" style="width:6px;height:6px;"></span>
             Connecting...
           </span>
         </div>
@@ -77,14 +77,14 @@ export function renderOverviewPage(port = 20120) {
             type="text"
             id="log-filter"
             placeholder="Saring log..."
-            style="width: 160px; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface);"
+            style="width: 160px; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface); color: var(--text); border: var(--bw) solid #000000;"
             oninput="applyLogFilter()"
           />
-          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: var(--text-muted); cursor: pointer; user-select: none;">
-            <input type="checkbox" id="log-autoscroll" checked style="width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer;" />
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: #000000; font-weight: 800; cursor: pointer; user-select: none;">
+            <input type="checkbox" id="log-autoscroll" checked style="width: 13px; height: 13px; accent-color: #000000; cursor: pointer;" />
             Auto-scroll
           </label>
-          <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: var(--text-xs); padding: 0.25rem 0.65rem;">
+          <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: var(--text-xs); padding: 0.25rem 0.65rem; background: var(--surface); color: #000000; border-color: #000000; font-weight: 800;">
             Clear
           </button>
         </div>
@@ -174,7 +174,7 @@ export function renderOverviewPage(port = 20120) {
 
           es.onopen = function() {
             statusBadge.className = 'pill pill-success';
-            statusBadge.style.fontSize = '0.68rem';
+            statusBadge.style.fontSize = 'var(--text-xs)';
             statusBadge.innerHTML = '<span class="dot dot-success" style="width:6px;height:6px;"></span> Live';
           };
 
@@ -199,7 +199,7 @@ export function renderOverviewPage(port = 20120) {
 
           es.onerror = function() {
             statusBadge.className = 'pill pill-danger';
-            statusBadge.style.fontSize = '0.68rem';
+            statusBadge.style.fontSize = 'var(--text-xs)';
             statusBadge.innerHTML = '<span class="dot dot-danger" style="width:6px;height:6px;"></span> Offline';
           };
         }

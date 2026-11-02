@@ -62,6 +62,8 @@ export const THEME_TOKENS_CSS = `
   --text-muted: #cfcfd6;
   --text-subtle: #9a9aa6;
   --accent-soft: rgba(37, 99, 235, 0.28);
+  --accent-lime: #ccff00;
+  --accent-lime-hover: #bbf400;
   --accent-pink-soft: rgba(255, 179, 217, 0.18);
   --success: #34d399;
   --warning: #facc15;

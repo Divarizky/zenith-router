@@ -196,6 +196,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .topbar h2 { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; text-transform: uppercase; }
     /* Window bar retro: judul, indikator, dan kontrol _ □ ✕ */
     .window-header { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.5rem 0.75rem; background: var(--accent); color: #ffffff; border-bottom: var(--bw) solid var(--line); }
+    .window-header-lime { background: var(--accent-lime, #ccff00); color: #000000; border-bottom: var(--bw) solid #000000; }
+    .window-header-lime .window-title { color: #000000; font-weight: 900; }
+    .window-header-lime .window-controls span { background: #ffffff; color: #000000; border-color: #000000; }
+    .window-header-lime .window-controls .wc-close { background: var(--danger); color: #000000; border-color: #000000; }
     .window-title { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
     .window-controls { display: inline-flex; gap: 0.3rem; }
     .window-controls span { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; background: var(--surface); color: var(--text); border: var(--bw) solid var(--line); font-size: var(--text-xs); font-weight: 800; line-height: 1; }
@@ -229,23 +233,25 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .pill {
       display: inline-flex; align-items: center; gap: 0.35rem;
       padding: 0.16rem 0.5rem;
-      border: var(--bw) solid var(--line);
+      border: 1.5px solid var(--line);
+      border-radius: 0px;
       background: var(--surface);
       /* Teks hitam, bukan warna status: kontras teks berwarna di atas putih gagal WCAG. */
       color: var(--text);
       font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
       white-space: nowrap;
     }
-    .pill-success { background: var(--success); border-color: var(--line); color: #0a0a0a; }
-    .pill-warning { background: var(--warning); border-color: var(--line); color: #0a0a0a; }
-    .pill-danger { background: var(--danger); border-color: var(--line); color: #0a0a0a; }
-    .pill-info { background: var(--info); border-color: var(--line); color: #0a0a0a; }
-    .pill-accent { background: var(--accent); border-color: var(--line); color: #ffffff; }
-    .pill-pink { background: var(--accent-pink); border-color: var(--line); color: #0a0a0a; }
-    .pill-muted { background: var(--surface-2); border-color: var(--line); color: var(--text-muted); }
+    .pill-success, .pill-lime { background: var(--accent-lime, #ccff00); border: 1.5px solid #000000; color: #000000; font-weight: 800; }
+    .pill-warning { background: var(--warning); border: 1.5px solid var(--line); color: #0a0a0a; }
+    .pill-danger { background: var(--danger); border: 1.5px solid var(--line); color: #0a0a0a; }
+    .pill-info { background: var(--info); border: 1.5px solid var(--line); color: #0a0a0a; }
+    .pill-accent { background: var(--accent); border: 1.5px solid var(--line); color: #ffffff; }
+    .pill-pink { background: var(--accent-pink); border: 1.5px solid var(--line); color: #0a0a0a; }
+    .pill-muted { background: transparent; border: 1.5px solid var(--line); color: var(--text-muted); }
     .pill .dot, .pill svg { flex-shrink: 0; }
     .dot { display: inline-block; width: 8px; height: 8px; background: currentColor; }
-    .dot-success { background: var(--success); }
+    .dot-success { background: var(--accent-lime, #ccff00); border: 1.5px solid #000000; border-radius: 50%; }
+    .pill-success .dot-success, .pill-lime .dot-success { background: #000000; border: none; }
     .dot-warning { background: var(--warning); }
     .dot-danger { background: var(--danger); }
     .dot-accent { background: var(--accent); }
@@ -278,8 +284,119 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .bulk-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; padding: 0.65rem 0.9rem; border-radius: var(--radius); background: var(--surface); border: var(--bw) solid var(--line); margin-bottom: 1rem; box-shadow: var(--hard-sm); }
 
     /* ===== Provider & combo ===== */
-    .provider-card { display: block; margin-bottom: 0; color: inherit; text-decoration: none; transition: background 0.12s, border-color 0.12s, transform 0.12s, box-shadow 0.12s; }
-    .provider-card:hover { border-color: var(--line); background: var(--surface-2); transform: translate(-2px, -2px); box-shadow: var(--hard); }
+    .provider-card {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      border: 2px solid #000000;
+      border-radius: 0px;
+      box-shadow: 4px 4px 0 #000000;
+      background: var(--surface);
+      color: inherit;
+      text-decoration: none;
+      padding: 0;
+      overflow: hidden;
+      margin-bottom: 0;
+      transition: background 0.12s, border-color 0.12s, transform 0.12s, box-shadow 0.12s;
+    }
+    .provider-card:hover {
+      border-color: #000000;
+      background: var(--surface-2);
+      transform: translate(-2px, -2px);
+      box-shadow: 6px 6px 0 #000000;
+    }
+    [data-theme="dark"] .provider-card {
+      border: 2px solid var(--border);
+      box-shadow: 4px 4px 0 var(--shadow-ink);
+    }
+    [data-theme="dark"] .provider-card:hover {
+      border-color: var(--border);
+      box-shadow: 6px 6px 0 var(--shadow-ink);
+    }
+    .provider-matrix-left {
+      width: 90px;
+      min-width: 90px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      padding: 0.85rem 0.5rem;
+      border-right: 2px solid var(--border);
+      background: var(--surface-2);
+    }
+    .provider-logo-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .provider-prefix-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.12rem 0.4rem;
+      border: 1.5px solid #000000;
+      border-radius: 0px;
+      background: var(--surface);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      line-height: 1.2;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .provider-prefix-badge code {
+      font-family: inherit;
+      font-size: inherit;
+      font-weight: inherit;
+      background: transparent;
+      padding: 0;
+      border: none;
+      color: inherit;
+    }
+    .provider-matrix-right {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 0.6rem;
+      padding: 0.75rem 0.85rem;
+    }
+    .provider-matrix-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .provider-matrix-head h3, .provider-name {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      overflow-wrap: break-word;
+      color: var(--text);
+    }
+    .provider-model-count {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      color: var(--text-muted);
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+    .provider-matrix-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.5rem;
+    }
     .provider-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem 0.75rem; margin-bottom: 0.35rem; }
     .provider-card-head h3 { margin-bottom: 0; }
     .provider-title { display: flex; align-items: center; gap: 0.65rem; flex: 1 1 12rem; min-width: 0; }
@@ -287,7 +404,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .provider-title h3 { overflow-wrap: break-word; }
     .provider-card-head > .pill { flex-shrink: 0; margin-left: auto; }
     .provider-card .hint, .provider-card .hint code { overflow-wrap: anywhere; }
-    .provider-icon { width: var(--pi, 32px); height: var(--pi, 32px); flex-shrink: 0; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--logo-tile); border: var(--bw) solid var(--line); }
+    .provider-icon { width: var(--pi, 32px); height: var(--pi, 32px); flex-shrink: 0; border-radius: 0px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--logo-tile); border: var(--bw) solid var(--line); }
     .provider-icon img { width: 100%; height: 100%; object-fit: contain; }
     .provider-icon-fb { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--pi, 32px) * 0.38); font-weight: 800; color: var(--text); }
     .cap-icons { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.45rem; vertical-align: middle; }
@@ -676,7 +793,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     </div>` : ""}
     <div class="topbar">
       <h2>${escapeHtml(title)}</h2>
-      <span class="pill pill-success"><span style="width:7px;height:7px;border-radius:50%;background:var(--success);display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
+      <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
     </div>
     ${content}
   </main>

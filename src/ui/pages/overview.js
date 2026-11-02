@@ -63,10 +63,10 @@ export function renderOverviewPage(port = 20120) {
 
     <!-- Live Console Log Card -->
     <div class="card console-log-card" style="padding: 0; overflow: hidden; margin-bottom: 2rem;">
-      <div class="window-header window-header-lime" style="flex-wrap: wrap;" aria-label="Console Log">
+      <div class="window-header window-header-blue" style="flex-wrap: wrap;" aria-label="Console Log">
         <div style="display: flex; align-items: center; gap: 0.65rem;">
-          <span class="window-title" style="color: #000000; font-weight: 900;">CONSOLE.LOG</span>
-          <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs);">
+          <span class="window-title" style="color: #ffffff; font-weight: 900;">CONSOLE.LOG</span>
+          <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs); border-color: #ffffff;">
             <span class="dot dot-success" style="width:6px;height:6px;"></span>
             Connecting...
           </span>
@@ -77,14 +77,14 @@ export function renderOverviewPage(port = 20120) {
             type="text"
             id="log-filter"
             placeholder="Saring log..."
-            style="width: 160px; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface); color: var(--text); border: var(--bw) solid #000000;"
+            style="width: 160px; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface); color: var(--text); border: var(--bw) solid #ffffff;"
             oninput="applyLogFilter()"
           />
-          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: #000000; font-weight: 800; cursor: pointer; user-select: none;">
-            <input type="checkbox" id="log-autoscroll" checked style="width: 13px; height: 13px; accent-color: #000000; cursor: pointer;" />
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: #ffffff; font-weight: 800; cursor: pointer; user-select: none;">
+            <input type="checkbox" id="log-autoscroll" checked style="width: 13px; height: 13px; accent-color: #2563eb; cursor: pointer;" />
             Auto-scroll
           </label>
-          <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: var(--text-xs); padding: 0.25rem 0.65rem; background: var(--surface); color: #000000; border-color: #000000; font-weight: 800;">
+          <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: var(--text-xs); padding: 0.25rem 0.65rem; background: #ffffff; color: #000000; border-color: #ffffff; font-weight: 800;">
             Clear
           </button>
         </div>

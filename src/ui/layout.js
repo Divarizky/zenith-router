@@ -200,6 +200,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .window-header-lime .window-title { color: #000000; font-weight: 900; }
     .window-header-lime .window-controls span { background: #ffffff; color: #000000; border-color: #000000; }
     .window-header-lime .window-controls .wc-close { background: var(--danger); color: #000000; border-color: #000000; }
+    .window-header-blue { background: #2563eb; color: #ffffff; border-bottom: var(--bw) solid var(--line); }
+    .window-header-blue .window-title { color: #ffffff; font-weight: 900; }
+    .window-header-blue .window-controls span { background: #ffffff; color: #000000; border: var(--bw) solid #ffffff; }
+    .window-header-blue .window-controls .wc-close { background: var(--danger); color: #ffffff; border-color: #ffffff; }
     .window-title { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
     .window-controls { display: inline-flex; gap: 0.3rem; }
     .window-controls span { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; background: var(--surface); color: var(--text); border: var(--bw) solid var(--line); font-size: var(--text-xs); font-weight: 800; line-height: 1; }

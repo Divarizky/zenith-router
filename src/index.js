@@ -68,6 +68,7 @@ import {
 } from "./ui/pages/oauth.js";
 import { handleSessionLoginCancel, handleSessionLoginPoll, handleSessionLoginStart } from "./ui/pages/sessionLogin.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
+import { syncManagedCombos } from "./services/managedCombos.js";
 import {
   handleCreateCombo,
   handleUpdateCombo,
@@ -386,6 +387,9 @@ export function startServer() {
   if (!startModelSyncScheduler()) startOpencodeCatalogRefresh();
   startQuotaSyncScheduler();
   startTokenRefreshScheduler();
+  try {
+    syncManagedCombos().catch(() => {});
+  } catch {}
   const hostname = getBindHost();
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
   const base = `http://${displayHost}:${PORT}`;

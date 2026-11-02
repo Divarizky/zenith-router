@@ -236,3 +236,44 @@ export function deleteCombo(name) {
   if (!result.changes) throw new Error(`combo "${name}" tidak ada`);
   return true;
 }
+
+/**
+ * Simpan atau perbarui combo secara langsung (upsert).
+ * Menerima baik signature saveCombo(name, models, options) maupun saveCombo({ name, models, strategy, enabled }).
+ */
+export function saveCombo(nameOrObj, maybeModels, maybeOptions) {
+  let name;
+  let models;
+  let strategy;
+  let enabled;
+
+  if (typeof nameOrObj === "object" && nameOrObj !== null) {
+    name = nameOrObj.name;
+    models = nameOrObj.models ?? [];
+    strategy = nameOrObj.strategy ?? "fallback";
+    enabled = nameOrObj.enabled ?? 1;
+  } else {
+    name = nameOrObj;
+    models = maybeModels ?? [];
+    strategy = maybeOptions?.strategy ?? "fallback";
+    enabled = maybeOptions?.enabled ?? 1;
+  }
+
+  if (!name || typeof name !== "string") throw new Error("nama combo wajib diisi");
+
+  const existing = getComboByName(name);
+  const now = Date.now();
+  const modelList = Array.isArray(models) ? models : [];
+
+  if (existing) {
+    getDb()
+      .prepare(`UPDATE combos SET strategy = ?, models = ?, enabled = ?, updated_at = ? WHERE name = ?`)
+      .run(strategy, JSON.stringify(modelList), enabled ? 1 : 0, now, name);
+  } else {
+    getDb()
+      .prepare(`INSERT INTO combos (name, strategy, models, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(name, strategy, JSON.stringify(modelList), enabled ? 1 : 0, now, now);
+  }
+
+  return getComboByName(name);
+}

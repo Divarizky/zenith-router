@@ -33,6 +33,7 @@ import { syncFreeModels, getSyncIntervalMs } from "../../services/modelSync.js";
 import { getOAuthFlow } from "../../services/oauth/providers.js";
 import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
+import { testConnection } from "../../services/testConnection.js";
 import { renderLayout, capabilityIcons } from "../layout.js";
 import { renderCombosContent } from "./combos.js";
 import {
@@ -159,9 +160,11 @@ function importNotice(query = {}) {
     default:
       return null;
   }
-  if (query.notice === "test_ok") return { ok: true, text: "Koneksi provider berhasil." };
+  if (query.notice === "test_ok") {
+    return { ok: true, text: query.msg ? `Koneksi berhasil: ${escapeHtml(String(query.msg))}` : "Koneksi berhasil." };
+  }
   if (query.notice === "test_fail") {
-    return { ok: false, text: "Koneksi provider gagal: " + escapeHtml(String(query.msg || "tidak diketahui")) };
+    return { ok: false, text: "Koneksi gagal: " + escapeHtml(String(query.msg || "tidak diketahui")) };
   }
   if (query.notice === "test_no_base") return { ok: false, text: "Provider ini tidak memiliki endpoint untuk diuji." };
   return null;
@@ -883,7 +886,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
               <input type="text" name="cookies" placeholder="cookies (opsional)" autocomplete="off" />
               <button type="submit" class="btn btn-sm">Perbarui sesi</button>
             </form>`
-          : "";
+          : `<form action="/dashboard/providers/test-connection" method="POST">
+              ${hidden}
+              <button type="submit" class="btn btn-sm btn-ghost" title="Uji koneksi dan otentikasi akun ini">Uji</button>
+            </form>`;
       return `
         <tr>
           <td>${accountOrderCell(c, id, index, accounts.length)}</td>
@@ -1421,26 +1427,17 @@ export async function handleTestConnection(c) {
   const provider = getProvider(String(body.provider || ""));
   if (!provider) return c.redirect("/dashboard/providers");
 
-  const baseUrl = provider.transport?.baseUrl;
-  if (!baseUrl) return c.redirect(`${backTo(provider.id)}?notice=test_no_base`);
+  const connectionId = Number(body.id);
+  const connection = connectionId ? getConnectionById(connectionId) : null;
 
-  try {
-    const res = await fetch(`${baseUrl}/v1/models`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      return c.redirect(`${backTo(provider.id)}?notice=test_ok`);
-    }
-    return c.redirect(
-      `${backTo(provider.id)}?notice=test_fail&msg=${encodeURIComponent(`HTTP ${res.status}`)}`
-    );
-  } catch (err) {
-    return c.redirect(
-      `${backTo(provider.id)}?notice=test_fail&msg=${encodeURIComponent(err.message || "koneksi gagal")}`
-    );
+  const result = await testConnection(provider.id, { connection });
+  if (result.ok) {
+    const msgParam = result.details ? `&msg=${encodeURIComponent(result.details)}` : "";
+    return c.redirect(`${backTo(provider.id)}?notice=test_ok${msgParam}`);
   }
+
+  const errParam = encodeURIComponent(result.error || "koneksi gagal");
+  return c.redirect(`${backTo(provider.id)}?notice=test_fail&msg=${errParam}`);
 }
 
 export async function handleImportModels(c) {

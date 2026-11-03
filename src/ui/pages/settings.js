@@ -5,6 +5,7 @@ import { getBindHost, isLoopbackHost } from "../../security.js";
 import { countActiveApiKeys } from "../../services/apiKeys.js";
 import { listCombos } from "../../services/combos.js";
 import { getAvailableModels, getProvider } from "../../providers/index.js";
+import { dlpModeFrom } from "../../services/dlp.js";
 import {
   isLoginRequired,
   setLoginRequired,
@@ -91,6 +92,9 @@ export function renderSettingsPage(port = 20120, query = {}) {
   const maxConcurrency = settings.max_account_concurrency || "2";
   const isJitter = settings.request_jitter_enabled !== "false";
   const fallbackModel = settings.default_fallback_model || "";
+  const dlpMode = dlpModeFrom(settings);
+  const isRtkEnabled = settings.token_saver_rtk !== "false";
+  const isCavemanEnabled = settings.token_saver_caveman === "true";
   const forcedByBind = !isLoopbackHost(getBindHost());
   const activeKeys = countActiveApiKeys();
   const isSaved = query.saved === "1" || query.saved === "true";
@@ -155,6 +159,20 @@ export function renderSettingsPage(port = 20120, query = {}) {
           </div>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Mode DLP (Data Loss Prevention)</strong>
+            <p class="hint">Pindai isi request keluar ke provider eksternal untuk mendeteksi kunci API, token, dan rahasia sensitif.</p>
+          </div>
+          <div class="setting-action">
+            <select name="dlp_mode" class="input-select" style="min-width: 180px;">
+              <option value="off" ${dlpMode === "off" ? "selected" : ""}>Nonaktif (Off)</option>
+              <option value="redact" ${dlpMode === "redact" ? "selected" : ""}>Sensor (Redact)</option>
+              <option value="block" ${dlpMode === "block" ? "selected" : ""}>Blokir (Block)</option>
+            </select>
+          </div>
+        </div>
+
         <div class="setting-row" id="password">
           <div class="setting-info">
             <strong>Ubah Password Dashboard</strong>
@@ -184,6 +202,39 @@ export function renderSettingsPage(port = 20120, query = {}) {
             <div style="margin-top: 0.35rem; display: flex; justify-content: flex-end;">
               <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-danger btn-sm" data-confirm="Kembalikan password dashboard ke default (123456)? Password saat ini tetap diperlukan." data-confirm-ok="Reset">Reset ke Default (123456)</button>
             </div>
+          </div>
+        </div>`,
+      })}
+
+      ${sectionCard({
+        id: "tokensaver",
+        iconName: "bolt",
+        title: "Token &amp; Prompt Saver",
+        hint: "Optimasi dan kompresi token untuk menghemat kuota inferensi tanpa merusak struktur respons.",
+        rows: `
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>RTK (Reduced Token Kit)</strong>
+            <p class="hint">Memadatkan baris berulang pada teks input pengguna. Output tool dan asisten tetap utuh.</p>
+          </div>
+          <div class="setting-action">
+            <label class="switch" aria-label="RTK">
+              <input type="checkbox" name="token_saver_rtk" value="true" ${isRtkEnabled ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Caveman Conciseness Compactor</strong>
+            <p class="hint">Menambahkan instruksi jawaban ringkas ke prompt sistem. Nonaktifkan jika membutuhkan jawaban panjang.</p>
+          </div>
+          <div class="setting-action">
+            <label class="switch" aria-label="Caveman">
+              <input type="checkbox" name="token_saver_caveman" value="true" ${isCavemanEnabled ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
           </div>
         </div>`,
       })}
@@ -304,6 +355,9 @@ export async function handleSaveSettings(c) {
   const requestJitter = body.request_jitter_enabled === "true" || body.request_jitter_enabled === "on" ? "true" : "false";
   const comboHoldCount = String(Math.max(1, Math.trunc(Number(body.combo_round_robin_count) || 1)));
   const fallbackModel = String(body.default_fallback_model || "").trim();
+  const rawDlpMode = String(body.dlp_mode || "").toLowerCase().trim();
+  const tokenSaverRtk = body.token_saver_rtk === "true" || body.token_saver_rtk === "on" ? "true" : "false";
+  const tokenSaverCaveman = body.token_saver_caveman === "true" || body.token_saver_caveman === "on" ? "true" : "false";
 
   // Ubah password jika new_password diisi. Divalidasi sebelum apa pun ditulis.
   const newPassword = String(body.new_password || "").trim();
@@ -322,6 +376,15 @@ export async function handleSaveSettings(c) {
   setSetting("request_jitter_enabled", requestJitter);
   setSetting("combo_round_robin_count", comboHoldCount);
   setSetting("default_fallback_model", fallbackModel);
+  if (rawDlpMode === "off" || rawDlpMode === "redact" || rawDlpMode === "block") {
+    setSetting("dlp_mode", rawDlpMode);
+  }
+  if (body.token_saver_rtk !== undefined) {
+    setSetting("token_saver_rtk", tokenSaverRtk);
+  }
+  if (body.token_saver_caveman !== undefined) {
+    setSetting("token_saver_caveman", tokenSaverCaveman);
+  }
   if (newPassword) {
     setDashboardPassword(newPassword, currentPassword);
   }

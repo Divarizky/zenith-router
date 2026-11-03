@@ -6,7 +6,9 @@ import {
   updateProxyPoolEntry,
   deleteProxyPool,
   toggleProxyPool,
+  getProxyRotationStrategy,
 } from "../../services/proxyPools.js";
+import { getAllProviders } from "../../providers/index.js";
 import { escapeHtml } from "../html.js";
 import { renderLayout, icon } from "../layout.js";
 
@@ -151,6 +153,52 @@ export function renderProxyContent(query = {}) {
       ? emptyState
       : `<div class="proxy-list">${pools.map(renderProxyRow).join("")}</div>`;
 
+  const noAuthProviders = getAllProviders().filter((p) => p.noAuth);
+  const rotationRows = noAuthProviders
+    .map((p) => {
+      const currentStrategy = getProxyRotationStrategy(p.id);
+      return `
+      <tr>
+        <td><strong>${escapeHtml(p.name)}</strong> <span class="hint">(${escapeHtml(p.id)})</span></td>
+        <td>
+          <form action="/dashboard/providers/proxy-rotation" method="POST" style="display: flex; gap: 0.5rem; align-items: center; margin: 0;">
+            <input type="hidden" name="provider" value="${escapeHtml(p.id)}" />
+            <select name="strategy" class="input-select" style="min-width: 140px; font-size: 0.85rem; padding: 0.25rem 0.5rem;">
+              <option value="off"${currentStrategy === "off" ? " selected" : ""}>Tidak aktif</option>
+              <option value="round_robin"${currentStrategy === "round_robin" ? " selected" : ""}>Bergiliran</option>
+              <option value="random"${currentStrategy === "random" ? " selected" : ""}>Acak</option>
+            </select>
+            <button type="submit" class="btn btn-sm btn-ghost">Simpan</button>
+          </form>
+        </td>
+      </tr>`;
+    })
+    .join("");
+
+  const rotationCard =
+    noAuthProviders.length > 0
+      ? `
+    <div class="card">
+      <div class="card-head">
+        <h3>Rotasi Proxy Provider Publik</h3>
+      </div>
+      <p class="hint" style="margin-bottom: 1rem;">
+        Provider tanpa akun (keyless/publik) dapat merotasi alamat proxy aktif untuk mendistribusikan beban IP dan menghindari rate limit.
+      </p>
+      <table class="table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th style="width: 260px;">Strategi Rotasi</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rotationRows}
+        </tbody>
+      </table>
+    </div>`
+      : "";
+
   return `
     ${notice}
 
@@ -203,6 +251,8 @@ export function renderProxyContent(query = {}) {
 
       ${listBody}
     </div>
+
+    ${rotationCard}
 
     <!-- Modal Add Proxy Pool -->
     <div class="modal-backdrop" id="add-proxy-modal">

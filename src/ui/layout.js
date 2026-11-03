@@ -390,6 +390,22 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .back-link:active { transform: translate(1px, 1px); box-shadow: none; }
     .back-link svg { flex-shrink: 0; }
 
+    /* ===== Sub-navigasi section pada halaman detail ===== */
+    .detail-subnav {
+      position: sticky; top: 0; z-index: 40;
+      display: flex; gap: 0.25rem; flex-wrap: wrap;
+      padding: 0.45rem 0.6rem; margin-bottom: 1.25rem;
+      background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--radius);
+      box-shadow: var(--hard-sm);
+    }
+    .detail-subnav a {
+      color: var(--text-muted); text-decoration: none;
+      font-size: 0.82rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+      padding: 0.3rem 0.6rem;
+    }
+    .detail-subnav a:hover { color: var(--text); background: var(--surface-2); }
+    #ringkasan, #akun, #batas, #model { scroll-margin-top: 4rem; }
+
     /* ===== Pill status: gaya badge LIVE (latar penuh, teks hitam / kontras WCAG) ===== */
     .pill {
       display: inline-flex; align-items: center; gap: 0.35rem;

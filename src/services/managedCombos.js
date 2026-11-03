@@ -173,6 +173,18 @@ export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap =
   return { smart, fast };
 }
 
+/**
+ * Mendeteksi model yang menerima input gambar (vision). Sumber sinyal bisa
+ * capabilities dari registry/DB, field supportsImages, atau flag vision eksplisit.
+ */
+function isVisionCapable(meta) {
+  if (!meta || typeof meta !== "object") return false;
+  if (meta.capabilities?.vision === true) return true;
+  if (meta.supportsImages === true || meta.supports_images === true) return true;
+  if (meta.vision === true || meta.multimodal === true) return true;
+  return false;
+}
+
 function getModelLatency(id, candidate, latencyMap) {
   if (latencyMap instanceof Map && latencyMap.has(id)) return latencyMap.get(id);
   if (latencyMap && latencyMap[id] !== undefined) return latencyMap[id];
@@ -271,6 +283,20 @@ export function assembleManagedCombos({
   const sortedActive = sortModelsByCodingQuality(passedAgentic, sortOpts);
   const zenithFree = [...new Set(sortedActive.map(toId).filter(Boolean))];
 
+  // Combo vision: subset model gratis yang menerima input gambar, urut kualitas koding.
+  // Tidak ada fallback non-vision: model tanpa kemampuan gambar merusak combo ini.
+  const zenithVision = [
+    ...new Set(
+      sortedActive
+        .filter((m) => {
+          const id = toId(m);
+          return isVisionCapable(getModelMeta(id, m, metaMap));
+        })
+        .map(toId)
+        .filter(Boolean),
+    ),
+  ];
+
   // Pisahkan ke tier smart dan fast
   const { smart: zenithSmart, fast: zenithFast } = deriveTierLists(
     sortedActive,
@@ -293,16 +319,19 @@ export function assembleManagedCombos({
     "zenith-smart": zenithSmart,
     "zenith-fast": zenithFast,
     "zenith-cooldown": zenithCooldown,
+    "zenith-vision": zenithVision,
     zenithFree,
     zenithSmart,
     zenithFast,
     zenithCooldown,
+    zenithVision,
   };
 }
 
 /**
  * Mengambil kandidat model dari database/katalog, mengevaluasi agentic gate & benchmark,
- * lalu menyimpan atau memperbarui combo zenith-free, zenith-smart, zenith-fast, dan zenith-cooldown.
+ * lalu menyimpan atau memperbarui combo zenith-free, zenith-smart, zenith-fast,
+ * zenith-cooldown, dan zenith-vision.
  */
 export async function syncManagedCombos(options = {}) {
   let candidates = options.candidates;
@@ -339,6 +368,7 @@ export async function syncManagedCombos(options = {}) {
   const savedSmart = saveCombo("zenith-smart", assembled["zenith-smart"], { strategy, enabled: 1 });
   const savedFast = saveCombo("zenith-fast", assembled["zenith-fast"], { strategy, enabled: 1 });
   const savedCooldown = saveCombo("zenith-cooldown", assembled["zenith-cooldown"], { strategy, enabled: 1 });
+  const savedVision = saveCombo("zenith-vision", assembled["zenith-vision"], { strategy, enabled: 1 });
 
   return {
     ok: true,
@@ -347,6 +377,7 @@ export async function syncManagedCombos(options = {}) {
       "zenith-smart": savedSmart,
       "zenith-fast": savedFast,
       "zenith-cooldown": savedCooldown,
+      "zenith-vision": savedVision,
     },
     assembled,
   };

@@ -133,6 +133,19 @@ test("GET /dashboard/settings - renders Settings page with form", async () => {
   assert.ok(!html.includes("Auto Sinkron Kuota"));
 });
 
+test("GET /dashboard/settings - renders DLP and Token Saver settings", async () => {
+  initDb(":memory:");
+
+  const res = await app.request("/dashboard/settings");
+  assert.strictEqual(res.status, 200);
+
+  const html = await res.text();
+  assert.ok(html.includes("Token &amp; Prompt Saver") || html.includes("Token & Prompt Saver"));
+  assert.ok(html.includes("token_saver_rtk"));
+  assert.ok(html.includes("token_saver_caveman"));
+  assert.ok(html.includes("dlp_mode"));
+});
+
 test("GET /dashboard/token-saver - renders Token Saver page with toggles", async () => {
   initDb(":memory:");
 

@@ -110,13 +110,13 @@ test("deriveTierLists - fallback aman menambahkan model dari pool aktif jika tie
   ]);
 });
 
-test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, dan zenith-cooldown", () => {
+test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, zenith-cooldown, dan zenith-vision", () => {
   const candidates = [
-    { id: "ag/claude-3-7-sonnet", owned_by: "llm7", contextLength: 1000000 },
-    { id: "ag/gemini-3.1-pro", owned_by: "llm7", contextLength: 1048576 },
-    { id: "fb/gpt-4o-mini", owned_by: "llm7", contextLength: 128000 },
-    { id: "fb/llama-3-1-8b", owned_by: "llm7", contextLength: 128000 },
-    { id: "ag/qwen-2.5-coder-32b", owned_by: "llm7", contextLength: 1000000 },
+    { id: "ag/claude-3-7-sonnet", owned_by: "llm7", contextLength: 1000000, capabilities: { vision: true } },
+    { id: "ag/gemini-3.1-pro", owned_by: "llm7", contextLength: 1048576, capabilities: { vision: true } },
+    { id: "fb/gpt-4o-mini", owned_by: "llm7", contextLength: 128000, capabilities: { vision: true } },
+    { id: "fb/llama-3-1-8b", owned_by: "llm7", contextLength: 128000, capabilities: { vision: false } },
+    { id: "ag/qwen-2.5-coder-32b", owned_by: "llm7", contextLength: 1000000, capabilities: { vision: false } },
     // Model context kecil (tidak lolos agentic gate)
     { id: "provider/old-small-model", owned_by: "llm7", contextLength: 32000 },
     // Model tanpa tools (tidak lolos agentic gate)
@@ -163,6 +163,30 @@ test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, da
   // 5. zenith-fast memuat model non-thinking berlatensi cepat
   assert.ok(result["zenith-fast"].includes("fb/gpt-4o-mini"));
   assert.ok(result["zenith-fast"].includes("fb/llama-3-1-8b"));
+
+  // 6. zenith-vision hanya memuat model dengan capabilities.vision = true
+  assert.ok(result["zenith-vision"].includes("ag/claude-3-7-sonnet"));
+  assert.ok(result["zenith-vision"].includes("ag/gemini-3.1-pro"));
+  assert.ok(result["zenith-vision"].includes("fb/gpt-4o-mini"));
+  assert.equal(result["zenith-vision"].includes("fb/llama-3-1-8b"), false);
+  assert.equal(result["zenith-vision"].includes("ag/qwen-2.5-coder-32b"), false);
+});
+
+test("assembleManagedCombos - zenith-vision menerima sinyal vision dari metaMap dan supportsImages", () => {
+  const candidates = [
+    { id: "m/vision-via-metaMap", owned_by: "llm7", contextLength: 128000 },
+    { id: "m/vision-via-supportsImages", owned_by: "llm7", contextLength: 128000, supportsImages: true },
+    { id: "m/text-only", owned_by: "llm7", contextLength: 128000 },
+  ];
+
+  const result = assembleManagedCombos({
+    candidates,
+    metaMap: new Map([["m/vision-via-metaMap", { id: "m/vision-via-metaMap", capabilities: { vision: true } }]]),
+  });
+
+  assert.ok(result["zenith-vision"].includes("m/vision-via-metaMap"));
+  assert.ok(result["zenith-vision"].includes("m/vision-via-supportsImages"));
+  assert.equal(result["zenith-vision"].includes("m/text-only"), false);
 });
 
 test("assembleManagedCombos - mendeteksi cooldown dari signals 429 atau quotaModels", () => {
@@ -190,12 +214,13 @@ test("assembleManagedCombos - mendeteksi cooldown dari signals 429 atau quotaMod
   assert.equal(result["zenith-free"].includes("model-quota-2"), false);
 });
 
-test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 4 combo ke SQLite", async () => {
+test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 5 combo ke SQLite", async () => {
   const candidates = [
     { id: "test-smart-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true } },
     { id: "test-smart-2", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true } },
     { id: "test-fast-1", owned_by: "llm7", contextLength: 128000 },
     { id: "test-fast-2", owned_by: "llm7", contextLength: 128000 },
+    { id: "test-vision-1", owned_by: "llm7", contextLength: 128000, capabilities: { vision: true } },
     { id: "test-cooldown-1", owned_by: "llm7", contextLength: 128000, status: "quota" },
   ];
 
@@ -227,6 +252,12 @@ test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 4 combo ke SQL
   assert.ok(cooldownCombo);
   assert.equal(cooldownCombo.enabled, 1);
   assert.ok(cooldownCombo.models.includes("test-cooldown-1"));
+
+  const visionCombo = getComboByName("zenith-vision");
+  assert.ok(visionCombo);
+  assert.equal(visionCombo.enabled, 1);
+  assert.ok(visionCombo.models.includes("test-vision-1"));
+  assert.equal(visionCombo.models.includes("test-fast-1"), false);
 
   // Verifikasi direct upsert via saveCombo
   saveCombo("zenith-free", ["updated-model-1", "updated-model-2"]);

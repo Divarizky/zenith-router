@@ -81,6 +81,15 @@ const IMPORT_MODE_LABELS = {
 
 /** Fixed notice texts keyed by the result code in the redirect query; never echo raw input. */
 function importNotice(query = {}) {
+  if (query.notice === "test_ok") {
+    return { ok: true, text: query.msg ? `Koneksi berhasil: ${escapeHtml(String(query.msg))}` : "Koneksi berhasil." };
+  }
+  if (query.notice === "test_fail") {
+    return { ok: false, text: "Koneksi gagal: " + escapeHtml(String(query.msg || "tidak diketahui")) };
+  }
+  if (query.notice === "test_no_base") {
+    return { ok: false, text: "Provider ini tidak memiliki endpoint untuk diuji." };
+  }
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
   if (query.notice === "account_exists") {
     return { ok: true, text: "Sesi ini sudah terdaftar sebagai akun. Tidak ada akun baru yang ditambahkan." };
@@ -160,14 +169,6 @@ function importNotice(query = {}) {
     default:
       return null;
   }
-  if (query.notice === "test_ok") {
-    return { ok: true, text: query.msg ? `Koneksi berhasil: ${escapeHtml(String(query.msg))}` : "Koneksi berhasil." };
-  }
-  if (query.notice === "test_fail") {
-    return { ok: false, text: "Koneksi gagal: " + escapeHtml(String(query.msg || "tidak diketahui")) };
-  }
-  if (query.notice === "test_no_base") return { ok: false, text: "Provider ini tidak memiliki endpoint untuk diuji." };
-  return null;
 }
 
 const WIB_FORMAT = new Intl.DateTimeFormat("en-GB", {
@@ -1038,7 +1039,14 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         : ""
     }
 
-    <div class="card">
+    <nav class="detail-subnav" aria-label="Navigasi section">
+      <a href="#ringkasan">Ringkasan</a>
+      <a href="#akun">Akun</a>
+      <a href="#batas">Batas &amp; Rotasi</a>
+      <a href="#model">Model</a>
+    </nav>
+
+    <div class="card" id="ringkasan">
       <div class="window-header window-header-card" aria-hidden="true">
         <span class="window-title">${escapeHtml(p.id)}</span>
         <div class="window-controls"><span>_</span><span>&#9633;</span><span class="wc-close">&#10005;</span></div>
@@ -1068,13 +1076,11 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 
     ${
       isSession
-        ? `<div class="card">
-      <p class="hint" style="margin: 0;">Akses ini memakai antarmuka web DeepSeek, bukan API resmi. Pemakaian di luar klien resmi bisa melanggar ketentuan layanan mereka dan berisiko pembatasan atau pemblokiran akun. Token setara akses penuh ke akun dan tersimpan sebagai teks biasa di database lokal. Gateway tidak menyediakan akun bersama: provider ini nonaktif sampai Anda menambahkan token sendiri, dan Anda memakai akun tersebut dengan risiko sendiri.</p>
-    </div>`
+        ? `<div class="notice notice-warning"><span>Akses ini memakai antarmuka web DeepSeek, bukan API resmi. Pemakaian di luar klien resmi bisa melanggar ketentuan layanan mereka dan berisiko pembatasan atau pemblokiran akun. Token setara akses penuh ke akun dan tersimpan sebagai teks biasa di database lokal. Gateway tidak menyediakan akun bersama: provider ini nonaktif sampai Anda menambahkan token sendiri, dan Anda memakai akun tersebut dengan risiko sendiri.</span></div>`
         : ""
     }
 
-    <div class="card">
+    <div class="card" id="akun">
       <div class="card-head">
         <h3>Accounts${p.noAuth ? "" : ` (${accounts.length})`}</h3>
         ${p.noAuth ? "" : `<button class="btn btn-primary btn-sm" onclick="openModal('add-account-modal')">Tambah Akun</button>`}
@@ -1085,7 +1091,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     ${
       p.noAuth
         ? ""
-        : `<div class="card">
+        : `<div class="card" id="batas">
       <div class="card-head">
         <h3>Batas Sesi Paralel</h3>
         <span class="pill">${escapeHtml(String(effectiveConcurrency))} per akun</span>
@@ -1117,7 +1123,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
 
     ${
       p.noAuth
-        ? `<div class="card">
+        ? `<div class="card" id="batas">
       <div class="card-head">
         <h3>Rotasi Proxy</h3>
       </div>
@@ -1140,7 +1146,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
         : ""
     }
 
-    <div class="card">
+    <div class="card" id="model">
       <div class="card-head">
         <h3>Model (${totalModels})</h3>
         <div class="btn-row">

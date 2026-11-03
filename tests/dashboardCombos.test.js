@@ -660,3 +660,27 @@ test("GET /dashboard/providers - the nav drops Combos and the page offers both t
   assert.ok(combosHtml.includes("Buat Combo"), "isi tab Combos adalah halaman combo");
   assert.ok(!combosHtml.includes('class="card provider-card"'), "tab Combos tidak ikut merender kartu provider");
 });
+
+test("GET /dashboard/providers?tab=combos - renders master-detail split pane neo-brutalism layout", async () => {
+  seed();
+  createCombo({ name: "zenith-free", models: ["glm/glm-4-flash"] });
+  createCombo({ name: "cadangan-custom", models: ["together/meta-llama/Llama-3.3-70B-Instruct-Turbo"] });
+
+  const html = await (await app.request("/dashboard/providers?tab=combos")).text();
+  assert.ok(html.includes('class="combos-layout"'), "kontainer split pane 2-kolom ada");
+  assert.ok(html.includes('class="combos-master-pane"'), "kolom master kiri ada");
+  assert.ok(html.includes('class="combos-detail-pane"'), "kolom detail kanan ada");
+  assert.ok(html.includes('id="combo-search-input"'), "fitur pencarian combo ada di master pane");
+  assert.ok(html.includes('id="create-combo-modal"'), "modal pembuatan combo baru ada");
+  assert.ok(html.includes("zenith-router/"), "snippet integrasi klien ada");
+  assert.ok(html.includes("btn-copy-combo"), "tombol salin integrasi klien ada");
+
+  const selectedHtml = await (await app.request("/dashboard/providers?tab=combos&selected=zenith-free")).text();
+  assert.ok(selectedHtml.includes("MANAGED 100% FREE"), "badge zenith- combo berlabel MANAGED 100% FREE");
+  assert.ok(selectedHtml.includes("zenith-router/zenith-free"), "snippet mengarah ke combo terpilih");
+
+  const customHtml = await (await app.request("/dashboard/providers?tab=combos&selected=cadangan-custom")).text();
+  assert.ok(customHtml.includes("CUSTOM"), "badge combo non-zenith berlabel CUSTOM");
+  assert.ok(customHtml.includes("zenith-router/cadangan-custom"), "snippet mengarah ke combo custom terpilih");
+});
+

@@ -405,6 +405,7 @@ export function renderCombosContent(query = {}) {
         align-items: center;
         gap: 0.4rem;
         min-width: 0;
+        flex: 1;
       }
       .combo-item-name {
         font-size: 0.9rem;
@@ -412,6 +413,8 @@ export function renderCombosContent(query = {}) {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        min-width: 0;
+        flex: 1;
       }
       .combo-zenith-badge {
         background: var(--accent-lime);
@@ -431,9 +434,11 @@ export function renderCombosContent(query = {}) {
         gap: 0.4rem;
         font-size: var(--text-xs);
         color: var(--text-muted);
+        min-width: 0;
       }
       .combo-item-dot {
         opacity: 0.5;
+        flex-shrink: 0;
       }
       .combo-item-priority {
         display: flex;
@@ -443,6 +448,8 @@ export function renderCombosContent(query = {}) {
         color: var(--text-subtle);
         margin-top: 0.15rem;
         overflow: hidden;
+        min-width: 0;
+        width: 100%;
       }
       .combo-p1-label {
         font-weight: 700;
@@ -458,11 +465,15 @@ export function renderCombosContent(query = {}) {
         background: var(--surface);
         padding: 0.1rem 0.3rem;
         border: 1px solid var(--border-subtle);
+        min-width: 0;
+        flex: 1;
+        display: inline-block;
       }
       .pill-xs {
         font-size: 0.7rem;
         padding: 0.1rem 0.45rem;
         line-height: 1.2;
+        flex-shrink: 0;
       }
       .combo-detail-head {
         display: flex;

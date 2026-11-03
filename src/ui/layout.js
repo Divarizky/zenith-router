@@ -111,9 +111,9 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       background: var(--bg);
     }
     .sidebar {
-      width: 240px;
-      min-width: 240px;
-      max-width: 240px;
+      width: 256px;
+      min-width: 256px;
+      max-width: 256px;
       background: var(--surface);
       border-right: var(--bw-thick) solid var(--line);
       position: sticky;
@@ -175,9 +175,16 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       padding: 0.55rem 0.75rem;
       border: 2px solid transparent;
       color: var(--text-muted); text-decoration: none;
-      font-size: var(--text-sm); font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
+      font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em;
       white-space: nowrap;
+      min-width: 0;
       transition: color 0.12s, background 0.12s, border-color 0.12s, transform 0.08s, box-shadow 0.08s;
+    }
+    .nav-link span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
     }
     .nav-link:hover {
       color: var(--text);

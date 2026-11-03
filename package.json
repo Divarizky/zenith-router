@@ -10,6 +10,7 @@
   "files": [
     "bin",
     "src",
+    "scripts",
     "public",
     "README.md",
     "CHANGELOG.md",
@@ -21,6 +22,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "setup:bun": "node scripts/ensureBun.js",
+    "postinstall": "node scripts/ensureBun.js || true",
     "test": "node --test tests/*.test.js"
   },
   "engines": {

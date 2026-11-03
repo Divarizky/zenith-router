@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { captureLine } from "./logger.js";
 import {
   DEFAULT_BRIDGE_PORT,
@@ -12,30 +12,89 @@ import {
 let managedProcess = null;
 let bridgeActive = false;
 
-/**
- * Locate bun binary on system:
- * 1. process.env.BUN_BIN
- * 2. ~/.bun/bin/bun
- * 3. /usr/local/bin/bun, /usr/bin/bun
- */
-export function findBunBinary() {
-  if (process.env.BUN_BIN && fs.existsSync(process.env.BUN_BIN)) {
-    return process.env.BUN_BIN;
+function checkAccessible(filePath, isWindows, fsImpl = fs) {
+  try {
+    if (!fsImpl.existsSync(filePath)) return false;
+    const stat = fsImpl.statSync(filePath);
+    if (stat.isDirectory()) return false;
+    if (isWindows) {
+      fsImpl.accessSync(filePath, fsImpl.constants?.F_OK ?? 0);
+    } else {
+      fsImpl.accessSync(filePath, fsImpl.constants?.X_OK ?? 1);
+    }
+    return true;
+  } catch {
+    return false;
   }
-  const home = os.homedir();
-  const candidates = [
-    path.join(home, ".bun", "bin", "bun"),
-    "/usr/local/bin/bun",
-    "/usr/bin/bun",
-  ];
+}
+
+/**
+ * Locate bun binary on system cross-platform (Linux, macOS, Windows):
+ * 1. process.env.BUN_BIN
+ * 2. Platform-specific known candidate paths (.bun/bin, AppData, /usr/local/bin, /opt/homebrew)
+ * 3. PATH lookup via `where.exe bun` (Windows) or `which bun` (Linux/macOS)
+ */
+export function findBunBinary({
+  platform = process.platform,
+  env = process.env,
+  fsImpl = fs,
+  execFn = execSync,
+} = {}) {
+  const isWindows = platform === "win32";
+  const pathImpl = isWindows ? path.win32 : path.posix;
+
+  if (env.BUN_BIN && checkAccessible(env.BUN_BIN, isWindows, fsImpl)) {
+    return env.BUN_BIN;
+  }
+
+  const home = env.USERPROFILE || env.HOME || (typeof os?.homedir === "function" ? os.homedir() : "");
+  const candidates = [];
+
+  if (isWindows) {
+    if (home) {
+      candidates.push(pathImpl.join(home, ".bun", "bin", "bun.exe"));
+      candidates.push(pathImpl.join(home, ".bun", "bin", "bun"));
+    }
+    if (env.LOCALAPPDATA) {
+      candidates.push(pathImpl.join(env.LOCALAPPDATA, "bun", "bun.exe"));
+      candidates.push(pathImpl.join(env.LOCALAPPDATA, "Programs", "bun", "bun.exe"));
+    }
+    if (env.ProgramFiles) {
+      candidates.push(pathImpl.join(env.ProgramFiles, "bun", "bun.exe"));
+    }
+  } else {
+    if (home) {
+      candidates.push(pathImpl.join(home, ".bun", "bin", "bun"));
+      candidates.push(pathImpl.join(home, ".local", "bin", "bun"));
+    }
+    candidates.push("/usr/local/bin/bun");
+    candidates.push("/usr/bin/bun");
+    candidates.push("/opt/homebrew/bin/bun");
+  }
+
   for (const c of candidates) {
-    if (fs.existsSync(c)) {
-      try {
-        fs.accessSync(c, fs.constants.X_OK);
-        return c;
-      } catch {}
+    if (checkAccessible(c, isWindows, fsImpl)) {
+      return c;
     }
   }
+
+  // Fallback to system PATH lookup
+  try {
+    const cmd = isWindows ? "where.exe bun" : "which bun";
+    const stdout = execFn(cmd, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      timeout: 1000,
+    });
+    if (typeof stdout === "string") {
+      const firstLine = stdout.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0);
+      if (firstLine && checkAccessible(firstLine, isWindows, fsImpl)) {
+        return firstLine;
+      }
+    }
+  } catch {}
+
   return null;
 }
 

@@ -32,6 +32,7 @@ import {
 import { OpencodeExecutor } from "../src/executors/opencode.js";
 import { initDb } from "../src/db/index.js";
 import { recordUsage, getUsageStats } from "../src/services/usage.js";
+import { installBunSoft } from "../scripts/ensureBun.js";
 
 test("opencode bridge - session ID matches official upstream shape", () => {
   const sid = generateOpencodeSessionId();
@@ -380,4 +381,68 @@ test("opencode bridge - handleBridgeRequest handles client stream: false by aggr
     globalThis.fetch = origFetch;
   }
 });
+
+test("opencode bridge - findBunBinary detects Windows bun.exe in AppData or .bun", () => {
+  const mockFs = {
+    existsSync(p) {
+      return p === "C:\\Users\\tester\\.bun\\bin\\bun.exe";
+    },
+    statSync() {
+      return { isDirectory: () => false };
+    },
+    accessSync() {
+      return true;
+    },
+    constants: { F_OK: 0, X_OK: 1 },
+  };
+
+  const found = findBunBinary({
+    platform: "win32",
+    env: { USERPROFILE: "C:\\Users\\tester" },
+    fsImpl: mockFs,
+  });
+
+  assert.strictEqual(found, "C:\\Users\\tester\\.bun\\bin\\bun.exe");
+
+  // PATH fallback via where.exe
+  const mockFs2 = {
+    existsSync(p) {
+      return p === "C:\\Program Files\\bun\\bun.exe";
+    },
+    statSync() {
+      return { isDirectory: () => false };
+    },
+    accessSync() {
+      return true;
+    },
+    constants: { F_OK: 0, X_OK: 1 },
+  };
+  const foundPath = findBunBinary({
+    platform: "win32",
+    env: {},
+    fsImpl: mockFs2,
+    execFn: () => "C:\\Program Files\\bun\\bun.exe\r\n",
+  });
+  assert.strictEqual(foundPath, "C:\\Program Files\\bun\\bun.exe");
+});
+
+test("opencode bridge - installBunSoft handles offline/failed installer softly without throwing", () => {
+  let warned = false;
+  const result = installBunSoft({
+    platform: "linux",
+    findFn: () => null,
+    execFn: () => {
+      throw new Error("Could not resolve host: bun.sh");
+    },
+    logFn: () => {},
+    warnFn: () => {
+      warned = true;
+    },
+  });
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.error, "install_skipped_or_failed");
+  assert.strictEqual(warned, true);
+});
+
 

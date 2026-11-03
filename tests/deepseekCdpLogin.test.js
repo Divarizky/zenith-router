@@ -39,6 +39,19 @@ test("cdp - default candidates follow the platform", () => {
   }
 });
 
+test("cdp - linux candidates include Brave and the common Chromium packages", () => {
+  const previous = process.env.ZENITH_BROWSER_PATH;
+  delete process.env.ZENITH_BROWSER_PATH;
+  try {
+    const linux = browserCandidates("linux");
+    assert.ok(linux.includes("/usr/bin/brave-browser"), "Brave from the .deb package must be probed");
+    assert.ok(linux.includes("/snap/bin/chromium"), "snap Chromium must be probed");
+    assert.ok(linux.indexOf("/usr/bin/google-chrome") < linux.indexOf("/usr/bin/brave-browser"), "install order keeps Chrome first");
+  } finally {
+    if (previous !== undefined) process.env.ZENITH_BROWSER_PATH = previous;
+  }
+});
+
 test("cdp - the debugging port file is parsed, junk is rejected", () => {
   assert.deepStrictEqual(parseDevToolsActivePort("51234\n/devtools/browser/abc-123\n"), {
     port: 51234,

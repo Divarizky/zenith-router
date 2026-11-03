@@ -97,9 +97,14 @@ function allCandidates(platform) {
   }
   return [
     { family: "chrome", path: "/usr/bin/google-chrome" },
+    { family: "chrome", path: "/usr/bin/google-chrome-stable" },
     { family: "chromium", path: "/usr/bin/chromium" },
     { family: "chromium", path: "/usr/bin/chromium-browser" },
+    { family: "chromium", path: "/snap/bin/chromium" },
     { family: "edge", path: "/usr/bin/microsoft-edge" },
+    { family: "edge", path: "/usr/bin/microsoft-edge-stable" },
+    { family: "brave", path: "/usr/bin/brave-browser" },
+    { family: "brave", path: "/usr/bin/brave" },
   ];
 }
 

@@ -236,7 +236,7 @@ test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 4 combo ke SQL
 
 test("isFreeModel - hanya model dari provider gratis atau berakhiran :free yang dianggap gratis", () => {
   // Provider gratis keyless (noAuth / category free) lewat owned_by atau prefix ID
-  assert.equal(isFreeModel({ id: "poll/openai-fast", owned_by: "pollinations" }), true);
+  assert.equal(isFreeModel({ id: "kcf/ling-3.1", owned_by: "kilo-free" }), true);
   assert.equal(isFreeModel("llm7/default"), true);
   // Model berbayar / berbasis akun tidak boleh lolos
   assert.equal(isFreeModel({ id: "claude-3-7-sonnet", owned_by: "claude" }), false);
@@ -250,12 +250,12 @@ test("isFreeModel - hanya model dari provider gratis atau berakhiran :free yang 
 
 test("assembleManagedCombos - super-combo hanya memuat model gratis", () => {
   const candidates = [
-    { id: "poll/openai-fast", owned_by: "pollinations", contextLength: 128000 },
+    { id: "kcf/ling-3.1", owned_by: "kilo-free", contextLength: 128000 },
     { id: "claude-3-7-sonnet", owned_by: "claude", contextLength: 200000 },
   ];
   const result = assembleManagedCombos({ candidates });
   for (const name of ["zenith-free", "zenith-smart", "zenith-fast", "zenith-cooldown"]) {
     assert.equal(result[name].includes("claude-3-7-sonnet"), false, `${name} tidak boleh memuat model berbayar`);
   }
-  assert.ok(result["zenith-free"].includes("poll/openai-fast"));
+  assert.ok(result["zenith-free"].includes("kcf/ling-3.1"));
 });

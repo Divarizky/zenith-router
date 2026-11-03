@@ -10,7 +10,6 @@ import nvidia from "./registry/nvidia.js";
 import cline from "./registry/cline.js";
 import openrouter from "./registry/openrouter.js";
 import llm7 from "./registry/llm7.js";
-import pollinations from "./registry/pollinations.js";
 import kiloFree from "./registry/kilo-free.js";
 import together from "./registry/together.js";
 import freebuff from "./registry/freebuff.js";
@@ -101,7 +100,6 @@ const REGISTRY = [
   cline,
   openrouter,
   llm7,
-  pollinations,
   together,
   freebuff,
   ollama,

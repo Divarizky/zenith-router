@@ -201,8 +201,8 @@ export const BENCHMARKS_DATABASE = [
     swe_bench: 43.0,
     livecodebench: 47.5,
     tier: "A+",
-    patterns: ["*nemotron*ultra*", "*nemotron*70b*ultra*"],
-    aliases: ["nemotron-ultra", "llama-3.1-nemotron-70b-ultra"]
+    patterns: ["*nemotron-ultra-legacy*"],
+    aliases: ["nemotron-ultra-legacy", "nemotron-ultra"]
   },
   {
     id: "mimo-v2-6",

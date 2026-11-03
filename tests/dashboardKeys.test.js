@@ -70,7 +70,7 @@ test("POST /dashboard/keys/toggle and /delete - manage key status", async () => 
 
 test("dashboard pages - set no-store, no-cache headers to prevent stale bfcache", async () => {
   initDb(":memory:");
-  for (const path of ["/dashboard", "/dashboard/providers", "/dashboard/usage", "/dashboard/token-saver", "/dashboard/settings", "/dashboard/keys"]) {
+  for (const path of ["/dashboard", "/dashboard/providers", "/dashboard/usage", "/dashboard/settings", "/dashboard/keys"]) {
     const res = await app.request(path);
     assert.strictEqual(res.status, 200);
     const cc = res.headers.get("cache-control") || "";

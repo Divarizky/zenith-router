@@ -9,8 +9,6 @@ const NAV = [
   { id: "providers", label: "Providers & Combos", href: "/dashboard/providers", icon: "link" },
   { id: "proxies", label: "Proxy Pools", href: "/dashboard/proxies", icon: "lan" },
   { id: "usage", label: "Usage & Quota", href: "/dashboard/usage", icon: "chart" },
-  { id: "tokensaver", label: "Token Saver", href: "/dashboard/token-saver", icon: "bolt" },
-  { id: "dlp", label: "DLP", href: "/dashboard/dlp", icon: "shield" },
   { id: "keys", label: "API Keys", href: "/dashboard/keys", icon: "key" },
   { id: "settings", label: "Settings", href: "/dashboard/settings", icon: "gear" },
 ];

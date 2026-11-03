@@ -8,8 +8,6 @@ const NAV_LABELS = [
   "Providers & Combos",
   "Proxy Pools",
   "Usage & Quota",
-  "Token Saver",
-  "DLP",
   "API Keys",
   "Settings",
 ];
@@ -21,7 +19,7 @@ function navHtml(html) {
   return html.slice(start, end);
 }
 
-test("nav renders all 8 items so none is cut off at any width", async () => {
+test("nav renders all 6 items so none is cut off at any width", async () => {
   initDb(":memory:");
   const html = await (await app.request("/dashboard")).text();
   const nav = navHtml(html);
@@ -29,7 +27,7 @@ test("nav renders all 8 items so none is cut off at any width", async () => {
   for (const label of NAV_LABELS) {
     assert.ok(nav.includes(`<span>${label}</span>`), `missing nav item ${label}`);
   }
-  assert.strictEqual((nav.match(/class="nav-link/g) || []).length, 8);
+  assert.strictEqual((nav.match(/class="nav-link/g) || []).length, 6);
 });
 
 test("nav has an accessible name and marks only the active item with aria-current", async () => {

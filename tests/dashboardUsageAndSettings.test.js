@@ -146,16 +146,12 @@ test("GET /dashboard/settings - renders DLP and Token Saver settings", async () 
   assert.ok(html.includes("dlp_mode"));
 });
 
-test("GET /dashboard/token-saver - renders Token Saver page with toggles", async () => {
+test("GET /dashboard/token-saver - redirects to settings#tokensaver", async () => {
   initDb(":memory:");
 
   const res = await app.request("/dashboard/token-saver");
-  assert.strictEqual(res.status, 200);
-
-  const html = await res.text();
-  assert.ok(html.includes("Token Saver"));
-  assert.ok(html.includes("token_saver_rtk"));
-  assert.ok(html.includes("token_saver_caveman"));
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(res.headers.get("location"), "/dashboard/settings#tokensaver");
 });
 
 test("POST /dashboard/settings - updates settings in SQLite and redirects with saved notice", async () => {
@@ -205,7 +201,7 @@ test("POST /dashboard/quota/sync/all - refreshes every linked provider quota", a
   }
 });
 
-test("POST /dashboard/token-saver - updates token saver settings and redirects with saved notice", async () => {
+test("POST /dashboard/token-saver - legacy route saves settings and redirects to settings#tokensaver", async () => {
   initDb(":memory:");
 
   const formData = new FormData();
@@ -218,11 +214,8 @@ test("POST /dashboard/token-saver - updates token saver settings and redirects w
   });
 
   assert.strictEqual(res.status, 302);
-  assert.strictEqual(res.headers.get("location"), "/dashboard/token-saver?saved=1");
+  assert.strictEqual(res.headers.get("location"), "/dashboard/settings?saved=1#tokensaver");
   assert.strictEqual(getSetting("token_saver_caveman"), "false");
-
-  const html = await (await app.request(res.headers.get("location"))).text();
-  assert.ok(html.includes("Pengaturan Token Saver berhasil disimpan."));
 });
 
 test("GET /api/topology/active - reports live in-flight and last provider", async () => {

@@ -234,9 +234,10 @@ app.get("/dashboard/models", (c) => c.redirect("/dashboard/providers"));
 
 // Dashboard Usage & Settings UI & Actions
 app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT, c.req.query())));
-app.get("/dashboard/token-saver", (c) => c.html(renderTokenSaverPage(PORT, c.req.query())));
+// Old pages merged into Settings; keep bookmarks working.
+app.get("/dashboard/token-saver", (c) => c.redirect("/dashboard/settings#tokensaver"));
 app.post("/dashboard/token-saver", handleSaveTokenSaver);
-app.get("/dashboard/dlp", (c) => c.html(renderDlpPage(PORT, c.req.query())));
+app.get("/dashboard/dlp", (c) => c.redirect("/dashboard/settings#access"));
 app.post("/dashboard/dlp", handleSaveDlp);
 app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query())));
 app.post("/dashboard/settings", handleSaveSettings);

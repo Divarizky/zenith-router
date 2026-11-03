@@ -60,5 +60,5 @@ export async function handleSaveTokenSaver(c) {
   const caveman = body.token_saver_caveman === "true" || body.token_saver_caveman === "on" ? "true" : "false";
   setSetting("token_saver_rtk", rtk);
   setSetting("token_saver_caveman", caveman);
-  return c.redirect("/dashboard/token-saver?saved=1");
+  return c.redirect("/dashboard/settings?saved=1#tokensaver");
 }

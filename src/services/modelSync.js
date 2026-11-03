@@ -5,6 +5,7 @@ import { fetchFreebuffCatalog } from "./freebuffCatalog.js";
 import { refreshOpencodeCatalog } from "./opencodeCatalog.js";
 import { getSetting, setSetting } from "./settings.js";
 import { syncManagedCombos } from "./managedCombos.js";
+import { refreshBenchmarkSnapshot } from "./benchmarkSync.js";
 
 const DEFAULT_INTERVAL_HOURS = 6;
 
@@ -146,6 +147,7 @@ export function startModelSyncScheduler() {
   const run = async () => {
     await syncAllFreeModels().catch(() => {});
     await refreshOpencodeCatalog().catch(() => {});
+    await refreshBenchmarkSnapshot().catch(() => {});
     await syncManagedCombos().catch(() => {});
   };
   run().catch(() => {});

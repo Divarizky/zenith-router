@@ -7,6 +7,7 @@
  */
 
 import { QUOTA_LATENCY_SENTINEL, isParkedLatency } from "./modelHealth.js";
+import { calculateHeuristicScore, resolveLiveScores } from "./benchmarkSync.js";
 
 /**
  * Baseline Database Benchmark Empiris.
@@ -200,7 +201,7 @@ export const BENCHMARKS_DATABASE = [
     swe_bench: 43.0,
     livecodebench: 47.5,
     tier: "A+",
-    patterns: ["*nemotron*ultra*", "*nemotron*70b*ultra*", "*nemotron*"],
+    patterns: ["*nemotron*ultra*", "*nemotron*70b*ultra*"],
     aliases: ["nemotron-ultra", "llama-3.1-nemotron-70b-ultra"]
   },
   {
@@ -509,9 +510,10 @@ export function findBenchmarkMatch(modelIdentifier, benchmarks = null) {
  *
  * @param {string} modelIdentifier
  * @param {Array|object} [benchmarks]
+ * @param {object} [liveScores]
  * @returns {boolean}
  */
-export function isSmartTierModel(modelIdentifier, benchmarks = null) {
+export function isSmartTierModel(modelIdentifier, benchmarks = null, liveScores = null) {
   if (!modelIdentifier || typeof modelIdentifier !== "string") {
     return false;
   }
@@ -522,7 +524,15 @@ export function isSmartTierModel(modelIdentifier, benchmarks = null) {
   if (match && typeof match.score === "number") {
     return match.score >= 68;
   }
-  return false;
+  if (liveScores && typeof liveScores === "object") {
+    const liveEntry = liveScores[modelIdentifier];
+    const score = typeof liveEntry?.score === "number" ? liveEntry.score : liveEntry;
+    if (typeof score === "number") {
+      return score >= 68;
+    }
+  }
+  const heuristic = calculateHeuristicScore(modelIdentifier);
+  return heuristic >= 68;
 }
 
 /**
@@ -536,14 +546,34 @@ export function isSmartTierModel(modelIdentifier, benchmarks = null) {
  * @param {number} [options.latencyMs] - Latensi dalam milidetik
  * @param {number} [options.failureRate] - Rasio kegagalan (0-1 atau 0-100%)
  * @param {Array|object} [options.benchmarks] - Dataset benchmark kustom
+ * @param {object} [options.liveScores] - Peta skor live/heuristik { [id]: { score } | number }
  * @returns {number} Skor akhir terbobot
  */
-export function calculateCodingScore(modelIdentifier, { latencyMs = 0, failureRate = 0, benchmarks } = {}) {
+export function calculateCodingScore(modelIdentifier, { latencyMs = 0, failureRate = 0, benchmarks, liveScores } = {}) {
   const match = findBenchmarkMatch(modelIdentifier, benchmarks);
   let baseScore = match?.score;
 
   if (baseScore === undefined || baseScore === null) {
-    baseScore = isThinkingVariant(modelIdentifier) ? 75 : 50;
+    let scores = liveScores;
+    if (!scores && modelIdentifier) {
+      try {
+        scores = resolveLiveScores([modelIdentifier]);
+      } catch {
+        // Abaikan kegagalan baca snapshot live, lanjut ke heuristik
+      }
+    }
+    if (scores && typeof scores === "object") {
+      const liveEntry = scores[modelIdentifier];
+      if (typeof liveEntry?.score === "number") {
+        baseScore = liveEntry.score;
+      } else if (typeof liveEntry === "number") {
+        baseScore = liveEntry;
+      }
+    }
+  }
+
+  if (baseScore === undefined || baseScore === null) {
+    baseScore = isThinkingVariant(modelIdentifier) ? 75 : calculateHeuristicScore(modelIdentifier);
   }
 
   // Model terkena quota / rate limit dan diparkir
@@ -573,9 +603,11 @@ export function calculateCodingScore(modelIdentifier, { latencyMs = 0, failureRa
  * @param {Map|object} [options.latencyMap] - Peta latensi model
  * @param {Map|object} [options.failureRateMap] - Peta kegagalan model
  * @param {Array|object} [options.benchmarks] - Dataset benchmark kustom
+ * @param {object} [options.liveScores] - Skor live/heuristik per ID model
+ * @param {Object<string, number>} [options.adjustments] - (Opsional, kompatibilitas) Koreksi skor per ID model
  * @returns {Array<string|object>} Daftar model yang telah diurutkan
  */
-export function sortModelsByCodingQuality(models, { latencyMap = {}, failureRateMap = {}, benchmarks } = {}) {
+export function sortModelsByCodingQuality(models, { latencyMap = {}, failureRateMap = {}, benchmarks, liveScores, adjustments = null } = {}) {
   if (!Array.isArray(models)) return [];
 
   const getModelId = (m) => (typeof m === "string" ? m : (m?.id || m?.model || m?.name || ""));
@@ -623,8 +655,10 @@ export function sortModelsByCodingQuality(models, { latencyMap = {}, failureRate
     const failA = getFailureRate(idA, a);
     const failB = getFailureRate(idB, b);
 
-    const scoreA = isParkedA ? -999999 : calculateCodingScore(idA, { latencyMs: latA, failureRate: failA, benchmarks });
-    const scoreB = isParkedB ? -999999 : calculateCodingScore(idB, { latencyMs: latB, failureRate: failB, benchmarks });
+    const adjA = adjustments && Number.isFinite(adjustments[idA]) ? adjustments[idA] : 0;
+    const adjB = adjustments && Number.isFinite(adjustments[idB]) ? adjustments[idB] : 0;
+    const scoreA = isParkedA ? -999999 : calculateCodingScore(idA, { latencyMs: latA, failureRate: failA, benchmarks, liveScores }) + adjA;
+    const scoreB = isParkedB ? -999999 : calculateCodingScore(idB, { latencyMs: latB, failureRate: failB, benchmarks, liveScores }) + adjB;
 
     if (scoreB !== scoreA) {
       return scoreB - scoreA;

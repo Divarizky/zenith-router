@@ -5,6 +5,7 @@ import {
   isThinkingVariant,
   sortModelsByCodingQuality,
 } from "./modelBenchmarks.js";
+import { resolveLiveScores } from "./benchmarkSync.js";
 import { isParkedLatency, QUOTA_LATENCY_SENTINEL } from "./modelHealth.js";
 import { saveCombo } from "./combos.js";
 
@@ -37,6 +38,22 @@ export function isFreeModel(modelMeta) {
   const provider = getProvider(String(ownerRaw));
   if (!provider) return false;
   return provider.category === "free" || provider.noAuth === true;
+}
+
+/**
+ * Provider yang berkategori "free" tetapi tidak dimasukkan ke combo terkelola.
+ * `kiro` (alias `kr`) menyajikan model Claude/GPT berbayar, bukan model gratis sejati.
+ */
+export const MANAGED_COMBO_EXCLUDED_PROVIDERS = Object.freeze(["kiro"]);
+
+export function isExcludedFromManagedCombos(modelMeta) {
+  const id = toId(modelMeta);
+  if (!id) return false;
+  const ownerRaw =
+    (typeof modelMeta === "object" && modelMeta !== null && modelMeta.owned_by) ||
+    (id.includes("/") ? id.slice(0, id.indexOf("/")) : "");
+  const provider = getProvider(String(ownerRaw));
+  return Boolean(provider && MANAGED_COMBO_EXCLUDED_PROVIDERS.includes(provider.id));
 }
 
 /**
@@ -97,7 +114,7 @@ export function passesAgenticGate(modelMeta) {
  * - Fallback: Jika model per tier kurang dari 3, ambil model teratas dari pool aktif
  *   sebagai cadangan aman agar router tidak pernah kehabisan model.
  */
-export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap = null) {
+export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap = null, liveScores = null) {
   if (!Array.isArray(rankedActiveModels)) {
     return { smart: [], fast: [] };
   }
@@ -123,7 +140,7 @@ export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap =
     const isReasoning =
       hasReasoningCap ||
       isThinkingVariant(id) ||
-      isSmartTierModel(id, benchmarks);
+      isSmartTierModel(id, benchmarks, liveScores);
 
     if (isReasoning) {
       smart.push(id);
@@ -225,7 +242,7 @@ export function assembleManagedCombos({
   // Seluruh super-combo hanya boleh berisi model gratis.
   for (const c of candidates) {
     const id = toId(c);
-    if (!id || !isFreeModel(c)) continue;
+    if (!id || !isFreeModel(c) || isExcludedFromManagedCombos(c)) continue;
     const latency = getModelLatency(id, c, latencyMap);
     if (isModelInCooldown(id, c, latency, signals)) {
       cooldownCandidates.push(c);
@@ -244,23 +261,30 @@ export function assembleManagedCombos({
     }
   }
 
-  // Urutkan berdasarkan kualitas koding empiris
-  const sortedActive = sortModelsByCodingQuality(passedAgentic, {
+  // Urutkan berdasarkan kualitas koding empiris & heuristik terpadu
+  const sortOpts = {
     latencyMap,
     failureRateMap: signals?.failureRateMap,
     benchmarks: signals?.benchmarks,
-  });
-
+    liveScores: signals?.liveScores,
+  };
+  const sortedActive = sortModelsByCodingQuality(passedAgentic, sortOpts);
   const zenithFree = [...new Set(sortedActive.map(toId).filter(Boolean))];
 
   // Pisahkan ke tier smart dan fast
-  const { smart: zenithSmart, fast: zenithFast } = deriveTierLists(sortedActive, signals?.benchmarks, metaMap);
+  const { smart: zenithSmart, fast: zenithFast } = deriveTierLists(
+    sortedActive,
+    signals?.benchmarks,
+    metaMap,
+    signals?.liveScores,
+  );
 
   // Urutkan juga model cooldown
   const sortedCooldown = sortModelsByCodingQuality(cooldownCandidates, {
     latencyMap,
     failureRateMap: signals?.failureRateMap,
     benchmarks: signals?.benchmarks,
+    liveScores: signals?.liveScores,
   });
   const zenithCooldown = [...new Set(sortedCooldown.map(toId).filter(Boolean))];
 
@@ -291,11 +315,22 @@ export async function syncManagedCombos(options = {}) {
     }
   }
 
+  let signals = options.signals;
+  if (!signals?.liveScores) {
+    try {
+      const ids = candidates.map(toId).filter(Boolean);
+      const liveScores = resolveLiveScores(ids);
+      signals = { ...(signals || {}), liveScores };
+    } catch {
+      // Benchmark live bersifat tambahan: gagal membaca snapshot tidak boleh menggagalkan sync combo.
+    }
+  }
+
   const assembled = assembleManagedCombos({
     candidates,
     latencyMap: options.latencyMap,
     metaMap: options.metaMap,
-    signals: options.signals,
+    signals,
   });
 
   const strategy = options.strategy || "fallback";

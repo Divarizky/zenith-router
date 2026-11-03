@@ -694,6 +694,99 @@ export function renderCombosContent(query = {}) {
         row.style.display = (!q || model.indexOf(q) !== -1) ? "flex" : "none";
       });
     }
+
+    // Navigasi master-detail tanpa hard refresh seluruh halaman
+    (function () {
+      if (typeof window === "undefined" || typeof document === "undefined") return;
+
+      function setupMasterItemClicks() {
+        var masterList = document.getElementById("combo-master-list");
+        var detailPane = document.querySelector ? document.querySelector(".combos-detail-pane") : null;
+        if (!masterList || !detailPane) return;
+
+        masterList.addEventListener("click", function (e) {
+          var item = e.target && e.target.closest ? e.target.closest(".combo-item") : null;
+          if (!item) return;
+
+          e.preventDefault();
+          var href = item.getAttribute("href");
+          if (!href) return;
+
+          // Tandai item aktif di master list secara langsung
+          if (masterList.querySelectorAll) {
+            masterList.querySelectorAll(".combo-item").forEach(function (el) {
+              el.classList.remove("active");
+            });
+          }
+          item.classList.add("active");
+
+          try {
+            history.pushState(null, "", href);
+          } catch (_) {}
+
+          detailPane.style.opacity = "0.5";
+
+          fetch(href, { credentials: "same-origin" })
+            .then(function (res) { return res.text(); })
+            .then(function (html) {
+              if (typeof DOMParser !== "undefined") {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, "text/html");
+                var newDetail = doc.querySelector(".combos-detail-pane");
+                if (newDetail) {
+                  detailPane.innerHTML = newDetail.innerHTML;
+                  if (typeof window.zrInitComboPicker === "function") {
+                    window.zrInitComboPicker();
+                  }
+                }
+              } else {
+                window.location.href = href;
+              }
+            })
+            .catch(function () {
+              window.location.href = href;
+            })
+            .finally(function () {
+              detailPane.style.opacity = "1";
+            });
+        });
+
+        window.addEventListener("popstate", function () {
+          var curHref = window.location.href;
+          if (curHref.indexOf("tab=combos") !== -1) {
+            detailPane.style.opacity = "0.5";
+            fetch(curHref, { credentials: "same-origin" })
+              .then(function (res) { return res.text(); })
+              .then(function (html) {
+                if (typeof DOMParser !== "undefined") {
+                  var parser = new DOMParser();
+                  var doc = parser.parseFromString(html, "text/html");
+                  var newDetail = doc.querySelector(".combos-detail-pane");
+                  var newMaster = doc.querySelector("#combo-master-list");
+                  if (newDetail) {
+                    detailPane.innerHTML = newDetail.innerHTML;
+                    if (typeof window.zrInitComboPicker === "function") {
+                      window.zrInitComboPicker();
+                    }
+                  }
+                  if (newMaster && masterList) {
+                    masterList.innerHTML = newMaster.innerHTML;
+                  }
+                }
+              })
+              .finally(function () {
+                detailPane.style.opacity = "1";
+              });
+          }
+        });
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", setupMasterItemClicks);
+      } else {
+        setupMasterItemClicks();
+      }
+    })();
     </script>
 
     <script>
@@ -866,21 +959,28 @@ export function renderCombosContent(query = {}) {
       }
 
       searchEl.addEventListener("input", renderList);
-      document.querySelectorAll("[data-picker-open]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          var wrap = btn.closest(".combo-chain-editor");
-          var ta = wrap ? wrap.querySelector('textarea[name="models"]') : null;
-          if (ta) open(ta);
+      function initPicker() {
+        document.querySelectorAll("[data-picker-open]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var wrap = btn.closest(".combo-chain-editor");
+            var ta = wrap ? wrap.querySelector('textarea[name="models"]') : null;
+            if (ta) open(ta);
+          });
         });
-      });
 
-      document.querySelectorAll(".combo-chain-editor").forEach(function (wrap) {
-        var ta = wrap.querySelector('textarea[name="models"]');
-        if (ta) {
-          ta.hidden = true;
-          renderSelected(ta);
-        }
-      });
+        document.querySelectorAll(".combo-chain-editor").forEach(function (wrap) {
+          var ta = wrap.querySelector('textarea[name="models"]');
+          if (ta) {
+            ta.hidden = true;
+            renderSelected(ta);
+          }
+        });
+      }
+
+      initPicker();
+      if (typeof window !== "undefined") {
+        window.zrInitComboPicker = initPicker;
+      }
     })();
     </script>
   `;

@@ -863,6 +863,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     /* Dialog konfirmasi bersama: menggantikan confirm() bawaan browser. */
     .zr-confirm-backdrop { position: fixed; inset: 0; background: rgba(10, 10, 10, 0.55); display: none; align-items: center; justify-content: center; z-index: 1300; padding: 1rem; }
     .zr-confirm-backdrop.open { display: flex; }
+    .zr-confirm { background: var(--surface); color: var(--text); border: var(--bw-thick) solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--hard-lg); padding: 1.5rem; width: 100%; max-width: 440px; }
+    .zr-confirm h3 { font-size: 1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.75rem; }
+    .zr-confirm p { color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.5; }
+    .zr-confirm .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
     /* ===== Bento HUD & Overview Asimetris ===== */
     .bento-split-grid {
       display: grid;

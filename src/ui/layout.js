@@ -103,36 +103,127 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
     .num { font-variant-numeric: tabular-nums; }
 
-    /* ===== Topbar (menggantikan sidebar) ===== */
-    .topbar-app {
-      position: sticky; top: 0; z-index: 60;
-      display: flex; align-items: center; gap: 1.25rem;
-      padding: 0.6rem 1.75rem;
+    /* ===== App Shell & Sidebar Vertikal Neo-Brutalist ===== */
+    .app-shell {
+      display: flex;
+      min-height: 100vh;
+      width: 100%;
+      background: var(--bg);
+    }
+    .sidebar {
+      width: 240px;
+      min-width: 240px;
+      max-width: 240px;
       background: var(--surface);
-      border-bottom: var(--bw-thick) solid var(--line);
+      border-right: var(--bw-thick) solid var(--line);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 1.25rem 1rem 1rem;
+      box-sizing: border-box;
+      z-index: 50;
+      overflow-y: auto;
+    }
+    .sidebar-header {
+      margin-bottom: 1.25rem;
     }
     .brand { display: flex; align-items: center; gap: 0.65rem; flex-shrink: 0; }
     .brand-logo {
-      width: 34px; height: 34px;
-      border: var(--bw) solid var(--line);
+      width: 36px; height: 36px;
+      border: var(--bw-thick) solid var(--line);
+      box-shadow: 2px 2px 0 var(--shadow-ink);
       object-fit: cover; display: block; background: transparent; flex-shrink: 0;
     }
-    .brand h1 { font-size: 0.98rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; text-transform: uppercase; }
-    .brand small { display: block; color: var(--text-subtle); font-size: var(--text-xs); font-weight: 500; }
-    .topbar-app nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; flex: 1 1 auto; min-width: 0; }
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .brand h1 {
+      font-size: 0.95rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      line-height: 1.2;
+      text-transform: uppercase;
+      margin: 0;
+      color: var(--text);
+    }
+    .brand small {
+      display: inline-block;
+      align-self: flex-start;
+      padding: 0.1rem 0.4rem;
+      background: var(--surface-2);
+      border: var(--bw) solid var(--line);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      color: var(--text);
+      box-shadow: 1px 1px 0 var(--shadow-ink);
+      line-height: 1.2;
+    }
+    .sidebar-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
     .nav-link {
-      display: flex; align-items: center; gap: 0.45rem;
-      padding: 0.45rem 0.75rem;
-      border: var(--bw) solid transparent;
+      display: flex; align-items: center; gap: 0.65rem;
+      padding: 0.55rem 0.75rem;
+      border: 2px solid transparent;
       color: var(--text-muted); text-decoration: none;
       font-size: var(--text-sm); font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
       white-space: nowrap;
-      transition: color 0.12s, background 0.12s, border-color 0.12s;
+      transition: color 0.12s, background 0.12s, border-color 0.12s, transform 0.08s, box-shadow 0.08s;
     }
-    .nav-link:hover { color: var(--text); background: var(--surface-2); }
-    .nav-link.active { color: #ffffff; background: var(--accent); border-color: var(--line); box-shadow: var(--hard-sm); }
+    .nav-link:hover {
+      color: var(--text);
+      background: var(--surface-2);
+      border: 2px solid var(--line);
+      box-shadow: 3px 3px 0 var(--shadow-ink);
+      transform: translate(-1px, -1px);
+    }
+    .nav-link.active {
+      color: #ffffff;
+      background: var(--accent);
+      border: 2px solid var(--line);
+      box-shadow: 3px 3px 0 var(--shadow-ink);
+    }
     .nav-link svg { flex-shrink: 0; }
-    .topbar-end { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; margin-left: auto; }
+    .sidebar-footer {
+      margin-top: auto;
+      padding-top: 1rem;
+      border-top: var(--bw-thick) solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      flex-shrink: 0;
+    }
+    .sidebar-status {
+      display: flex;
+      align-items: center;
+    }
+    .sidebar-status .pill {
+      width: 100%;
+      justify-content: center;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      border: var(--bw) solid var(--line);
+      box-shadow: 2px 2px 0 var(--shadow-ink);
+    }
+    .sidebar-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .sidebar-actions form { margin: 0; flex: 1; }
+    .sidebar-actions .btn-danger {
+      width: 100%;
+      justify-content: center;
+    }
     .sidebar-user { color: var(--text-subtle); font-size: var(--text-xs); }
     @media (max-width: 1100px) { .sidebar-user { display: none; } }
     .sidebar-user form { margin: 0; display: inline; }
@@ -190,10 +281,66 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       color: #fafafa; font-size: 0.95rem; text-align: center; padding: 2rem;
     }
 
-    /* ===== Main & topbar judul ===== */
-    .main { min-width: 0; padding: var(--space-5) 2.25rem 5rem; }
-    .topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); flex-wrap: wrap; }
-    .topbar h2 { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; text-transform: uppercase; }
+    /* ===== Main Content & Main Header ===== */
+    .main-content {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      overflow-y: auto;
+    }
+    .main-header {
+      background: var(--surface);
+      border-bottom: var(--bw-thick) solid var(--line);
+      margin: 0 -2.25rem 1.75rem -2.25rem;
+      padding: 1rem 2.25rem;
+      box-shadow: 0 2px 0 var(--shadow-ink);
+    }
+    .main-header .topbar {
+      margin-bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .main-header-title {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .main-header-title .crumb {
+      margin-bottom: 0;
+      font-size: var(--text-xs);
+      font-weight: 700;
+      color: var(--text-subtle);
+    }
+    .main-header-title .crumb a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .main-header-title .crumb a:hover {
+      color: var(--accent);
+      text-decoration: underline;
+    }
+    .main-header-title h2 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .main-header-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .main-header-status .pill {
+      font-size: var(--text-xs);
+      font-weight: 800;
+      border: var(--bw) solid var(--line);
+      box-shadow: 2px 2px 0 var(--shadow-ink);
+    }
+    .main { min-width: 0; padding: 0 2.25rem 5rem; }
     /* Window bar retro: judul, indikator, dan kontrol _ □ ✕ */
     .window-header { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.5rem 0.75rem; background: var(--accent); color: #ffffff; border-bottom: var(--bw) solid var(--line); }
     .window-header-lime { background: var(--accent-lime, #ccff00); color: #000000; border-bottom: var(--bw) solid #000000; }
@@ -709,9 +856,201 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     /* Dialog konfirmasi bersama: menggantikan confirm() bawaan browser. */
     .zr-confirm-backdrop { position: fixed; inset: 0; background: rgba(10, 10, 10, 0.55); display: none; align-items: center; justify-content: center; z-index: 1300; padding: 1rem; }
     .zr-confirm-backdrop.open { display: flex; }
-    .zr-confirm { background: var(--surface); color: var(--text); border: var(--bw-thick) solid var(--line); box-shadow: var(--hard-lg); padding: 1.5rem; width: 100%; max-width: 440px; }
-    .zr-confirm h3 { font-size: 1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.75rem; }
-    .zr-confirm p { color: var(--text-muted); margin-bottom: 0.5rem; }
+    /* ===== Bento HUD & Overview Asimetris ===== */
+    .bento-split-grid {
+      display: grid;
+      grid-template-columns: 1.18fr 0.82fr;
+      gap: 1.25rem;
+      margin-bottom: 1.5rem;
+      align-items: stretch;
+    }
+    @media (max-width: 1024px) {
+      .bento-split-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .bento-card {
+      display: flex;
+      flex-direction: column;
+      padding: 1.25rem;
+    }
+    .card-header-neo {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding-bottom: 0.75rem;
+      border-bottom: var(--bw) solid var(--line);
+    }
+    .endpoint-item {
+      background: var(--surface-2);
+      border: var(--bw) solid var(--line);
+      padding: 0.75rem 0.85rem;
+      box-shadow: 2px 2px 0 var(--shadow-ink);
+    }
+    .endpoint-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.45rem;
+    }
+    .endpoint-title-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .method-tag {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      font-size: var(--text-xs);
+      font-weight: 900;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: 1.2;
+      border: var(--bw) solid var(--line);
+    }
+    .method-post {
+      background: var(--accent);
+      color: #ffffff;
+      box-shadow: 1px 1px 0 var(--shadow-ink);
+    }
+    .method-get {
+      background: var(--surface-3);
+      color: var(--text);
+      box-shadow: 1px 1px 0 var(--shadow-ink);
+    }
+    .endpoint-name {
+      font-size: var(--text-sm);
+      font-weight: 800;
+      color: var(--text);
+    }
+    .endpoint-desc {
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+    }
+    .endpoint-code-box {
+      background: var(--surface);
+      border: var(--bw) solid var(--line);
+      padding: 0.4rem 0.65rem;
+      overflow-x: auto;
+    }
+    .endpoint-code-box code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      color: var(--text);
+      white-space: nowrap;
+      background: transparent;
+      padding: 0;
+      border: none;
+    }
+    .copy-btn {
+      font-weight: 800;
+      font-size: var(--text-xs);
+      border: var(--bw) solid var(--line);
+      box-shadow: 2px 2px 0 var(--shadow-ink);
+      cursor: pointer;
+      transition: transform 0.08s, box-shadow 0.08s, background 0.12s, color 0.12s;
+    }
+    .copy-btn:hover {
+      transform: translate(-1px, -1px);
+      box-shadow: 3px 3px 0 var(--shadow-ink);
+    }
+    .copy-btn.btn-copied {
+      background: var(--success) !important;
+      color: #0a0a0a !important;
+      border-color: var(--line) !important;
+    }
+
+    .combo-tier-box {
+      background: var(--surface-2);
+      border: var(--bw) solid var(--line);
+      padding: 0.75rem 0.85rem;
+      box-shadow: 2px 2px 0 var(--shadow-ink);
+    }
+    .combo-tier-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.45rem;
+    }
+    .combo-tier-badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      font-size: var(--text-xs);
+      font-weight: 900;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      border: var(--bw) solid var(--line);
+      box-shadow: 1px 1px 0 var(--shadow-ink);
+    }
+    .combo-tier-badge.smart {
+      background: var(--accent);
+      color: #ffffff;
+    }
+    .combo-tier-badge.fast {
+      background: var(--accent-lime);
+      color: #0a0a0a;
+    }
+    .combo-tier-badge.free {
+      background: var(--success);
+      color: #0a0a0a;
+    }
+    .combo-tier-sub {
+      font-size: var(--text-xs);
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+    .combo-tier-count {
+      font-size: var(--text-xs);
+      font-weight: 800;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+    }
+    .combo-chips {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .combo-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      background: var(--surface);
+      border: var(--bw) solid var(--line);
+      padding: 0.25rem 0.5rem;
+      font-size: var(--text-xs);
+      overflow: hidden;
+    }
+    .chip-rank {
+      font-weight: 900;
+      font-size: var(--text-xs);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .chip-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      background: transparent;
+      padding: 0;
+      border: none;
+    }
+    .combo-empty-hint {
+      font-size: var(--text-xs);
+      color: var(--text-subtle);
+      font-style: italic;
+      padding: 0.25rem 0;
+    }
+    .combo-free-desc {
+      font-size: var(--text-xs);
+      color: var(--text);
+      line-height: 1.45;
+    }
 
     /* ===== Stat ===== */
     .stat .value { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
@@ -720,19 +1059,35 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 
     /* ===== Responsif ===== */
     @media (max-width: 860px) {
-      .main { padding: 1.25rem 1rem 4rem; }
-      .topbar-app { flex-wrap: wrap; padding: 0.6rem 1rem; gap: 0.6rem; }
+      .main { padding: 0 1rem 4rem; }
+      .main-header { margin: 0 -1rem 1.25rem -1rem; padding: 0.85rem 1rem; }
       /* Target sentuh interaktif minimal 44x44 px pada layar sempit. */
       .btn, .btn-sm, .btn-icon, .nav-link, .btn-ghost { min-height: var(--touch-min); min-width: var(--touch-min); }
       .btn-sm { padding: 0.5rem 0.9rem; }
-      .topbar-app nav { order: 3; width: 100%; flex: 1 0 100%; }
-      .topbar-end { margin-left: auto; }
-      .sidebar-user { display: none; }
       .setting-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
       .setting-action .input-select { width: 100%; }
       .setting-stack { width: 100%; }
       .settings-actions { flex-direction: column-reverse; align-items: stretch; }
       .settings-actions .btn { width: 100%; }
+    }
+    @media (max-width: 768px) {
+      .app-shell { flex-direction: column; }
+      .sidebar {
+        width: 100%; min-width: 100%; max-width: 100%; height: auto; position: sticky; top: 0;
+        border-right: none; border-bottom: var(--bw-thick) solid var(--line);
+        padding: 0.6rem 1rem; gap: 0.5rem; box-shadow: 0 2px 0 var(--shadow-ink);
+      }
+      .sidebar-header { margin-bottom: 0; }
+      .sidebar-nav {
+        flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        gap: 0.35rem; padding-bottom: 0.25rem;
+      }
+      .sidebar-footer {
+        flex-direction: row; align-items: center; justify-content: space-between;
+        margin-top: 0; padding-top: 0.5rem; border-top: var(--bw) solid var(--border-subtle);
+      }
+      .sidebar-status { display: none; }
+      .sidebar-actions { width: 100%; justify-content: space-between; }
     }
 
     /* ===== Toast hasil aksi & tombol sibuk ===== */
@@ -772,39 +1127,56 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     </script>
 </head>
 <body>
-  <header class="topbar-app">
-    <div class="brand">
-      <img src="/logo.png" alt="Zenith Router" class="brand-logo" width="34" height="34" />
-      <div>
-        <h1>Zenith Router</h1>
-        <small>v${pkg.version}</small>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <img src="/logo.png" alt="Zenith Router" class="brand-logo" width="36" height="36" />
+          <div class="brand-text">
+            <h1>ZENITH ROUTER</h1>
+            <small>v${pkg.version}</small>
+          </div>
+        </div>
       </div>
+      <div id="update-badge"></div>
+      <nav aria-label="Navigasi utama" class="sidebar-nav">${navHtml}</nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-status">
+          <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
+        </div>
+        <div class="sidebar-actions">
+          <button type="button" class="btn btn-secondary btn-icon" id="theme-toggle" aria-label="Ubah tema" title="Ubah tema">
+            <span class="theme-icon theme-icon-moon">${icon("moon")}</span>
+            <span class="theme-icon theme-icon-sun">${icon("sun")}</span>
+          </button>
+          <form action="/dashboard/logout" method="POST">
+            <button type="submit" class="btn btn-danger btn-sm" title="Logout">Keluar</button>
+          </form>
+        </div>
+      </div>
+    </aside>
+    <div class="main-content">
+      <main class="main">
+        <header class="main-header">
+          <div class="topbar">
+            <div class="main-header-title">
+              <div class="crumb"><a href="/dashboard">Zenith Router</a> / <strong>${escapeHtml(title)}</strong></div>
+              <h2>${escapeHtml(title)}</h2>
+            </div>
+            <div class="main-header-status">
+              <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
+            </div>
+          </div>
+        </header>
+        ${isUsingDefaultPassword() ? `
+        <div class="banner banner-warning">
+          <span><strong>Perhatian:</strong> dashboard masih memakai password awal <code>123456</code>. Ubah lewat menu Settings.</span>
+          <a href="/dashboard/settings#password" class="btn btn-ghost">Ubah Password</a>
+        </div>` : ""}
+        ${content}
+      </main>
     </div>
-    <div id="update-badge"></div>
-    <nav aria-label="Navigasi utama">${navHtml}</nav>
-    <div class="topbar-end">
-      <button type="button" class="btn btn-secondary btn-icon" id="theme-toggle" aria-label="Ubah tema" title="Ubah tema">
-        <span class="theme-icon theme-icon-moon">${icon("moon")}</span>
-        <span class="theme-icon theme-icon-sun">${icon("sun")}</span>
-      </button>
-      <span class="sidebar-user">Ultra-lightweight personal AI gateway</span>
-      <form action="/dashboard/logout" method="POST">
-        <button type="submit" class="btn btn-danger btn-sm" title="Logout">Keluar</button>
-      </form>
-    </div>
-  </header>
-  <main class="main">
-    ${isUsingDefaultPassword() ? `
-    <div class="banner banner-warning">
-      <span><strong>Perhatian:</strong> dashboard masih memakai password awal <code>123456</code>. Ubah lewat menu Settings.</span>
-      <a href="/dashboard/settings#password" class="btn btn-ghost">Ubah Password</a>
-    </div>` : ""}
-    <div class="topbar">
-      <h2>${escapeHtml(title)}</h2>
-      <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
-    </div>
-    ${content}
-  </main>
+  </div>
   <div class="zr-confirm-backdrop" id="zr-confirm">
     <div class="zr-confirm" role="dialog" aria-modal="true" aria-labelledby="zr-confirm-title" aria-describedby="zr-confirm-msg">
       <h3 id="zr-confirm-title">Konfirmasi</h3>

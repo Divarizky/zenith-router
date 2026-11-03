@@ -314,10 +314,18 @@ export function renderOverviewPage(port = 20120) {
         var es = null;
 
         var LEVEL_COLORS = {
+          log: '#a3a3a3',
           info: 'var(--info)',
+          route: 'var(--accent-lime)',
+          routing: 'var(--accent-lime)',
+          usage: 'var(--success)',
           warn: 'var(--warning)',
+          warning: 'var(--warning)',
           error: 'var(--danger)',
-          debug: 'var(--text-subtle)'
+          debug: 'var(--text-subtle)',
+          combo: 'var(--accent-pink, #ffb3d9)',
+          fallback: 'var(--warning)',
+          traffic: 'var(--traffic)'
         };
 
         function escapeLogHtml(str) {
@@ -329,17 +337,78 @@ export function renderOverviewPage(port = 20120) {
             .replace(/"/g, '&quot;');
         }
 
+        function formatLocalTime(date) {
+          var d = date || new Date();
+          var pad = function (n) { return String(n).padStart(2, '0'); };
+          return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        }
+
+        function parseLogLine(raw) {
+          if (raw === null || raw === undefined) return null;
+          if (typeof raw === 'object') {
+            var tsObj = raw.timestamp || '';
+            if (typeof tsObj === 'string' && tsObj.includes('T')) {
+              tsObj = tsObj.split('T')[1]?.replace('Z', '') || tsObj;
+            }
+            return {
+              timestamp: tsObj || formatLocalTime(new Date()),
+              level: String(raw.level || 'LOG').toUpperCase(),
+              message: String(raw.message || ''),
+              requestId: raw.requestId ? String(raw.requestId) : '',
+              model: raw.model ? String(raw.model) : ''
+            };
+          }
+
+          var str = String(raw).trim();
+          if (!str) return null;
+
+          var ts = '';
+          var level = 'LOG';
+          var msg = str;
+
+          var tsMatch = msg.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*/);
+          if (tsMatch) {
+            ts = tsMatch[1];
+            msg = msg.slice(tsMatch[0].length);
+          } else {
+            ts = formatLocalTime(new Date());
+          }
+
+          var tagMatch = msg.match(/^\[([A-Za-z0-9_-]+)\]\s*/);
+          if (tagMatch) {
+            level = tagMatch[1].toUpperCase();
+            msg = msg.slice(tagMatch[0].length);
+
+            if (level === 'LOG' || level === 'INFO') {
+              var subTagMatch = msg.match(/^\[([A-Z0-9_-]+)\]\s*/);
+              if (subTagMatch) {
+                level = subTagMatch[1].toUpperCase();
+                msg = msg.slice(subTagMatch[0].length);
+              }
+            }
+          }
+
+          return {
+            timestamp: ts,
+            level: level,
+            message: msg,
+            requestId: '',
+            model: ''
+          };
+        }
+
         function formatLogEntry(log) {
-          var ts = log.timestamp ? log.timestamp.split('T')[1]?.replace('Z', '') || log.timestamp : new Date().toTimeString().split(' ')[0];
-          var level = (log.level || 'info').toLowerCase();
-          var color = LEVEL_COLORS[level] || 'var(--text)';
+          var ts = log.timestamp ? (log.timestamp.includes('T') ? log.timestamp.split('T')[1].replace('Z', '') : log.timestamp) : formatLocalTime(new Date());
+          var rawLevel = log.level || 'LOG';
+          var levelKey = rawLevel.toLowerCase();
+          var color = LEVEL_COLORS[levelKey] || 'var(--text)';
           var msg = escapeLogHtml(log.message || '');
           var reqId = log.requestId ? '<span style="color:var(--text-subtle); margin-right:4px;">[' + escapeLogHtml(log.requestId.slice(-6)) + ']</span>' : '';
           var model = log.model ? '<span style="color:var(--accent-lime); margin-right:4px;">(' + escapeLogHtml(log.model) + ')</span>' : '';
 
-          return '<div class="log-line" data-level="' + level + '" style="display:flex; gap:0.5rem; word-break:break-all;">' +
-            '<span style="color:var(--text-subtle); flex-shrink:0;">' + ts + '</span>' +
-            '<span style="color:' + color + '; font-weight:800; text-transform:uppercase; flex-shrink:0; width:44px;">' + level + '</span>' +
+          return '<div class="log-line" data-level="' + escapeLogHtml(levelKey) + '" style="display:flex; gap:0.5rem; word-break:break-all;">' +
+            '<span style="color:var(--text-subtle); flex-shrink:0;">' + escapeLogHtml(ts) + '</span>' +
+            '<span style="color:' + color + '; font-weight:800; text-transform:uppercase; flex-shrink:0; min-width:56px;">' + escapeLogHtml(rawLevel) + '</span>' +
             '<div>' + reqId + model + msg + '</div>' +
             '</div>';
         }
@@ -350,7 +419,8 @@ export function renderOverviewPage(port = 20120) {
           return (log.message && log.message.toLowerCase().includes(q)) ||
                  (log.level && log.level.toLowerCase().includes(q)) ||
                  (log.model && log.model.toLowerCase().includes(q)) ||
-                 (log.requestId && log.requestId.toLowerCase().includes(q));
+                 (log.requestId && log.requestId.toLowerCase().includes(q)) ||
+                 (log.timestamp && log.timestamp.toLowerCase().includes(q));
         }
 
         window.applyLogFilter = function () {
@@ -376,6 +446,7 @@ export function renderOverviewPage(port = 20120) {
         };
 
         function addLogEntry(log) {
+          if (!log) return;
           var emptyMsg = entries.querySelector('.log-empty');
           if (emptyMsg) emptyMsg.remove();
 
@@ -384,10 +455,60 @@ export function renderOverviewPage(port = 20120) {
 
           if (filterEntry(log, filterInput.value.trim())) {
             entries.insertAdjacentHTML('beforeend', formatLogEntry(log));
+            while (entries.children.length > maxLogs) {
+              entries.removeChild(entries.firstElementChild);
+            }
             if (autoscrollCheck.checked) {
               terminal.scrollTop = terminal.scrollHeight;
             }
           }
+        }
+
+        function handleIncomingData(data) {
+          if (!data) return;
+
+          // Event type: "init" with initial backlog
+          if (data.type === 'init' && Array.isArray(data.logs)) {
+            allLogs = [];
+            entries.innerHTML = '';
+            if (data.logs.length === 0) {
+              entries.innerHTML = '<div class="log-empty" style="color:var(--text-subtle); padding:1rem 0; text-align:center;">Menunggu log aktivitas gateway...</div>';
+            } else {
+              data.logs.forEach(function (item) {
+                var parsed = parseLogLine(item);
+                if (parsed) addLogEntry(parsed);
+              });
+            }
+            return;
+          }
+
+          // Event type: "lines" with batched new lines
+          if (data.type === 'lines' && Array.isArray(data.lines)) {
+            data.lines.forEach(function (item) {
+              var parsed = parseLogLine(item);
+              if (parsed) addLogEntry(parsed);
+            });
+            return;
+          }
+
+          // Event type: "clear"
+          if (data.type === 'clear') {
+            window.clearLogs();
+            return;
+          }
+
+          // Array of logs
+          if (Array.isArray(data)) {
+            data.forEach(function (item) {
+              var parsed = parseLogLine(item);
+              if (parsed) addLogEntry(parsed);
+            });
+            return;
+          }
+
+          // Single log line / object
+          var parsed = parseLogLine(data);
+          if (parsed) addLogEntry(parsed);
         }
 
         function connectSSE() {
@@ -404,9 +525,15 @@ export function renderOverviewPage(port = 20120) {
 
           es.onmessage = function (e) {
             try {
-              var log = JSON.parse(e.data);
-              addLogEntry(log);
-            } catch (err) {}
+              if (!e.data || !e.data.trim()) return;
+              var data = JSON.parse(e.data);
+              handleIncomingData(data);
+            } catch (err) {
+              if (e.data && e.data.trim()) {
+                var parsed = parseLogLine(e.data);
+                if (parsed) addLogEntry(parsed);
+              }
+            }
           };
 
           es.onerror = function () {

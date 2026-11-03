@@ -126,3 +126,68 @@ export function clearConsoleLogs() {
 export function getConsoleEmitter() {
   return state.emitter;
 }
+
+/**
+ * Parse raw console log string or structured object into a normalized log entry.
+ * Accurately parses timestamp [HH:MM:SS], level/tag ([LOG], [INFO], [ROUTE], [USAGE], [ERROR], etc.),
+ * and message text. Promotes gateway activity sub-tags ([ROUTE], [USAGE], [COMBO], [FALLBACK], etc.)
+ * from generic [LOG]/[INFO] lines into distinct log levels.
+ */
+export function parseConsoleLogLine(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "object") {
+    let tsObj = raw.timestamp || "";
+    if (typeof tsObj === "string" && tsObj.includes("T")) {
+      tsObj = tsObj.split("T")[1]?.replace("Z", "") || tsObj;
+    }
+    return {
+      timestamp: tsObj || localTimestamp(),
+      level: String(raw.level || "LOG").toUpperCase(),
+      message: String(raw.message || ""),
+      requestId: raw.requestId ? String(raw.requestId) : "",
+      model: raw.model ? String(raw.model) : "",
+    };
+  }
+
+  const str = String(raw).trim();
+  if (!str) return null;
+
+  let ts = "";
+  let level = "LOG";
+  let msg = str;
+
+  // 1. Ekstrak timestamp [HH:MM:SS] atau [HH:MM]
+  const tsMatch = msg.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*/);
+  if (tsMatch) {
+    ts = tsMatch[1];
+    msg = msg.slice(tsMatch[0].length);
+  } else {
+    ts = localTimestamp();
+  }
+
+  // 2. Ekstrak tag utama [TAG]
+  const tagMatch = msg.match(/^\[([A-Za-z0-9_-]+)\]\s*/);
+  if (tagMatch) {
+    level = tagMatch[1].toUpperCase();
+    msg = msg.slice(tagMatch[0].length);
+
+    // 3. Jika tag utama adalah generic (LOG atau INFO), periksa apakah ada sub-tag aktivitas gateway
+    // huruf kapital seperti [ROUTE], [USAGE], [COMBO], [FALLBACK], [ERROR], [WARN], [TRAFFIC], dll.
+    if (level === "LOG" || level === "INFO") {
+      const subTagMatch = msg.match(/^\[([A-Z0-9_-]+)\]\s*/);
+      if (subTagMatch) {
+        level = subTagMatch[1].toUpperCase();
+        msg = msg.slice(subTagMatch[0].length);
+      }
+    }
+  }
+
+  return {
+    timestamp: ts,
+    level,
+    message: msg,
+    requestId: "",
+    model: "",
+  };
+}
+

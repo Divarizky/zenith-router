@@ -39,7 +39,8 @@ export function buildZcodeLLMHeaders(options = {}) {
 /**
  * Build the system array for an Anthropic Messages upstream.
  * Block 2 carries the ephemeral cache marker. Block 3 is added only when the
- * client sent its own system prompt.
+ * client sent its own system prompt, and it carries a marker too so the client
+ * prefix is cached.
  */
 export function buildZcodeSystemBlocks(clientSystemPrompt) {
   const blocks = [
@@ -47,7 +48,7 @@ export function buildZcodeSystemBlocks(clientSystemPrompt) {
     { type: "text", text: identity.stablePrefix, cache_control: { type: "ephemeral" } },
   ];
   if (clientSystemPrompt) {
-    blocks.push({ type: "text", text: `\n\n${clientSystemPrompt}` });
+    blocks.push({ type: "text", text: `\n\n${clientSystemPrompt}`, cache_control: { type: "ephemeral" } });
   }
   return blocks;
 }

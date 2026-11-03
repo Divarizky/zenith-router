@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { buildZcodeLLMHeaders, buildZcodeSystemBlocks } from "../services/zcodeIdentity.js";
 import { FORMATS, translateRequest, translateResponse, createTransformStream } from "../translator/index.js";
@@ -63,6 +64,82 @@ function mapZcodeError(upstreamRes, text) {
   });
 }
 
+// Batas breakpoint cache per request pada Anthropic Messages.
+const MAX_CACHE_BREAKPOINTS = 4;
+const EPHEMERAL = { type: "ephemeral" };
+
+function sha256Hex(text) {
+  return crypto.createHash("sha256").update(text).digest("hex");
+}
+
+function textOf(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((p) => (typeof p?.text === "string" ? p.text : "")).filter(Boolean).join("\n\n");
+  }
+  return "";
+}
+
+/**
+ * x-session-id yang stabil per percakapan. Memakai sessionKey dari fallback bila ada.
+ * Bila tidak ada atau berawalan `apikey:`, dipakai hash system dan user message pertama.
+ */
+export function zcodeSessionId(sessionKey, clientPayload) {
+  if (typeof sessionKey === "string" && sessionKey && !sessionKey.startsWith("apikey:")) {
+    return `session_${sha256Hex(sessionKey).slice(0, 32)}`;
+  }
+  const messages = Array.isArray(clientPayload?.messages) ? clientPayload.messages : [];
+  const system = messages.filter((m) => m?.role === "system").map((m) => textOf(m.content)).join("\n");
+  const firstUser = messages.find((m) => m?.role === "user");
+  const seed = `${system}\n${textOf(firstUser?.content)}`;
+  if (!seed.trim()) return `session_${crypto.randomBytes(16).toString("hex")}`;
+  return `session_${sha256Hex(seed).slice(0, 32)}`;
+}
+
+function countBreakpoints(payload) {
+  let n = 0;
+  if (Array.isArray(payload.system)) n += payload.system.filter((b) => b?.cache_control).length;
+  if (Array.isArray(payload.tools)) n += payload.tools.filter((t) => t?.cache_control).length;
+  for (const m of payload.messages ?? []) {
+    if (Array.isArray(m?.content)) n += m.content.filter((b) => b?.cache_control).length;
+  }
+  return n;
+}
+
+/**
+ * Pasang breakpoint pada tool terakhir dan content text terakhir message terakhir.
+ * Elemen yang sudah membawa cache_control dari klien dibiarkan. Total breakpoint
+ * (termasuk milik klien dan identitas) tidak melebihi MAX_CACHE_BREAKPOINTS.
+ */
+export function withZcodeCacheBreakpoints(payload) {
+  const out = { ...payload };
+  let budget = MAX_CACHE_BREAKPOINTS - countBreakpoints(out);
+
+  if (budget > 0 && Array.isArray(out.tools) && out.tools.length > 0) {
+    const last = out.tools.length - 1;
+    if (!out.tools[last].cache_control) {
+      out.tools = out.tools.map((t, i) => (i === last ? { ...t, cache_control: EPHEMERAL } : t));
+      budget -= 1;
+    }
+  }
+
+  if (budget > 0 && Array.isArray(out.messages) && out.messages.length > 0) {
+    const lastIdx = out.messages.length - 1;
+    const msg = out.messages[lastIdx];
+    const blocks = typeof msg.content === "string"
+      ? [{ type: "text", text: msg.content }]
+      : Array.isArray(msg.content) ? msg.content.slice() : null;
+    const hasMarker = blocks?.some((b) => b?.cache_control);
+    const textIdx = blocks ? blocks.map((b) => b?.type).lastIndexOf("text") : -1;
+    if (blocks && !hasMarker && textIdx >= 0) {
+      blocks[textIdx] = { ...blocks[textIdx], cache_control: EPHEMERAL };
+      out.messages = out.messages.map((m, i) => (i === lastIdx ? { ...m, content: blocks } : m));
+      budget -= 1;
+    }
+  }
+  return out;
+}
+
 /** Gabungkan system prompt klien menjadi satu string, lalu bungkus dengan identitas ZCode. */
 function withZcodeSystem(payload) {
   const system = payload.system;
@@ -79,7 +156,7 @@ function withZcodeSystem(payload) {
 
 export class ZcodePlanExecutor extends BaseExecutor {
   async execute(args) {
-    const { url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, targetModel } = args;
+    const { url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, targetModel, sessionKey } = args;
     const planToken = connection?.credentials?.plan_token;
 
     // Akun tanpa plan_token memakai jalur PaaS biasa, tanpa perubahan.
@@ -95,11 +172,14 @@ export class ZcodePlanExecutor extends BaseExecutor {
     }
 
     // Gateway mengirim format OpenAI untuk provider ini. Start-Plan memakai Anthropic Messages.
-    const claudePayload = withZcodeSystem(translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, clientPayload, targetModel));
+    const sessionId = zcodeSessionId(sessionKey, clientPayload);
+    const claudePayload = withZcodeCacheBreakpoints(
+      withZcodeSystem(translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, clientPayload, targetModel))
+    );
     const wantsStream = claudePayload.stream === true;
 
     const requestHeaders = {
-      ...buildZcodeLLMHeaders(),
+      ...buildZcodeLLMHeaders({ sessionId }),
       "Content-Type": "application/json",
       Authorization: `Bearer ${planToken}`,
     };

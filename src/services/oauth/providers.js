@@ -639,7 +639,19 @@ const glm = {
     if (!zaiToken) return { error: "Respons ZCode tidak berisi access token." };
     const apiKey = await resolveGlmPlanApiKey(zaiToken, { proxyUrl });
     const user = d.user || {};
-    return { tokens: { access_token: apiKey, email: user.email, name: user.name } };
+    // plan_token is the ZCode coding-plan JWT. It is optional: accounts without a
+    // ZCode quota still get the PaaS API key, so a missing token must not throw.
+    const planToken = d.token || payload?.data?.token || payload?.token || null;
+    const refreshToken = zai.refresh_token || d.refreshToken || d.refresh_token || null;
+    return {
+      tokens: {
+        access_token: apiKey,
+        plan_token: planToken || null,
+        refresh_token: refreshToken || null,
+        email: user.email,
+        name: user.name,
+      },
+    };
   },
 };
 

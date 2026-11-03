@@ -52,6 +52,7 @@ export function saveOAuthConnection(providerId, tokens, { name, proxyUrl } = {})
   if (tokens.refresh_token) credentials.refresh_token = tokens.refresh_token;
   if (expiresAt) credentials.expires_at = expiresAt;
   if (tokens.email) credentials.email = tokens.email;
+  if (tokens.plan_token) credentials.plan_token = tokens.plan_token;
   Object.assign(credentials, tokens.extra || {});
 
   const accountName = name || tokens.email || tokens.name || `${provider.name} OAuth`;

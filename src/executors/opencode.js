@@ -22,7 +22,7 @@ import {
 import { ensureOpencodeBridge } from "../services/opencodeBridge.js";
 import { parseRetryAfterMs } from "../services/fallback.js";
 
-export const OPENCODE_UA = "opencode/latest/2.1.2/cli";
+export const OPENCODE_UA = "opencode/latest/2.2.5/cli";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 export const OPENCODE_REQUEST_RE = /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 

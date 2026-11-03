@@ -18,7 +18,7 @@ function expectedPrefix(timestamp, counter, inverted) {
 }
 
 test("OPENCODE_UA - aligned to official release v2 CLI", () => {
-  assert.strictEqual(OPENCODE_UA, "opencode/latest/2.1.2/cli");
+  assert.strictEqual(OPENCODE_UA, "opencode/latest/2.2.5/cli");
 });
 
 test("opencodeSessionId - ses_ + exact inverted-timestamp prefix + 14 base62", () => {
@@ -71,7 +71,7 @@ test("OpencodeExecutor - canonical headers; a canonical sessionKey passes throug
   const body = JSON.stringify({ model: "big-pickle", messages: [{ role: "user", content: "test" }] });
   try {
     await executor.execute({ url: "https://opencode.ai/inference/v1/chat/completions", body });
-    assert.strictEqual(captured["User-Agent"], "opencode/latest/2.1.2/cli");
+    assert.strictEqual(captured["User-Agent"], "opencode/latest/2.2.5/cli");
     assert.strictEqual(captured.Authorization, "Bearer public");
     assert.strictEqual(captured["x-opencode-client"], "cli");
     assert.strictEqual(captured["x-opencode-project"], "global");
@@ -90,7 +90,7 @@ test("OpencodeExecutor - canonical headers; a canonical sessionKey passes throug
       body,
       headers: { "User-Agent": "opencode/1.18.31", "x-opencode-session": canonical },
     });
-    assert.strictEqual(captured["User-Agent"], "opencode/latest/2.1.2/cli", "UA versi lama tidak pernah lolos ke upstream");
+    assert.strictEqual(captured["User-Agent"], "opencode/latest/2.2.5/cli", "UA versi lama tidak pernah lolos ke upstream");
     assert.notStrictEqual(captured["x-opencode-session"], canonical, "sesi hanya ditentukan sessionKey, bukan header");
   } finally {
     proto.execute = origExecute;

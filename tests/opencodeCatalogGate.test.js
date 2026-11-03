@@ -187,7 +187,7 @@ test("gate - only gate statuses and payloads count as rejections", () => {
 test("gate - the shape audit reports the anchors upstream checks", () => {
   const full = auditOpencodeGateShape({
     body: JSON.stringify({ stream: true, tools: [{ type: "function", function: { name: "read" } }] }),
-    headers: { "User-Agent": "opencode/latest/2.1.2/cli", "x-opencode-session": "ses_x" },
+    headers: { "User-Agent": "opencode/latest/2.2.5/cli", "x-opencode-session": "ses_x" },
   });
   assert.strictEqual(isOpencodeGateShapeOk(full), true);
   assert.strictEqual(full.hasShellTool, false);

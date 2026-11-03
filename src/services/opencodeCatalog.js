@@ -9,6 +9,8 @@
  * never clears a good snapshot, so a flaky network cannot reroute traffic.
  */
 import { captureLine } from "./logger.js";
+import { isOpencodeBridgeActive } from "./opencodeBridge.js";
+import { DEFAULT_BRIDGE_URL } from "../bridge/opencode-bridge.js";
 
 export const OPENCODE_CATALOG_URL = "https://models.opencode.ai/api.json";
 export const OPENCODE_DEFAULT_BASE_URL = "https://opencode.ai/inference/openai/v1";
@@ -128,7 +130,9 @@ export function listOpencodeCatalogFreeModels() {
  */
 export function getOpencodeBaseUrlOverride() {
   const raw = process.env.ZENITH_OPENCODE_BASE_URL;
-  return typeof raw === "string" && raw.trim() ? trimBase(raw.trim()) : null;
+  if (typeof raw === "string" && raw.trim()) return trimBase(raw.trim());
+  if (isOpencodeBridgeActive()) return DEFAULT_BRIDGE_URL;
+  return null;
 }
 
 /**

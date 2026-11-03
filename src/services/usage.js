@@ -250,6 +250,10 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
                 if (typeof deltaContent === "string") {
                   streamedTextLength += deltaContent.length;
                 }
+                const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning_content;
+                if (typeof deltaReasoning === "string") {
+                  streamedTextLength += deltaReasoning.length;
+                }
                 const claudeDeltaText = parsed.delta?.text;
                 if (typeof claudeDeltaText === "string") {
                   streamedTextLength += claudeDeltaText.length;
@@ -355,16 +359,16 @@ export function getUsageStats(options = {}) {
   `);
   const byApiKey = keyStmt.all(since) || [];
 
-  // Breakdown by provider (via connection -> connections table)
+  // Breakdown by provider (via connection -> connections table or u.provider)
   const providerStmt = db.prepare(`
     SELECT
-      COALESCE(c.provider, 'unknown') AS provider,
+      COALESCE(c.provider, u.provider, 'unknown') AS provider,
       COUNT(*) AS count,
       COALESCE(SUM(u.total_tokens), 0) AS total_tokens
     FROM usage_history u
     LEFT JOIN connections c ON u.connection_id = c.id
     WHERE u.timestamp >= ?
-    GROUP BY c.provider
+    GROUP BY COALESCE(c.provider, u.provider, 'unknown')
     ORDER BY total_tokens DESC
   `);
   const byProvider = providerStmt.all(since) || [];

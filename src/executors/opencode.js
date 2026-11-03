@@ -12,12 +12,15 @@ import {
   isOpencodeGateShapeOk,
   isOpencodeNetworkBlock,
   isOpencodeGateStatus,
+  isOpencodeFreeUsageLimit,
   listMissingOpencodeGateAnchors,
   noteOpencodeGateRejection,
   noteOpencodeGateSuccess,
   opencodeGateKey,
   withOpencodeGateHeaders,
 } from "../services/opencodeGate.js";
+import { ensureOpencodeBridge } from "../services/opencodeBridge.js";
+import { parseRetryAfterMs } from "../services/fallback.js";
 
 export const OPENCODE_UA = "opencode/latest/2.1.2/cli";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
@@ -502,6 +505,11 @@ export class OpencodeExecutor extends BaseExecutor {
     if (String(targetFormat).includes("responses")) lane = "responses";
     else if (String(targetFormat) === "claude") lane = "messages";
     let path = lanePath(lane);
+
+    if (!this.fetchFn) {
+      await ensureOpencodeBridge().catch(() => {});
+    }
+
     // The base comes from the OpenCode catalog (mirrors the CLI); the model or
     // ZENITH_OPENCODE_BASE_URL can pin a different one.
     let finalUrl = resolveOpencodeUrl(model, lane);
@@ -683,17 +691,20 @@ export class OpencodeExecutor extends BaseExecutor {
         const shapeOk = isOpencodeGateShapeOk(shape);
         const missing = listMissingOpencodeGateAnchors(shape);
         const firstLogId = res.headers?.get?.("x-opencode-log-id") || null;
+        const firstRetryAfterMs = parseRetryAfterMs(res.headers?.get?.("retry-after"));
+        const isQuotaLimit = res.status === 429 && isOpencodeFreeUsageLimit(firstText);
         let retryRes = null;
 
-        // An explicit network block is not a shape problem: a second request
-        // from the same IP only extends it, so the cooldown starts right away.
-        if (isOpencodeNetworkBlock(firstText) && shapeOk) {
+        // An explicit network block or quota limit is not a shape problem: a second request
+        // from the same IP/account only extends it, so the cooldown starts right away.
+        if ((isOpencodeNetworkBlock(firstText) || isQuotaLimit) && shapeOk) {
           const state = noteOpencodeGateRejection(gateKey, {
             status: res.status,
             shape,
             shapeOk,
             logId: firstLogId,
             missing,
+            retryAfterMs: firstRetryAfterMs,
           });
           res = new Response(firstText, {
             status: res.status,
@@ -725,6 +736,7 @@ export class OpencodeExecutor extends BaseExecutor {
             if (!isOpencodeGateRejection(retryRes.status, retryText)) {
               res = retryRes;
             } else {
+              const retryRetryAfterMs = parseRetryAfterMs(retryRes.headers?.get?.("retry-after")) || firstRetryAfterMs;
               const state = noteOpencodeGateRejection(gateKey, {
                 status: retryRes.status,
                 shape,
@@ -732,6 +744,7 @@ export class OpencodeExecutor extends BaseExecutor {
                 // The retry is the refusal that started the cooldown, so its id is the one to quote.
                 logId: retryRes.headers?.get?.("x-opencode-log-id") || firstLogId,
                 missing,
+                retryAfterMs: retryRetryAfterMs,
               });
               // Keep upstream's own status and body; the labels are what let a
               // reader tell a blocked egress from a shape this router got wrong.

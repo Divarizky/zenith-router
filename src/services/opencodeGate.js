@@ -15,8 +15,8 @@ export const OPENCODE_GATE_DEFAULT_COOLDOWN_MS = 30000;
 export const OPENCODE_GATE_DEFAULT_STATUS = 429;
 export const OPENCODE_GATE_MAX_COOLDOWN_MS = 600000;
 
-const GATE_ERROR_TYPES = new Set(["FreeTierError", "UpgradeRequired"]);
-const GATE_MESSAGE_RE = /freetiererror|free tier|detect abuse traffic|upgrade required/i;
+const GATE_ERROR_TYPES = new Set(["FreeTierError", "UpgradeRequired", "FreeUsageLimitError"]);
+const GATE_MESSAGE_RE = /freetiererror|free tier|detect abuse traffic|upgrade required|freeusagelimiterror|free usage limit/i;
 const SESSION_HEADERS = ["x-opencode-session", "x-opencode-session-id", "x-session-affinity", "x-session-id"];
 
 const gateState = new Map();
@@ -43,9 +43,13 @@ function errorTypeOf(text) {
   return typeof type === "string" ? type : "";
 }
 
-/** 401/403 are the gate's statuses; 426 is its version-floor handshake. */
+/** 401/403 are the gate's statuses; 426 is its version-floor handshake; 429 is free-usage limit. */
 export function isOpencodeGateStatus(status) {
-  return status === 401 || status === 403 || status === 426;
+  return status === 401 || status === 403 || status === 426 || status === 429;
+}
+
+export function isOpencodeFreeUsageLimit(text = "") {
+  return /FreeUsageLimitError/i.test(String(text || "")) || /free usage limit reached/i.test(String(text || ""));
 }
 
 export function isOpencodeGateRejection(status, text = "") {
@@ -136,26 +140,31 @@ export function getOpencodeGateDiagnostic(key) {
  * Record a rejection that survived the identity retry: requests to this egress
  * are held back until the cooldown expires instead of being forwarded.
  */
-export function noteOpencodeGateRejection(key, { status, shape, shapeOk, logId = null, missing = [] } = {}, now = Date.now()) {
+export function noteOpencodeGateRejection(key, { status, shape, shapeOk, logId = null, missing = [], retryAfterMs = null } = {}, now = Date.now()) {
   const baseMs = opencodeGateCooldownMs();
   const previous = strikeState.get(key);
   // A strike older than two max cooldowns means the block had lifted.
   const strikes = previous && now - previous.at <= OPENCODE_GATE_MAX_COOLDOWN_MS * 2 ? previous.count + 1 : 1;
   strikeState.set(key, { count: strikes, at: now });
-  const cooldownMs = escalateOpencodeCooldown(baseMs, strikes);
+  const cooldownMs = retryAfterMs && retryAfterMs > 0
+    ? Math.min(retryAfterMs, OPENCODE_GATE_MAX_COOLDOWN_MS)
+    : escalateOpencodeCooldown(baseMs, strikes);
   const isVersionFloor = status === 426;
+  const isFreeUsageLimit = status === 429;
   const state = {
     until: now + cooldownMs,
     at: now,
     status,
     strikes,
     shapeOk: Boolean(shapeOk),
-    gate: isVersionFloor ? "version-rejected" : shapeOk ? "ip-throttled" : "shape-rejected",
+    gate: isVersionFloor ? "version-rejected" : isFreeUsageLimit ? "quota-exhausted" : shapeOk ? "ip-throttled" : "shape-rejected",
     reason: isVersionFloor
       ? "upstream demands a newer OpenCode client version (HTTP 426); the emulated User-Agent is below its floor"
-      : shapeOk
-        ? "upstream refused this egress; the free-tier allowance for this route is spent or the network is blocked"
-        : `the request this router sent was refused — missing ${missing.join(", ")}`,
+      : isFreeUsageLimit
+        ? "upstream account/IP free-tier usage limit reached (HTTP 429 FreeUsageLimitError); cooling down per Retry-After"
+        : shapeOk
+          ? "upstream refused this egress; the free-tier allowance for this route is spent or the network is blocked"
+          : `the request this router sent was refused — missing ${missing.join(", ")}`,
     missing,
     shape: shape || null,
     logId,

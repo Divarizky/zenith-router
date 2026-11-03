@@ -69,6 +69,7 @@ import {
 import { handleSessionLoginCancel, handleSessionLoginPoll, handleSessionLoginStart } from "./ui/pages/sessionLogin.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
 import { syncManagedCombos } from "./services/managedCombos.js";
+import { startOpencodeBridgeService } from "./services/opencodeBridge.js";
 import {
   handleCreateCombo,
   handleUpdateCombo,
@@ -387,6 +388,7 @@ export function startServer() {
   if (!startModelSyncScheduler()) startOpencodeCatalogRefresh();
   startQuotaSyncScheduler();
   startTokenRefreshScheduler();
+  startOpencodeBridgeService().catch(() => {});
   try {
     syncManagedCombos().catch(() => {});
   } catch {}

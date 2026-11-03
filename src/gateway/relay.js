@@ -177,6 +177,22 @@ export async function relayClientRequest(c, spec) {
     }
 
     if (!routed.ok) {
+      if (routed.provider?.id === "opencode" || (typeof body?.model === "string" && body.model.startsWith("opencode/"))) {
+        const estTokens = spec.estimateInputTokens ? spec.estimateInputTokens(body) : 0;
+        queueMicrotask(() => {
+          recordUsage({
+            connectionId: routed.connection?.id || null,
+            apiKeyId: c.get("apiKeyId") || null,
+            provider: "opencode",
+            comboName: routed.comboName || null,
+            fallbackFrom: routed.fallbackFrom || null,
+            model: routed.targetModel || body?.model || "unknown",
+            inputTokens: estTokens,
+            outputTokens: 0,
+            durationMs: Date.now() - (routed.startTime || Date.now()),
+          });
+        });
+      }
       return routed.response;
     }
 

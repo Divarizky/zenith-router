@@ -366,7 +366,7 @@ export function renderOverviewPage(port = 20120) {
           var level = 'LOG';
           var msg = str;
 
-          var tsMatch = msg.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*/);
+          var tsMatch = msg.match(/^\\[(\\d{1,2}:\\d{2}(?::\\d{2})?)\\]\\s*/);
           if (tsMatch) {
             ts = tsMatch[1];
             msg = msg.slice(tsMatch[0].length);
@@ -374,13 +374,13 @@ export function renderOverviewPage(port = 20120) {
             ts = formatLocalTime(new Date());
           }
 
-          var tagMatch = msg.match(/^\[([A-Za-z0-9_-]+)\]\s*/);
+          var tagMatch = msg.match(/^\\[([A-Za-z0-9_-]+)\\]\\s*/);
           if (tagMatch) {
             level = tagMatch[1].toUpperCase();
             msg = msg.slice(tagMatch[0].length);
 
             if (level === 'LOG' || level === 'INFO') {
-              var subTagMatch = msg.match(/^\[([A-Z0-9_-]+)\]\s*/);
+              var subTagMatch = msg.match(/^\\[([A-Z0-9_-]+)\\]\\s*/);
               if (subTagMatch) {
                 level = subTagMatch[1].toUpperCase();
                 msg = msg.slice(subTagMatch[0].length);

@@ -123,7 +123,7 @@ test("Live Quota - GLM parses coding plan limits and flags exhaustion when 100%"
   initDb(":memory:");
 
   setOAuthFetch(async (url) => {
-    if (url.includes("/user/quota")) {
+    if (url.includes("/api/monitor/usage/quota/limit")) {
       return new Response(
         JSON.stringify({
           data: {

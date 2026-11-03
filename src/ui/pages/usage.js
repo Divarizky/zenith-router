@@ -587,11 +587,23 @@ function quotaRows(q) {
       rows.push({ label: "Secondary window", remaining: rem, used: Number(q.secondary_used_percent) + "% used", reset: q.secondary_reset_time });
     }
   } else if (unit === "coding_plan") {
-    for (const [key, label] of [["session_quota", "Session"], ["weekly_quota", "Weekly"]]) {
+    for (const [key, label] of [["session_quota", "PaaS 5h"], ["weekly_quota", "PaaS Mingguan"]]) {
       const part = q[key];
       if (!part) continue;
       const used = Number(part.used_percent) || 0;
       rows.push({ label, remaining: Math.max(0, 100 - used), used: used + "% used", reset: part.reset_time });
+    }
+    // ZCode Start-Plan: jatah harian per model dari plan_token.
+    if (Array.isArray(q.plan_quota)) {
+      for (const b of q.plan_quota) {
+        const rem = b.remaining_percent != null ? Math.max(0, Math.min(100, Number(b.remaining_percent))) : null;
+        const total = Number(b.total_units) || 0;
+        const left = Number(b.remaining_units);
+        const usedLine = total > 0 && Number.isFinite(left)
+          ? left.toLocaleString() + " / " + total.toLocaleString() + " " + (b.unit_type || "tokens")
+          : b.name || "Start-Plan";
+        rows.push({ label: "Start-Plan Harian" + (b.name && b.name !== "Daily Model Quota" ? " · " + b.name : ""), remaining: rem, used: usedLine, reset: null });
+      }
     }
   } else if (unit === "credits_usd") {
     if (q.limit != null) {

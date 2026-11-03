@@ -5,7 +5,7 @@ import { initDb, addConnection, getDb, getModelLockUntil } from "../src/db/index
 import { setCustomExecutor } from "../src/executors/base.js";
 import { createCombo } from "../src/services/combos.js";
 import { setSetting } from "../src/services/settings.js";
-import { resetComboRotation } from "../src/gateway/route.js";
+import { resetComboRotation, shouldAdvanceToNextMember, shouldTryNextMember, isAdvanceableErrorText } from "../src/gateway/route.js";
 import { isConnectionFullyCooledDown } from "../src/services/auth.js";
 
 const TOGETHER_URL = "api.together.xyz";
@@ -126,7 +126,7 @@ test("combo chain - a 400 that ran out of credit advances to the next member", a
   setCustomExecutor(null);
 });
 
-test("combo chain - every other 400 still stops the chain", async () => {
+test("combo chain - a fatal client error (malformed JSON syntax) stops the chain", async () => {
   seedChain();
   chainCombo();
 
@@ -134,7 +134,7 @@ test("combo chain - every other 400 still stops the chain", async () => {
   setCustomExecutor({
     async execute({ url }) {
       calls.push(url);
-      return upstreamError(400, "context length exceeded");
+      return upstreamError(400, "malformed JSON syntax");
     },
   });
 
@@ -145,8 +145,217 @@ test("combo chain - every other 400 still stops the chain", async () => {
   });
 
   assert.strictEqual(res.status, 400);
-  assert.strictEqual(calls.length, 1, "4xx lain tetap menghentikan rantai");
+  assert.strictEqual(calls.length, 1, "fatal client error tetap menghentikan rantai");
   setCustomExecutor(null);
+});
+
+test("combo chain - HTTP 400 with context limit advances to the next member", async () => {
+  seedChain();
+  chainCombo();
+
+  const contextErrors = [
+    "maximum context length exceeded",
+    "context_length_exceeded",
+    "prompt is too long",
+    "tokens exceed model window",
+    "max_tokens is too large",
+  ];
+
+  for (const errMsg of contextErrors) {
+    const calls = [];
+    setCustomExecutor({
+      async execute({ url }) {
+        calls.push(url);
+        if (url.includes(TOGETHER_URL)) return upstreamError(400, errMsg);
+        return okOpenAI("dari anggota kedua");
+      },
+    });
+
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+    });
+
+    assert.strictEqual(res.status, 200, `anggota kedua melayani untuk error: ${errMsg}`);
+    const data = await res.json();
+    assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
+    assert.strictEqual(calls.length, 2, `failover berhasil untuk error: ${errMsg}`);
+    setCustomExecutor(null);
+  }
+});
+
+test("combo chain - HTTP 400 or 422 with tools unsupported advances to the next member", async () => {
+  seedChain();
+  chainCombo();
+
+  const testCases = [
+    { status: 400, message: "tools are not supported for this model" },
+    { status: 422, message: "function calling is not supported" },
+    { status: 400, message: "system message is not supported" },
+    { status: 400, message: "thinking mode is not supported" },
+    { status: 422, message: "reasoning_effort parameter is not supported" },
+  ];
+
+  for (const { status, message } of testCases) {
+    const calls = [];
+    setCustomExecutor({
+      async execute({ url }) {
+        calls.push(url);
+        if (url.includes(TOGETHER_URL)) return upstreamError(status, message);
+        return okOpenAI("dari anggota kedua");
+      },
+    });
+
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+    });
+
+    assert.strictEqual(res.status, 200, `anggota kedua melayani untuk status ${status} error: ${message}`);
+    const data = await res.json();
+    assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
+    assert.strictEqual(calls.length, 2, `failover berhasil untuk status ${status}`);
+    setCustomExecutor(null);
+  }
+});
+
+test("combo chain - HTTP 400 with safety filter or temporary overload advances to the next member", async () => {
+  seedChain();
+  chainCombo();
+
+  const testCases = [
+    "content_filter",
+    "content_safety violation",
+    "safety_policy_violation",
+    "prompt flagged as sensitive",
+    "model is temporarily unavailable",
+    "model overloaded",
+    "no instances available",
+    "capacity exhausted",
+  ];
+
+  for (const message of testCases) {
+    const calls = [];
+    setCustomExecutor({
+      async execute({ url }) {
+        calls.push(url);
+        if (url.includes(TOGETHER_URL)) return upstreamError(400, message);
+        return okOpenAI("dari anggota kedua");
+      },
+    });
+
+    const res = await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+    });
+
+    assert.strictEqual(res.status, 200, `anggota kedua melayani untuk error: ${message}`);
+    const data = await res.json();
+    assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
+    assert.strictEqual(calls.length, 2, `failover berhasil untuk error: ${message}`);
+    setCustomExecutor(null);
+  }
+});
+
+test("combo chain - member with no available connections in DB advances to next member", async () => {
+  initDb(":memory:");
+  // Only GLM connection is added, Together has no connection
+  addConnection({ provider: "glm", name: "GLM Acc", credentials: { api_key: "glm-key" } });
+  chainCombo();
+
+  const calls = [];
+  setCustomExecutor({
+    async execute({ url }) {
+      calls.push(url);
+      return okOpenAI("dari anggota glm");
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const data = await res.json();
+  assert.strictEqual(data.choices[0].message.content, "dari anggota glm");
+  assert.strictEqual(calls.length, 1);
+  assert.ok(calls[0].includes(GLM_URL));
+  setCustomExecutor(null);
+});
+
+test("combo chain - error response with 'no available connections for provider' advances to next member", async () => {
+  seedChain();
+  chainCombo();
+
+  const calls = [];
+  setCustomExecutor({
+    async execute({ url }) {
+      calls.push(url);
+      if (url.includes(TOGETHER_URL)) {
+        return upstreamError(400, "no available connections for provider 'together'");
+      }
+      return okOpenAI("dari anggota kedua");
+    },
+  });
+
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "antai-utama", messages: [{ role: "user", content: "halo" }] }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const data = await res.json();
+  assert.strictEqual(data.choices[0].message.content, "dari anggota kedua");
+  assert.strictEqual(calls.length, 2);
+  setCustomExecutor(null);
+});
+
+test("combo chain - shouldAdvanceToNextMember safely handles unreadable, throwing, or empty bodies", async () => {
+  assert.strictEqual(await shouldAdvanceToNextMember(null), false);
+  assert.strictEqual(await shouldAdvanceToNextMember({}), false);
+  assert.strictEqual(await shouldAdvanceToNextMember({ status: 400 }), false);
+  assert.strictEqual(await shouldAdvanceToNextMember({ status: 400, response: null }), false);
+
+  // Response with clone() that throws
+  const throwingClone = {
+    status: 400,
+    response: {
+      clone() {
+        throw new Error("clone failed");
+      },
+    },
+  };
+  assert.strictEqual(await shouldAdvanceToNextMember(throwingClone), false);
+
+  // Response with text() that rejects
+  const rejectingText = {
+    status: 400,
+    response: {
+      clone() {
+        return {
+          async text() {
+            throw new Error("stream aborted");
+          },
+        };
+      },
+    },
+  };
+  assert.strictEqual(await shouldAdvanceToNextMember(rejectingText), false);
+
+  // Response with plain body string matching advanceable pattern
+  const stringBody = {
+    status: 400,
+    response: {
+      body: JSON.stringify({ error: { message: "maximum context length exceeded" } }),
+    },
+  };
+  assert.strictEqual(await shouldAdvanceToNextMember(stringBody), true);
 });
 
 test("combo chain - an exhausted chain answers 503 with the last member's error", async () => {

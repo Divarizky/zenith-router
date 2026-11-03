@@ -93,9 +93,48 @@ function advanceRotation(combo, start) {
 }
 
 /**
+ * Upstream error patterns that signify model limits, unsupported parameters/features,
+ * temporary overload, account/connection absence, or billing exhaustion.
+ * These justify failing over to the next combo member because another member might
+ * have a larger context window, support the requested features, or have active capacity/connections.
+ */
+const CREDIT_EXHAUSTED =
+  /insufficient\s*[-_ ]?(credit|balance|funds|quota)|balance\s+too\s+low|credit[s]?\s+exhausted|out\s+of\s+credit|quota\s+exhausted/i;
+
+const CONTEXT_LIMIT =
+  /(?:maximum\s+)?context[\s_-]*length[\s_-]*exceeded|context_length_exceeded|prompt\s+is\s+too\s+long|tokens?\s+exceeds?\s+model\s+window|max_tokens\s+is\s+too\s+large/i;
+
+const UNSUPPORTED_FEATURE =
+  /tools?\s+(?:are\s+)?not\s+supported|function\s+calling\s+(?:is\s+)?not\s+supported|system\s+messages?\s+(?:are|is)?\s*not\s+supported|thinking.*?not\s+supported|reasoning_effort.*?not\s+supported/i;
+
+const SAFETY_FILTER =
+  /content[-_ ]?filter|content[-_ ]?safety|safety[-_ ]?policy[-_ ]?violation|prompt\s+flagged\s+as\s+sensitive/i;
+
+const TEMPORARY_OVERLOAD =
+  /model\s+is\s+temporarily\s+unavailable|model\s+overloaded|no\s+instances\s+available|capacity\s+exhausted/i;
+
+const NO_CONNECTION =
+  /no\s+available\s+connections?\s+for\s+provider|no_available_connection/i;
+
+const ADVANCEABLE_ERROR_PATTERNS = [
+  CREDIT_EXHAUSTED,
+  CONTEXT_LIMIT,
+  UNSUPPORTED_FEATURE,
+  SAFETY_FILTER,
+  TEMPORARY_OVERLOAD,
+  NO_CONNECTION,
+];
+
+export function isAdvanceableErrorText(text) {
+  if (!text || typeof text !== "string") return false;
+  return ADVANCEABLE_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
  * Statuses that mean "this member cannot serve the request right now, the next
- * one might". A request the upstream itself rejects (400, 422) is the client's
- * fault and would fail the same way on every member, so the chain stops there.
+ * one might". A request the upstream itself rejects (400, 422) is usually the client's
+ * fault unless the body indicates model limits, unsupported features, safety filters,
+ * or temporary provider/account exhaustion.
  *
  * 401/402/403 are billing and credential problems, 404 means the model is gone,
  * 429 is a rate limit, and every 5xx is an upstream fault. The 5xx test is a
@@ -103,36 +142,39 @@ function advanceRotation(combo, start) {
  * transient, so a bare 500 or a 501 has to keep walking the chain too.
  */
 export function shouldTryNextMember(status) {
-  const code = Number(status);
+  const code = typeof status === "object" && status !== null ? Number(status.status) : Number(status);
   if (code >= 500) return true;
   return code === 401 || code === 402 || code === 403 || code === 404 || code === 429;
 }
 
 /**
- * Upstream wordings that mean "this account is out of money" rather than "this
- * request is wrong". They arrive on the same 400 as a malformed prompt, so the
- * status cannot tell them apart and the body has to.
- */
-const CREDIT_EXHAUSTED =
-  /insufficient\s*[-_ ]?(credit|balance|funds|quota)|balance\s+too\s+low|credit[s]?\s+exhausted|out\s+of\s+credit|quota\s+exhausted/i;
-
-/**
  * Whether the next member gets a turn.
  *
- * The status decides for everything except one case: a 400 whose body says the
- * account ran out of credit. Every other 4xx is the client's own error and would
- * repeat identically on the next member, but an exhausted account is a billing
- * state of this one member, and the next one may still have money.
+ * The status decides for transient upstream faults (5xx, 401-404, 429).
+ * For other errors (such as 400 or 422), the response body is safely checked
+ * for model capacity/token limits, unsupported features, moderation/safety,
+ * temporary overload, account/connection unavailability, or credit exhaustion.
+ * Pure fatal client errors (malformed syntax, empty messages, invalid roles)
+ * do not match and stop the chain immediately.
  */
-async function shouldAdvanceToNextMember({ status, response }) {
+export async function shouldAdvanceToNextMember(attempt) {
+  if (!attempt) return false;
+  const status = attempt.status ?? attempt.response?.status;
   if (shouldTryNextMember(status)) return true;
-  if (Number(status) !== 400) return false;
   try {
-    const text = await response?.clone().text();
-    return Boolean(text) && CREDIT_EXHAUSTED.test(text);
+    const res = attempt.response;
+    let text = null;
+    if (typeof res?.clone === "function") {
+      text = await res.clone().text();
+    } else if (typeof res?.text === "function") {
+      text = await res.text();
+    } else if (typeof res?.body === "string") {
+      text = res.body;
+    }
+    return Boolean(text) && isAdvanceableErrorText(text);
   } catch {
-    // An unreadable body is not evidence of billing trouble; treat the 400 as
-    // the client's own error, which is what the status alone would say.
+    // An unreadable body is not evidence of model limits or exhaustion;
+    // treat it as the client's own error, which stops the chain.
     return false;
   }
 }

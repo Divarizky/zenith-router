@@ -69,7 +69,7 @@ export function prepareOpenCodePayload(body = {}) {
     model,
     messages,
     tools,
-    stream: body.stream !== undefined ? Boolean(body.stream) : true,
+    stream: true, // Upstream OpenCode returns 429 if stream is false; always force stream: true to upstream
   };
 
   // Remove trace/unneeded fields that could interfere
@@ -77,6 +77,132 @@ export function prepareOpenCodePayload(body = {}) {
   delete payload.traceparent;
 
   return payload;
+}
+
+/**
+ * Aggregates upstream SSE chunks into a single OpenAI-compatible chat.completion object.
+ * Used when the client requested `stream: false`.
+ */
+export async function parseSseStreamToChatCompletion(streamOrResponse, fallbackModel = "glm-5.3-flash-free") {
+  const stream = streamOrResponse?.body || streamOrResponse;
+  let text = "";
+  if (typeof stream === "string") {
+    text = stream;
+  } else if (stream && typeof stream.getReader === "function") {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += typeof value === "string" ? value : decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } else if (stream && typeof stream[Symbol.asyncIterator] === "function") {
+    const decoder = new TextDecoder();
+    for await (const chunk of stream) {
+      text += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+    }
+    text += decoder.decode();
+  }
+
+  let id = null;
+  let model = fallbackModel;
+  let created = Math.floor(Date.now() / 1000);
+  let content = "";
+  let reasoningContent = "";
+  let finishReason = "stop";
+  let usage = null;
+  const toolCallsMap = new Map();
+
+  const lines = text.split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line.startsWith("data:")) continue;
+    const dataStr = line.slice(5).trim();
+    if (!dataStr || dataStr === "[DONE]") continue;
+
+    let chunk;
+    try {
+      chunk = JSON.parse(dataStr);
+    } catch {
+      continue;
+    }
+
+    if (chunk.id) id = chunk.id;
+    if (chunk.model) model = chunk.model;
+    if (chunk.created) created = chunk.created;
+    if (chunk.usage && typeof chunk.usage === "object") usage = chunk.usage;
+
+    const choice = chunk.choices?.[0];
+    if (choice) {
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      const delta = choice.delta;
+      if (delta) {
+        if (typeof delta.content === "string") {
+          content += delta.content;
+        }
+        if (typeof delta.reasoning_content === "string") {
+          reasoningContent += delta.reasoning_content;
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index !== undefined ? tc.index : toolCallsMap.size;
+            let current = toolCallsMap.get(idx);
+            if (!current) {
+              current = {
+                id: tc.id || "",
+                type: tc.type || "function",
+                function: {
+                  name: tc.function?.name || "",
+                  arguments: tc.function?.arguments || "",
+                },
+              };
+              toolCallsMap.set(idx, current);
+            } else {
+              if (tc.id) current.id = tc.id;
+              if (tc.type) current.type = tc.type;
+              if (tc.function?.name) current.function.name += tc.function.name;
+              if (tc.function?.arguments) current.function.arguments += tc.function.arguments;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const message = {
+    role: "assistant",
+    content: content || null,
+  };
+
+  if (reasoningContent) {
+    message.reasoning_content = reasoningContent;
+  }
+
+  if (toolCallsMap.size > 0) {
+    const sortedIndices = Array.from(toolCallsMap.keys()).sort((a, b) => Number(a) - Number(b));
+    message.tool_calls = sortedIndices.map((idx) => toolCallsMap.get(idx));
+  }
+
+  const completion = {
+    id: id || `chatcmpl-${Date.now()}`,
+    object: "chat.completion",
+    created,
+    model,
+    choices: [
+      {
+        index: 0,
+        message,
+        finish_reason: finishReason,
+      },
+    ],
+  };
+
+  if (usage) {
+    completion.usage = usage;
+  }
+
+  return completion;
 }
 
 /**
@@ -130,6 +256,7 @@ export async function handleBridgeRequest(req) {
       });
     }
 
+    const clientWantsStream = rawBody.stream !== false;
     const payload = prepareOpenCodePayload(rawBody);
     const headers = buildOpenCodeHeaders(req.headers);
     const upstreamUrl = process.env.OPENCODE_UPSTREAM_URL || OPENCODE_UPSTREAM_URL;
@@ -140,6 +267,33 @@ export async function handleBridgeRequest(req) {
         headers,
         body: JSON.stringify(payload),
       });
+
+      // Pass error status from upstream (e.g. 429, 401, 500) as-is
+      if (!upstreamRes.ok) {
+        const errorHeaders = new Headers();
+        const passHeaders = ["content-type", "retry-after", "x-opencode-log-id", "cache-control"];
+        for (const h of passHeaders) {
+          const val = upstreamRes.headers.get(h);
+          if (val) errorHeaders.set(h, val);
+        }
+        return new Response(upstreamRes.body, {
+          status: upstreamRes.status,
+          statusText: upstreamRes.statusText,
+          headers: errorHeaders,
+        });
+      }
+
+      // If client requested non-stream, aggregate SSE chunks into a single chat.completion JSON
+      if (!clientWantsStream) {
+        const completion = await parseSseStreamToChatCompletion(upstreamRes, payload.model);
+        return new Response(JSON.stringify(completion), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
 
       const responseHeaders = new Headers();
       const passHeaders = ["content-type", "retry-after", "x-opencode-log-id", "cache-control"];

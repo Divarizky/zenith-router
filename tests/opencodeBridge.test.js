@@ -5,6 +5,7 @@ import {
   prepareOpenCodePayload,
   buildOpenCodeHeaders,
   handleBridgeRequest,
+  parseSseStreamToChatCompletion,
   DEFAULT_BRIDGE_PORT,
   DEFAULT_BRIDGE_URL,
   OPENCODE_USER_AGENT,
@@ -245,3 +246,138 @@ test("opencode bridge - usage history records provider stats for keyless opencod
   assert.strictEqual(opencodeStat.count, 2);
   assert.strictEqual(opencodeStat.total_tokens, 200);
 });
+
+test("opencode bridge - upstream body always has stream: true even when client sends stream: false", () => {
+  const payloadFalse = prepareOpenCodePayload({
+    model: "glm-5.3-flash-free",
+    messages: [{ role: "user", content: "hi" }],
+    stream: false,
+  });
+  assert.strictEqual(payloadFalse.stream, true, "upstream payload must always force stream: true");
+
+  const payloadOmitted = prepareOpenCodePayload({
+    model: "glm-5.3-flash-free",
+    messages: [{ role: "user", content: "hi" }],
+  });
+  assert.strictEqual(payloadOmitted.stream, true, "omitted stream must default to stream: true");
+});
+
+test("opencode bridge - parseSseStreamToChatCompletion correctly aggregates SSE to non-stream JSON including tool_calls and reasoning", async () => {
+  const sseLines = [
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}',
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[{"index":0,"delta":{"reasoning_content":"Let me check."}}]}',
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[{"index":0,"delta":{"content":"Halo!"}}]}',
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"read","arguments":"{\\"path\\": "}}]}}]}',
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"test.txt\\"}"}}]}}]}',
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[{"index":0,"finish_reason":"tool_calls"}]}',
+    'data: {"id":"chatcmpl-123","model":"glm-5.3-flash-free","created":1793700000,"choices":[],"usage":{"prompt_tokens":50,"completion_tokens":20,"total_tokens":70}}',
+    'data: [DONE]',
+  ].join("\n\n");
+
+  const completion = await parseSseStreamToChatCompletion(sseLines, "glm-5.3-flash-free");
+
+  assert.strictEqual(completion.id, "chatcmpl-123");
+  assert.strictEqual(completion.object, "chat.completion");
+  assert.strictEqual(completion.model, "glm-5.3-flash-free");
+  assert.strictEqual(completion.created, 1793700000);
+  assert.strictEqual(completion.choices.length, 1);
+  assert.strictEqual(completion.choices[0].finish_reason, "tool_calls");
+
+  const msg = completion.choices[0].message;
+  assert.strictEqual(msg.role, "assistant");
+  assert.strictEqual(msg.content, "Halo!");
+  assert.strictEqual(msg.reasoning_content, "Let me check.");
+  assert.strictEqual(Array.isArray(msg.tool_calls), true);
+  assert.strictEqual(msg.tool_calls.length, 1);
+  assert.strictEqual(msg.tool_calls[0].id, "call_abc");
+  assert.strictEqual(msg.tool_calls[0].type, "function");
+  assert.strictEqual(msg.tool_calls[0].function.name, "read");
+  assert.strictEqual(msg.tool_calls[0].function.arguments, '{"path": "test.txt"}');
+
+  assert.deepStrictEqual(completion.usage, {
+    prompt_tokens: 50,
+    completion_tokens: 20,
+    total_tokens: 70,
+  });
+});
+
+test("opencode bridge - handleBridgeRequest forwards upstream error status (429) without wrapping", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init) => {
+      return new Response(
+        JSON.stringify({
+          type: "error",
+          error: { type: "FreeUsageLimitError", message: "Quota reached" },
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "120",
+          },
+        }
+      );
+    };
+
+    const req = new Request("http://127.0.0.1:20129/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "glm-5.3-flash-free",
+        messages: [{ role: "user", content: "hi" }],
+        stream: false,
+      }),
+    });
+
+    const res = await handleBridgeRequest(req);
+    assert.strictEqual(res.status, 429, "upstream 429 status must be forwarded as-is");
+    assert.strictEqual(res.headers.get("retry-after"), "120");
+    const body = await res.json();
+    assert.strictEqual(body.error.type, "FreeUsageLimitError");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("opencode bridge - handleBridgeRequest handles client stream: false by aggregating SSE", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    let capturedBody = null;
+    globalThis.fetch = async (url, init) => {
+      capturedBody = JSON.parse(init.body);
+      const sseStream = [
+        'data: {"id":"chatcmpl-mock","model":"glm-5.3-flash-free","choices":[{"index":0,"delta":{"content":"Non-stream answer"}}]}',
+        'data: {"id":"chatcmpl-mock","model":"glm-5.3-flash-free","choices":[{"index":0,"finish_reason":"stop"}]}',
+        'data: [DONE]',
+      ].join("\n\n");
+      return new Response(sseStream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    };
+
+    const req = new Request("http://127.0.0.1:20129/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "glm-5.3-flash-free",
+        messages: [{ role: "user", content: "halo" }],
+        stream: false,
+      }),
+    });
+
+    const res = await handleBridgeRequest(req);
+    assert.strictEqual(capturedBody.stream, true, "body sent to upstream must be stream: true");
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers.get("content-type"), "application/json");
+
+    const json = await res.json();
+    assert.strictEqual(json.object, "chat.completion");
+    assert.strictEqual(json.choices[0].message.content, "Non-stream answer");
+    assert.strictEqual(json.choices[0].finish_reason, "stop");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+

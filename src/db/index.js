@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resetAccountStrikes } from "../services/accountCooldown.js";
@@ -253,6 +253,13 @@ export function initDb(dbPath = null) {
     try {
       db.exec("PRAGMA journal_mode = WAL;");
     } catch {}
+    // Berisi kredensial provider: hanya pemilik yang boleh membaca. WAL/SHM yang dibuat setelah init belum tercakup.
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const file = effectivePath + suffix;
+      try {
+        if (existsSync(file)) chmodSync(file, 0o600);
+      } catch {}
+    }
   }
 
   try {

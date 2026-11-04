@@ -217,6 +217,10 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
       } catch {}
       finishUsage();
     },
+    // Client aborted mid-stream: flush never runs, so record what was seen so far.
+    cancel() {
+      finishUsage();
+    },
   });
 
   function consumeLines(lines) {
@@ -303,7 +307,8 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
  */
 export function getUsageStats(options = {}) {
   const db = getDb();
-  const days = Number(options.days) || 30;
+  // Clamp: a huge window scans the whole usage_history table on every request.
+  const days = Math.min(365, Math.max(1, Number(options.days) || 30));
   const since = Date.now() - days * 86400 * 1000;
 
   // Aggregate summary

@@ -1,0 +1,26 @@
+name: Release manifest
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Build and attach release-manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          commit="$(git rev-parse "${TAG}^{commit}")"
+          printf '{"tag":"%s","commit":"%s"}\n' "$TAG" "$commit" > release-manifest.json
+          cat release-manifest.json
+          gh release upload "$TAG" release-manifest.json --clobber

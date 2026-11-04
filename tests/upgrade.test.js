@@ -14,6 +14,7 @@ import {
   backupDatabase,
   runUpgrade,
   setUpgradeDataDir,
+  setUpgradeManifestFetcher,
 } from "../src/services/upgrade.js";
 import { setCustomVersionFetcher, resetVersionCache } from "../src/services/version.js";
 import { app } from "../src/index.js";
@@ -27,6 +28,9 @@ test.after(() => {
   setUpgradeDataDir(null);
   fs.rmSync(testDataDir, { recursive: true, force: true });
 });
+
+const TAG_COMMIT = "a".repeat(40);
+const goodManifest = async (tag) => ({ tag, commit: TAG_COMMIT });
 
 /** Rekaman eksekusi git: menjawab perintah sesuai skrip, mencatat urutannya. */
 function recorderExec({ inWorkTree = true, clean = true, fetchFails = false, tagMissing = false, checkoutFails = false } = {}) {
@@ -50,6 +54,7 @@ function recorderExec({ inWorkTree = true, clean = true, fetchFails = false, tag
       return { stdout: "abc\n", stderr: "" };
     }
     if (key.startsWith("rev-parse HEAD")) return { stdout: "abcdef123\n", stderr: "" };
+    if (key.endsWith("^{commit}")) return { stdout: `${TAG_COMMIT}\n`, stderr: "" };
     if (key.startsWith("checkout")) {
       if (checkoutFails) throw new Error("index.lock busy");
       return { stdout: "", stderr: "" };
@@ -157,6 +162,7 @@ test("upgrade - happy path: backup, fetch, checkout, runner, exit — in that or
   const exec = recorderExec();
   const events = [];
   setUpgradeExec(exec);
+  setUpgradeManifestFetcher(goodManifest);
   setUpgradeRunner(() => events.push("runner"));
   setSelfExit((d) => events.push(`exit:${d}`));
 
@@ -184,6 +190,7 @@ test("upgrade - a failed fetch still proceeds when the tag exists locally", asyn
   const exec = recorderExec({ fetchFails: true });
   const events = [];
   setUpgradeExec(exec);
+  setUpgradeManifestFetcher(goodManifest);
   setUpgradeRunner(() => events.push("runner"));
   setSelfExit((d) => events.push(`exit:${d}`));
 
@@ -198,6 +205,7 @@ test("upgrade - a failed fetch still proceeds when the tag exists locally", asyn
 test("upgrade - a checkout failure never spawns the runner", async () => {
   resetUpgradeState();
   setUpgradeExec(recorderExec({ checkoutFails: true }));
+  setUpgradeManifestFetcher(goodManifest);
   const runnerCalls = [];
   const exitCalls = [];
   setUpgradeRunner((...a) => runnerCalls.push(a));
@@ -207,6 +215,68 @@ test("upgrade - a checkout failure never spawns the runner", async () => {
   assert.strictEqual(runnerCalls.length, 0);
   assert.strictEqual(exitCalls.length, 0);
   resetUpgradeState();
+});
+
+async function upgradeWithManifest(manifestFn) {
+  resetUpgradeState();
+  const exec = recorderExec();
+  const runnerCalls = [];
+  setUpgradeExec(exec);
+  setUpgradeManifestFetcher(manifestFn);
+  setUpgradeRunner((...a) => runnerCalls.push(a));
+  setSelfExit(() => {});
+  const backupDir = tmpBackupDir();
+  try {
+    const outcome = await runUpgrade("v9.9.9", { backupDir }).then(
+      () => ({ ok: true }),
+      (err) => ({ ok: false, message: err.message })
+    );
+    return { outcome, exec, runnerCalls };
+  } finally {
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    resetUpgradeState();
+  }
+}
+
+test("upgrade - a tag whose commit differs from the release manifest is refused before checkout", async () => {
+  const { outcome, exec, runnerCalls } = await upgradeWithManifest(async (tag) => ({ tag, commit: "b".repeat(40) }));
+  assert.strictEqual(outcome.ok, false);
+  assert.match(outcome.message, /tidak sama dengan manifest/);
+  assert.ok(!exec.calls.some((c) => c.includes("checkout")), "tidak boleh checkout");
+  assert.strictEqual(runnerCalls.length, 0);
+});
+
+test("upgrade - an unreachable release manifest fails closed", async () => {
+  const { outcome, exec } = await upgradeWithManifest(async () => {
+    throw new Error("HTTP 404");
+  });
+  assert.strictEqual(outcome.ok, false);
+  assert.match(outcome.message, /manifest rilis v9\.9\.9 tidak bisa diambil/);
+  assert.ok(!exec.calls.some((c) => c.includes("checkout")));
+});
+
+test("upgrade - a manifest for another tag or with a malformed commit is refused", async () => {
+  for (const bad of [{ tag: "v1.0.0", commit: TAG_COMMIT }, { tag: "v9.9.9", commit: "abc" }, null]) {
+    const { outcome, exec } = await upgradeWithManifest(async () => bad);
+    assert.strictEqual(outcome.ok, false);
+    assert.match(outcome.message, /tidak valid/);
+    assert.ok(!exec.calls.some((c) => c.includes("checkout")));
+  }
+});
+
+test("upgrade - ZENITH_UPGRADE_SKIP_PIN=1 skips the manifest check", async () => {
+  const prev = process.env.ZENITH_UPGRADE_SKIP_PIN;
+  process.env.ZENITH_UPGRADE_SKIP_PIN = "1";
+  try {
+    const { outcome, runnerCalls } = await upgradeWithManifest(async () => {
+      throw new Error("tidak boleh dipanggil");
+    });
+    assert.strictEqual(outcome.ok, true);
+    assert.strictEqual(runnerCalls.length, 1);
+  } finally {
+    if (prev === undefined) delete process.env.ZENITH_UPGRADE_SKIP_PIN;
+    else process.env.ZENITH_UPGRADE_SKIP_PIN = prev;
+  }
 });
 
 test("POST /api/version/upgrade - a refusal comes back as JSON, not a crash", async () => {

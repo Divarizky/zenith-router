@@ -236,6 +236,7 @@ Endpoint Anthropic Messages dan OpenAI Responses menerima bentuk request masing-
 | `HOST` | `127.0.0.1` | Alamat bind. Selain loopback, API key otomatis diwajibkan |
 | `ZENITH_DB_PATH` | `<root>/data/zenith.db` | Lokasi database |
 | `ZENITH_ALLOWED_HOSTS` | kosong | Host tambahan yang diterima saat bind ke loopback |
+| `ZENITH_UPGRADE_SKIP_PIN` | kosong | `1` melewati pencocokan commit tag dengan `release-manifest.json` saat upgrade dari dashboard |
 | `ZENITH_CORS_ORIGINS` | kosong, CORS mati | Origin browser yang boleh memanggil `/v1` |
 | `ZENITH_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas tunggu header respons upstream |
 | `ZENITH_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda antar chunk stream upstream |

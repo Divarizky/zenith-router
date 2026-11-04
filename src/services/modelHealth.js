@@ -9,6 +9,9 @@
  * - dead: model mengembalikan HTTP 404, deprecated, atau 401 token invalid/unauthorized.
  */
 
+import { isApiKeyRequired } from "../security.js";
+import { listApiKeys } from "./apiKeys.js";
+
 /**
  * Latensi sentinel untuk menandai model yang terkena rate limit / kuota habis
  * dan diparkir di urutan terbawah tanpa dihapus permanen.
@@ -133,6 +136,25 @@ export async function testModelHealth(fullModelId, options = {}) {
   };
   if (options.apiKey) {
     headers["Authorization"] = `Bearer ${options.apiKey}`;
+  }
+
+  const hasAuth = Boolean(headers["Authorization"] || headers["authorization"]);
+  if (!hasAuth) {
+    try {
+      if (typeof isApiKeyRequired === "function" && isApiKeyRequired()) {
+        const keys = typeof listApiKeys === "function" ? listApiKeys() : [];
+        const active = keys.find((k) => k && (k.is_active === 1 || k.is_active === true || k.isActive));
+        const token =
+          typeof active === "string"
+            ? active
+            : active?.key || active?.apiKey || active?.token || active?.key_prefix;
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
+    } catch {
+      // Abaikan jika DB belum siap atau modul gagal diakses
+    }
   }
 
   const body = {

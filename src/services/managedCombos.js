@@ -428,28 +428,25 @@ async function probeSmartTier(assembled, options = {}) {
 
   const topN = smart.slice(0, PROBE_TOP_N);
   const rest = smart.slice(PROBE_TOP_N);
-  const healthy = [];
-  const degraded = [];
 
-  await Promise.all(
+  const probeResults = await Promise.all(
     topN.map(async (id) => {
       try {
         const result = await testModelHealth(id, {
           timeoutMs: options.timeoutMs ?? PROBE_TIMEOUT_MS,
           ...(options.testOptions || {}),
         });
-        if (result.ok || result.status === "active") {
-          healthy.push(id);
-        } else {
-          // quota (sentinel) atau dead -> degradasi ke urutan bawah tier
-          degraded.push(id);
-        }
+        const isHealthy = result.ok || result.status === "active";
+        return { id, isHealthy };
       } catch {
         // Probe gagal total: jangan buang modelnya, pertahankan posisi.
-        healthy.push(id);
+        return { id, isHealthy: true };
       }
     })
   );
+
+  const healthy = probeResults.filter((r) => r.isHealthy).map((r) => r.id);
+  const degraded = probeResults.filter((r) => !r.isHealthy).map((r) => r.id);
 
   const reordered = [...healthy, ...degraded, ...rest];
   return {

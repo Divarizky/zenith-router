@@ -253,3 +253,27 @@ test("testModelHealth - menangani network error dan timeout", async () => {
   assert.equal(res.ok, false);
   assert.match(res.error, /connection refused/i);
 });
+
+test("testModelHealth - menyertakan API key aktif saat auth gateway aktif dan Authorization kosong", async () => {
+  const { initDb } = await import("../src/db/index.js");
+  const { setSetting } = await import("../src/services/settings.js");
+  const { createApiKey } = await import("../src/services/apiKeys.js");
+  initDb(":memory:");
+  setSetting("require_api_key", "true");
+  const created = createApiKey("probe-key");
+
+  let capturedAuth = null;
+  const mockFetch = async (_url, init) => {
+    capturedAuth = init.headers?.["Authorization"] || init.headers?.["authorization"];
+    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+  };
+
+  const res = await testModelHealth("openai/gpt-4o", {
+    fetch: mockFetch,
+  });
+
+  assert.equal(res.ok, true);
+  assert.ok(capturedAuth, "Header Authorization harus terpasang");
+  assert.ok(capturedAuth.startsWith("Bearer "), "Harus berupa Bearer token");
+  assert.ok(capturedAuth.includes(created.key_prefix), "Bearer token harus memuat prefix key");
+});

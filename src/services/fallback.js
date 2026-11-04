@@ -559,6 +559,16 @@ export async function executeWithFallback({
       }
     }
 
+    const headers = { ...baseHeaders };
+    // The upstream checks the session id against metadata.user_id, so both
+    // have to come from the same request body.
+    const claudeSessionId =
+      provider.id === "claude" ? extractClaudeSessionId(payload?.metadata?.user_id) : null;
+    applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
+    const url = resolveUrl(connection);
+    const proxyUrl =
+      rotationProxies.length > 0 ? rotationProxies[attempt - 1] ?? null : requireResolvedProxy(connection);
+
     let releaseSlot = null;
     try {
       releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
@@ -570,16 +580,6 @@ export async function executeWithFallback({
       captureLine(`[TRAFFIC] provider=${provider.id} account="${connection.name || connection.id}" ${err.message}`);
       continue;
     }
-
-    const headers = { ...baseHeaders };
-    // The upstream checks the session id against metadata.user_id, so both
-    // have to come from the same request body.
-    const claudeSessionId =
-      provider.id === "claude" ? extractClaudeSessionId(payload?.metadata?.user_id) : null;
-    applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
-    const url = resolveUrl(connection);
-    const proxyUrl =
-      rotationProxies.length > 0 ? rotationProxies[attempt - 1] ?? null : requireResolvedProxy(connection);
 
     let res;
     try {
@@ -739,6 +739,7 @@ export async function executeWithFallback({
         }
         connection = refreshed;
         applyConnectionAuth(headers, connection, { adaptiveThinking });
+        const retryProxyUrl = requireResolvedProxy(connection);
 
         try {
           releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
@@ -755,7 +756,7 @@ export async function executeWithFallback({
             headers,
             body: bodyForConnection(connection),
             signal,
-            proxyUrl: requireResolvedProxy(connection),
+            proxyUrl: retryProxyUrl,
             connection,
             stream,
             targetModel,

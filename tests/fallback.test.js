@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { app } from "../src/index.js";
 import { initDb, getDb, addConnection, getConnections, getModelLockUntil, setConnectionCooldown } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
+import { getProviderTraffic, resetTrafficGuardState } from "../src/services/trafficGuard.js";
 
 test("Failover - retries on next account, and parks the failing one only after two requests", async () => {
   initDb(":memory:");
@@ -508,4 +509,31 @@ test("Failover - a client abort neither cools accounts down nor burns the next o
     "abort bukan alasan mengunci akun"
   );
   setCustomExecutor(null);
+});
+
+test("Failover - kegagalan resolusi proxy tidak membocorkan inFlight slot", async () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  addConnection({
+    provider: "glm",
+    name: "GLM Proxy Bad",
+    credentials: { api_key: "[REDACTED:credential_assignment]" },
+    proxy_pool_id: 999999,
+  });
+
+  try {
+    await app.request("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "glm/glm-4-flash",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+  } catch {
+    // Expected: resolusi proxy melempar error
+  }
+
+  const traffic = getProviderTraffic("glm");
+  assert.strictEqual(traffic.inFlight, 0, "inFlight slot tidak boleh bocor saat resolusi proxy gagal");
 });

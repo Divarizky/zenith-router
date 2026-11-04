@@ -220,3 +220,32 @@ test("Traffic Guard - a serial provider queue survives longer than the generic 3
   held();
   resetTrafficGuardState();
 });
+
+test("Traffic Guard - antrean throttle memisahkan waktu eksekusi request konkuren", async () => {
+  initDb(":memory:");
+  resetTrafficGuardState();
+  setSetting("traffic_guard_enabled", "true");
+  setSetting("max_account_concurrency", "4");
+  setSetting("request_jitter_enabled", "false");
+  setSetting("provider_throttle_ms:custom-concurrent", "60");
+
+  const conn = { id: 108, provider: "custom-concurrent", auth_type: "session" };
+
+  const startTimes = [];
+  const p1 = acquireAccountSlot(conn).then((rel) => {
+    startTimes.push({ id: 1, time: Date.now() });
+    return rel;
+  });
+  const p2 = acquireAccountSlot(conn).then((rel) => {
+    startTimes.push({ id: 2, time: Date.now() });
+    return rel;
+  });
+
+  const [rel1, rel2] = await Promise.all([p1, p2]);
+  rel1();
+  rel2();
+
+  assert.strictEqual(startTimes.length, 2);
+  const diff = Math.abs(startTimes[1].time - startTimes[0].time);
+  assert.ok(diff >= 45, `Request konkuren harus dipisahkan jeda throttle (diff: ${diff}ms)`);
+});

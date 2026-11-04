@@ -360,3 +360,36 @@ test("combo terkelola terisi dari katalog nyata: klaim tools per provider lolos 
     assert.equal(getProvider(owned)?.supportsTools, true, `${id} harus dari provider berklaim tools`);
   }
 });
+
+test("probeSmartTier - mempertahankan urutan ranking kualitas meski model peringkat bawah merespons lebih cepat", async () => {
+  const candidates = [
+    { id: "probe-a", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-b", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-c", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+  ];
+
+  // Model peringkat pertama (probe-a) sengaja merespons lebih lambat (60ms) daripada model peringkat kedua/ketiga (5ms)
+  const fetch = async (_url, init) => {
+    const { model } = JSON.parse(init.body);
+    if (model === "probe-a") {
+      await new Promise((r) => setTimeout(r, 60));
+    } else {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+  };
+
+  const result = await syncManagedCombos({
+    candidates,
+    probe: true,
+    probeOptions: { testOptions: { fetch } },
+  });
+
+  const smart = result.assembled["zenith-smart"];
+  const idxA = smart.indexOf("probe-a");
+  const idxB = smart.indexOf("probe-b");
+  const idxC = smart.indexOf("probe-c");
+
+  assert.ok(idxA < idxB, "model ranking 1 (probe-a) harus tetap sebelum ranking 2 (probe-b) meski probe lebih lambat");
+  assert.ok(idxB < idxC, "model ranking 2 (probe-b) harus tetap sebelum ranking 3 (probe-c)");
+});

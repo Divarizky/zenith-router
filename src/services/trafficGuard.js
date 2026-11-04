@@ -152,6 +152,7 @@ function getState(connId) {
       inFlight: 0,
       queue: [],
       lastDispatchedAt: 0,
+      nextDispatchSlot: 0,
     });
   }
   return connectionState.get(connId);
@@ -295,16 +296,26 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
 
   // Apply provider-level throttle minimum (e.g. 3s for web session chats)
   // or human-like proactive jitter pacing if previous request just finished (< 250ms ago).
-  if (minThrottleMs > 0 && state.lastDispatchedAt > 0) {
-    const elapsed = Date.now() - state.lastDispatchedAt;
-    if (elapsed < minThrottleMs) {
-      try {
-        await delay(minThrottleMs - elapsed, signal);
-      } catch (err) {
-        releaseAccountSlot(virtualKey || connection.id);
-        releaseProviderSlot();
-        throw err;
+  if (minThrottleMs > 0) {
+    const now = Date.now();
+    if (state.lastDispatchedAt > 0 || state.nextDispatchSlot > 0) {
+      const scheduledSlot = Math.max(
+        now,
+        (state.nextDispatchSlot || state.lastDispatchedAt) + minThrottleMs
+      );
+      state.nextDispatchSlot = scheduledSlot;
+      const waitMs = scheduledSlot - now;
+      if (waitMs > 0) {
+        try {
+          await delay(waitMs, signal);
+        } catch (err) {
+          releaseAccountSlot(virtualKey || connection.id);
+          releaseProviderSlot();
+          throw err;
+        }
       }
+    } else {
+      state.nextDispatchSlot = now;
     }
   } else if (isJitterEnabled && state.lastDispatchedAt > 0) {
     const elapsedSinceLast = Date.now() - state.lastDispatchedAt;

@@ -423,6 +423,33 @@ test("Failover - model without reasoning: drops reasoning_effort, retries once, 
   setCustomExecutor(null);
 });
 
+test("Failover - model rejects reasoning_effort with variant 'feature reasoning_effort for this model is not currently supported'", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });
+
+  const bodies = [];
+  setCustomExecutor({
+    async execute({ body }) {
+      const parsed = JSON.parse(body);
+      bodies.push(parsed);
+      if ("reasoning_effort" in parsed) {
+        return new Response(
+          JSON.stringify({ message: "feature 'reasoning_effort for this model' is not currently supported" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return okCompletion();
+    },
+  });
+
+  const res = await togetherChat("tg/custom-reasoning-model", { reasoning_effort: "high" });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(bodies.length, 2, "gagal pertama, retry kedua tanpa reasoning_effort");
+  assert.ok(!("reasoning_effort" in bodies[1]));
+
+  setCustomExecutor(null);
+});
+
 test("Failover - model refused for the tier by every account is disabled and hidden from /v1/models", async () => {
   initDb(":memory:");
   addConnection({ provider: "together", name: "Together", credentials: { api_key: "tk" } });

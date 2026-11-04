@@ -190,7 +190,11 @@ function classifyModelLevelDenial(res, errText, model, providerName) {
 const reasoningUnsupported = new Set();
 
 function isReasoningRejected(res, errText) {
-  return res.status === 400 && /reasoning_effort is not (enabled|supported)/i.test(errText);
+  return (
+    (res.status === 400 || res.status === 422) &&
+    (/reasoning_effort.*?(?:is\s+)?not\s+(?:currently\s+)?(enabled|supported)/i.test(errText) ||
+      /(?:not\s+support|unsupported).*?reasoning_effort/i.test(errText))
+  );
 }
 
 /**

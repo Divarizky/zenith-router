@@ -105,7 +105,7 @@ const CONTEXT_LIMIT =
   /(?:maximum\s+)?context[\s_-]*length[\s_-]*exceeded|context_length_exceeded|prompt\s+is\s+too\s+long|tokens?\s+exceeds?\s+model\s+window|max_tokens\s+is\s+too\s+large/i;
 
 const UNSUPPORTED_FEATURE =
-  /tools?\s+(?:are\s+|is\s+)?not\s+supported|does\s+not\s+support\s+tools?|function\s+calling\s+(?:is\s+)?not\s+supported|does\s+not\s+support\s+function|system\s+messages?\s+(?:are|is)?\s*not\s+supported|thinking.*?not\s+supported|reasoning_effort.*?not\s+supported|invalid\s+(?:temperature|top_p)\s+for\s+reasoning|unsupported\s+parameter|unsupported\s+field|schema\s+validation|failed\s+schema\s+validation/i;
+  /tool(?:s|\s*calls?|_choice)?.*?(?:is|are)?\s*not\s+(?:currently\s+)?(?:supported|enabled)|(?:does\s+not\s+support|unsupported).*?tool(?:s|\s*calls?|_choice)?|feature\s+['"][^'"]+['"]\s+is\s+not\s+(?:currently\s+)?supported|function\s*(?:calling|calls?).*?(?:is|are)?\s*not\s+(?:currently\s+)?supported|does\s+not\s+support\s+function|system\s+messages?.*?(?:are|is)?\s*not\s+(?:currently\s+)?supported|thinking.*?(?:is\s+)?not\s+(?:currently\s+)?supported|reasoning_effort.*?(?:is\s+)?not\s+(?:currently\s+)?(?:supported|enabled)|(?:not\s+support|unsupported).*?reasoning_effort|invalid\s+(?:temperature|top_p)\s+for\s+reasoning|unsupported\s+parameter|unsupported\s+field|schema\s+validation|failed\s+schema\s+validation/i;
 
 const SAFETY_FILTER =
   /content[-_ ]?filter|content[-_ ]?safety|safety[-_ ]?policy[-_ ]?violation|prompt\s+flagged\s+as\s+sensitive/i;

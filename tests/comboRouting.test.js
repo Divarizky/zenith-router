@@ -195,6 +195,8 @@ test("combo chain - HTTP 400 or 422 with tools unsupported advances to the next 
     { status: 400, message: "system message is not supported" },
     { status: 400, message: "thinking mode is not supported" },
     { status: 422, message: "reasoning_effort parameter is not supported" },
+    { status: 400, message: "feature 'reasoning_effort for this model' is not currently supported" },
+    { status: 400, message: "feature 'tool calls' is not currently supported" },
   ];
 
   for (const { status, message } of testCases) {

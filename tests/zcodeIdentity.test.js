@@ -35,7 +35,7 @@ test("LLM headers generate session, request and trace ids in ZCode formats", () 
   assert.notStrictEqual(buildZcodeLLMHeaders()["x-request-id"], h["x-request-id"], "each call gets a fresh request id");
 });
 
-test("system blocks build three ordered blocks with ephemeral cache on block two", () => {
+test("system blocks build three ordered blocks with ephemeral cache on blocks two and three", () => {
   const blocks = buildZcodeSystemBlocks("Be concise.");
   assert.strictEqual(blocks.length, 3);
   assert.deepStrictEqual(blocks[0], { type: "text", text: identity.cliPrefix });
@@ -44,7 +44,11 @@ test("system blocks build three ordered blocks with ephemeral cache on block two
     text: identity.stablePrefix,
     cache_control: { type: "ephemeral" },
   });
-  assert.deepStrictEqual(blocks[2], { type: "text", text: "\n\nBe concise." });
+  assert.deepStrictEqual(blocks[2], {
+    type: "text",
+    text: "\n\nBe concise.",
+    cache_control: { type: "ephemeral" },
+  });
 });
 
 test("system blocks omit the third block when the client sends no system prompt", () => {

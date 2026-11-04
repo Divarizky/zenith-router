@@ -4,7 +4,7 @@ export default {
   id: "glm",
   // Koneksi dengan plan_token memakai ZCode Start-Plan; tanpa token, executor meneruskan ke jalur PaaS.
   executor: "zcodePlan",
-  name: "Zai GLM Coding",
+  name: "Z.ai GLM Coding",
   alias: ["glm", "zai"],
   category: "oauth",
   keyUrl: "https://z.ai/manage-apikey/apikey-list",

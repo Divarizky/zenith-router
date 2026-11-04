@@ -501,6 +501,11 @@ export function createResponseTransformStream(sourceFormat, targetFormat, model,
                 if (typeof parsed.usage?.cache_creation_input_tokens === "number") {
                   cacheCreationTokens = Math.max(cacheCreationTokens, parsed.usage.cache_creation_input_tokens);
                 }
+                // Upstream Start-Plan mengirim cache_read_input_tokens di message_delta,
+                // bukan di message_start (nilainya 0 di sana). Ambil nilai terbesar.
+                if (typeof parsed.usage?.cache_read_input_tokens === "number") {
+                  cachedInputTokens = Math.max(cachedInputTokens, parsed.usage.cache_read_input_tokens);
+                }
                 if (stopReason) {
                   // OpenAI ordering: finish_reason chunk first (with the real
                   // stop reason), then the final usage chunk (choices: [])

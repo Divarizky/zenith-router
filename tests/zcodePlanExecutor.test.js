@@ -163,3 +163,39 @@ test("without plan_token the request goes to the given PaaS url with the origina
   assert.strictEqual(calls[0].init.headers.get("authorization"), "Bearer paas-key");
   assert.deepStrictEqual(calls[0].body, openAIBody, "body is forwarded without Anthropic translation");
 });
+
+test("model concurrency 3009 is retried in place and a later success is returned", async () => {
+  let n = 0;
+  const { fetchFn, calls } = recordingFetch(() => {
+    n++;
+    return n < 3 ? jsonRes({ code: 3009 }, 400) : jsonRes(okMessage);
+  });
+  const executor = new ZcodePlanExecutor({ fetchFn });
+  const res = await executor.execute({ body: JSON.stringify(openAIBody), connection: planConnection(), targetModel: "glm-5.3" });
+  assert.strictEqual(calls.length, 3);
+  assert.strictEqual(res.status, 200);
+});
+
+test("model concurrency 3009 that persists is reported as 429 after the retry budget", async () => {
+  const { fetchFn, calls } = recordingFetch(() => jsonRes({ code: 3009 }, 400));
+  const executor = new ZcodePlanExecutor({ fetchFn });
+  const res = await executor.execute({ body: JSON.stringify(openAIBody), connection: planConnection(), targetModel: "glm-5.3" });
+  assert.strictEqual(calls.length, 3);
+  assert.strictEqual(res.status, 429);
+  const data = await res.json();
+  assert.strictEqual(data.error.code, 3009);
+});
+
+test("client abort during 3009 backoff stops retrying and rejects with the abort reason", async () => {
+  const controller = new AbortController();
+  const { fetchFn, calls } = recordingFetch(() => {
+    setTimeout(() => controller.abort(new Error("client gone")), 50);
+    return jsonRes({ code: 3009 }, 400);
+  });
+  const executor = new ZcodePlanExecutor({ fetchFn });
+  await assert.rejects(
+    executor.execute({ body: JSON.stringify(openAIBody), connection: planConnection(), targetModel: "glm-5.3", signal: controller.signal }),
+    { message: "client gone" }
+  );
+  assert.strictEqual(calls.length, 1);
+});

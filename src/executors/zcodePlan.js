@@ -12,6 +12,7 @@ const ZCODE_ERROR_CODES = {
   3008: { status: 429, type: "rate_limit_error", message: "Concurrency ZCode Start-Plan melebihi batas (3008)." },
   3009: { status: 429, type: "rate_limit_error", message: "Concurrency ZCode Start-Plan melebihi batas (3009)." },
   1113: { status: 402, type: "insufficient_balance", message: "Saldo ZCode Start-Plan tidak mencukupi." },
+  1005: { status: 429, type: "rate_limit_error", message: "Kuota ZCode Start-Plan habis (1005)." },
 };
 
 function jsonResponse(status, data) {
@@ -28,6 +29,12 @@ function parseJson(text) {
     return null;
   }
 }
+
+// 3009 adalah concurrency model di sisi gateway: sifatnya sementara, jadi
+// dicoba ulang di tempat dengan backoff sebelum dilaporkan sebagai 429.
+const MODEL_CONCURRENCY_CODE = 3009;
+const MODEL_CONCURRENCY_MAX_ATTEMPTS = 3;
+const MODEL_CONCURRENCY_BASE_MS = 1500;
 
 /** Ambil kode error dari bentuk `{ code }` atau `{ error: { code } }`. */
 function zcodeErrorCode(data) {
@@ -184,22 +191,48 @@ export class ZcodePlanExecutor extends BaseExecutor {
       Authorization: `Bearer ${planToken}`,
     };
 
-    const res = await super.execute({
-      url: ZCODE_PLAN_URL,
-      method,
-      headers: requestHeaders,
-      body: JSON.stringify(claudePayload),
-      signal,
-      timeoutMs,
-      proxyUrl,
-    });
+    const sendOnce = () =>
+      super.execute({
+        url: ZCODE_PLAN_URL,
+        method,
+        headers: requestHeaders,
+        body: JSON.stringify(claudePayload),
+        signal,
+        timeoutMs,
+        proxyUrl,
+      });
 
+    let res = await sendOnce();
+    // Retry 3009 hanya untuk respons yang belum dikirim ke klien: body dibaca
+    // dulu, lalu dikembalikan sebagai buffer agar bisa diproses di bawah.
+    for (let attempt = 1; attempt < MODEL_CONCURRENCY_MAX_ATTEMPTS; attempt++) {
+      if (res.ok && !(wantsStream && (res.headers.get("content-type") || "").includes("application/json"))) break;
+      const text = await res.text();
+      const data = parseJson(text);
+      if (zcodeErrorCode(data) !== MODEL_CONCURRENCY_CODE) {
+        res = new Response(text, { status: res.status, headers: res.headers });
+        break;
+      }
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, MODEL_CONCURRENCY_BASE_MS * 2 ** (attempt - 1));
+        signal?.addEventListener?.("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("aborted")); }, { once: true });
+      });
+      res = await sendOnce();
+    }
+
+    const upstreamType = res.headers.get("content-type") || "";
+    // Upstream kadang membalas HTTP 200 dengan body JSON error (mis. code 1005).
+    // Untuk request stream, body JSON bukan SSE: diperlakukan sebagai error.
+    // Untuk non-stream, JSON 200 yang tanpa kode error tetap respons sukses.
     if (!res.ok) {
       const text = await res.text();
       return mapZcodeError(res, text);
     }
+    if (wantsStream && upstreamType.includes("application/json")) {
+      const text = await res.text();
+      return mapZcodeError(res, text);
+    }
 
-    const upstreamType = res.headers.get("content-type") || "";
     const model = targetModel || claudePayload.model;
 
     if (wantsStream || upstreamType.includes("text/event-stream")) {

@@ -18,10 +18,18 @@ test("AGENTIC_MIN_CONTEXT bernilai 100000 (100k token floor)", () => {
 });
 
 test("passesAgenticGate - memfilter model dengan context < 100k token atau tools unsupported", () => {
-  // Model dengan context memadai (>= 100k) dan support tools
-  assert.equal(passesAgenticGate({ id: "model-a", contextLength: 128000, toolsUnsupported: false }), true);
-  assert.equal(passesAgenticGate({ id: "model-b", context_length: 100000 }), true);
-  assert.equal(passesAgenticGate({ id: "model-c", contextWindow: 1000000 }), true);
+  // Model dengan context memadai (>= 100k) dan dukungan tools terverifikasi
+  assert.equal(passesAgenticGate({ id: "model-a", contextLength: 128000, tools: true }), true);
+  assert.equal(passesAgenticGate({ id: "model-b", context_length: 100000, tools: true }), true);
+  assert.equal(passesAgenticGate({ id: "model-c", contextWindow: 1000000, supportsTools: true }), true);
+  assert.equal(
+    passesAgenticGate({ id: "model-caps", contextWindow: 1000000, capabilities: { tools: true } }),
+    true
+  );
+
+  // Fail-closed: tanpa bukti dukungan tools, model ditolak meski context besar
+  assert.equal(passesAgenticGate({ id: "model-unverified", context_length: 100000 }), false);
+  assert.equal(passesAgenticGate({ id: "model-unknown-family", contextWindow: 1000000 }), false);
 
   // Model dengan context < 100k token wajib ditolak
   assert.equal(passesAgenticGate({ id: "model-small-1", contextLength: 32768 }), false);
@@ -40,7 +48,8 @@ test("passesAgenticGate - memfilter model dengan context < 100k token atau tools
 
   // Resolusi via pattern capabilities bawaan
   assert.equal(passesAgenticGate("gpt-3.5-turbo"), false); // context ~16k < 100k
-  assert.equal(passesAgenticGate("claude-3-7-sonnet"), true); // context 1M >= 100k
+  // String id tanpa metadata tools tidak punya bukti tools: fail-closed menolak.
+  assert.equal(passesAgenticGate("claude-3-7-sonnet"), false);
 
   // Input falsy
   assert.equal(passesAgenticGate(null), false);
@@ -112,17 +121,17 @@ test("deriveTierLists - fallback aman menambahkan model dari pool aktif jika tie
 
 test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, zenith-cooldown, dan zenith-vision", () => {
   const candidates = [
-    { id: "ag/claude-3-7-sonnet", owned_by: "llm7", contextLength: 1000000, capabilities: { vision: true } },
-    { id: "ag/gemini-3.1-pro", owned_by: "llm7", contextLength: 1048576, capabilities: { vision: true } },
-    { id: "fb/gpt-4o-mini", owned_by: "llm7", contextLength: 128000, capabilities: { vision: true } },
-    { id: "fb/llama-3-1-8b", owned_by: "llm7", contextLength: 128000, capabilities: { vision: false } },
-    { id: "ag/qwen-2.5-coder-32b", owned_by: "llm7", contextLength: 1000000, capabilities: { vision: false } },
+    { id: "ag/claude-3-7-sonnet", owned_by: "llm7", contextLength: 1000000, capabilities: { vision: true, tools: true } },
+    { id: "ag/gemini-3.1-pro", owned_by: "llm7", contextLength: 1048576, capabilities: { vision: true, tools: true } },
+    { id: "fb/gpt-4o-mini", owned_by: "llm7", contextLength: 128000, capabilities: { vision: true, tools: true } },
+    { id: "fb/llama-3-1-8b", owned_by: "llm7", contextLength: 128000, capabilities: { vision: false, tools: true } },
+    { id: "ag/qwen-2.5-coder-32b", owned_by: "llm7", contextLength: 1000000, capabilities: { vision: false, tools: true } },
     // Model context kecil (tidak lolos agentic gate)
     { id: "provider/old-small-model", owned_by: "llm7", contextLength: 32000 },
     // Model tanpa tools (tidak lolos agentic gate)
     { id: "provider/raw-text-model", owned_by: "llm7", contextLength: 200000, toolsUnsupported: true },
     // Model terkena kuota / rate limit
-    { id: "ag/claude-3-5-sonnet", owned_by: "llm7", contextLength: 200000 },
+    { id: "ag/claude-3-5-sonnet", owned_by: "llm7", contextLength: 200000, capabilities: { tools: true } },
   ];
 
   const latencyMap = {
@@ -174,14 +183,16 @@ test("assembleManagedCombos - merakit zenith-free, zenith-smart, zenith-fast, ze
 
 test("assembleManagedCombos - zenith-vision menerima sinyal vision dari metaMap dan supportsImages", () => {
   const candidates = [
-    { id: "m/vision-via-metaMap", owned_by: "llm7", contextLength: 128000 },
-    { id: "m/vision-via-supportsImages", owned_by: "llm7", contextLength: 128000, supportsImages: true },
-    { id: "m/text-only", owned_by: "llm7", contextLength: 128000 },
+    { id: "m/vision-via-metaMap", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "m/vision-via-supportsImages", owned_by: "llm7", contextLength: 128000, tools: true, supportsImages: true },
+    { id: "m/text-only", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
   ];
 
   const result = assembleManagedCombos({
     candidates,
-    metaMap: new Map([["m/vision-via-metaMap", { id: "m/vision-via-metaMap", capabilities: { vision: true } }]]),
+    metaMap: new Map([
+      ["m/vision-via-metaMap", { id: "m/vision-via-metaMap", capabilities: { tools: true, vision: true } }],
+    ]),
   });
 
   assert.ok(result["zenith-vision"].includes("m/vision-via-metaMap"));
@@ -191,10 +202,10 @@ test("assembleManagedCombos - zenith-vision menerima sinyal vision dari metaMap 
 
 test("assembleManagedCombos - mendeteksi cooldown dari signals 429 atau quotaModels", () => {
   const candidates = [
-    { id: "model-active-1", owned_by: "llm7", contextLength: 128000 },
-    { id: "model-active-2", owned_by: "llm7", contextLength: 128000 },
-    { id: "model-quota-1", owned_by: "llm7", contextLength: 128000 },
-    { id: "model-quota-2", owned_by: "llm7", contextLength: 128000 },
+    { id: "model-active-1", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "model-active-2", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "model-quota-1", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "model-quota-2", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
   ];
 
   const result = assembleManagedCombos({
@@ -216,12 +227,12 @@ test("assembleManagedCombos - mendeteksi cooldown dari signals 429 atau quotaMod
 
 test("saveCombo dan syncManagedCombos - menyimpan dan memperbarui 5 combo ke SQLite", async () => {
   const candidates = [
-    { id: "test-smart-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true } },
-    { id: "test-smart-2", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true } },
-    { id: "test-fast-1", owned_by: "llm7", contextLength: 128000 },
-    { id: "test-fast-2", owned_by: "llm7", contextLength: 128000 },
-    { id: "test-vision-1", owned_by: "llm7", contextLength: 128000, capabilities: { vision: true } },
-    { id: "test-cooldown-1", owned_by: "llm7", contextLength: 128000, status: "quota" },
+    { id: "test-smart-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "test-smart-2", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "test-fast-1", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "test-fast-2", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "test-vision-1", owned_by: "llm7", contextLength: 128000, capabilities: { vision: true, tools: true } },
+    { id: "test-cooldown-1", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true }, status: "quota" },
   ];
 
   const syncResult = await syncManagedCombos({ candidates });
@@ -281,12 +292,48 @@ test("isFreeModel - hanya model dari provider gratis atau berakhiran :free yang 
 
 test("assembleManagedCombos - super-combo hanya memuat model gratis", () => {
   const candidates = [
-    { id: "kcf/ling-3.1", owned_by: "kilo-free", contextLength: 128000 },
-    { id: "claude-3-7-sonnet", owned_by: "claude", contextLength: 200000 },
+    { id: "kcf/ling-3.1", owned_by: "kilo-free", contextLength: 128000, capabilities: { tools: true } },
+    { id: "claude-3-7-sonnet", owned_by: "claude", contextLength: 200000, capabilities: { tools: true } },
   ];
   const result = assembleManagedCombos({ candidates });
   for (const name of ["zenith-free", "zenith-smart", "zenith-fast", "zenith-cooldown"]) {
     assert.equal(result[name].includes("claude-3-7-sonnet"), false, `${name} tidak boleh memuat model berbayar`);
   }
   assert.ok(result["zenith-free"].includes("kcf/ling-3.1"));
+});
+
+test("passesAgenticGate - fail-closed saat bukti tools tidak ada (mencegah lolos dari context besar saja)", () => {
+  // Mencegah regresi: model context besar tanpa bukti tools tidak boleh masuk tier agentic.
+  assert.equal(passesAgenticGate({ id: "no-flag", contextLength: 1000000 }), false);
+  // Sinyal eksplisit tools: false selalu menolak, meski flag positif lain ada.
+  assert.equal(passesAgenticGate({ id: "explicit-no", contextLength: 1000000, tools: true, supportsTools: false }), false);
+});
+
+test("syncManagedCombos - probe mendegradasi model smart yang gagal ke urutan bawah", async () => {
+  const candidates = [
+    { id: "probe-ok-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-dead-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-ok-2", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-ok-3", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+  ];
+  // Mock upstream: model "probe-dead-1" menjawab 404 (dead), sisanya 200.
+  const fetch = async (_url, init) => {
+    const { model } = JSON.parse(init.body);
+    if (model === "probe-dead-1") {
+      return new Response(JSON.stringify({ error: { message: "model not found" } }), { status: 404 });
+    }
+    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+  };
+
+  const result = await syncManagedCombos({
+    candidates,
+    probe: true,
+    probeOptions: { testOptions: { fetch } },
+  });
+
+  const smart = result.assembled["zenith-smart"];
+  assert.ok(smart.includes("probe-dead-1"), "model dead tetap ada di tier, hanya diturunkan");
+  // Di dalam top-N, model dead harus berada setelah model sehat.
+  assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-1"));
+  assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-2"));
 });

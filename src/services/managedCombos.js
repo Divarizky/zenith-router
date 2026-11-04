@@ -6,7 +6,7 @@ import {
   sortModelsByCodingQuality,
 } from "./modelBenchmarks.js";
 import { resolveLiveScores } from "./benchmarkSync.js";
-import { isParkedLatency, QUOTA_LATENCY_SENTINEL } from "./modelHealth.js";
+import { isParkedLatency, QUOTA_LATENCY_SENTINEL, testModelHealth } from "./modelHealth.js";
 import { saveCombo } from "./combos.js";
 
 /**
@@ -58,7 +58,8 @@ export function isExcludedFromManagedCombos(modelMeta) {
 
 /**
  * Memfilter apakah model memenuhi kriteria agentic gate:
- * 1. Mendukung function / tool calling (`toolsUnsupported !== true`).
+ * 1. Memiliki dukungan tool calling terverifikasi (fail-closed: tanpa bukti
+ *    dukungan tools, model ditolak dari tier agentic).
  * 2. Memiliki context length minimal 100.000 token (`AGENTIC_MIN_CONTEXT`).
  */
 export function passesAgenticGate(modelMeta) {
@@ -66,7 +67,11 @@ export function passesAgenticGate(modelMeta) {
 
   const id = toId(modelMeta);
 
-  // 1. Evaluasi Tool Support
+  // 1. Evaluasi Tool Support — fail-closed.
+  //    Sinyal eksplisit "tidak support" menolak; tanpa sinyal positif apa pun
+  //    (flag tools/stored caps/pattern table), model juga ditolak karena
+  //    kegagalan tools di upstream langsung merusak client agentic.
+  let toolsVerified = false;
   if (typeof modelMeta === "object") {
     if (modelMeta.toolsUnsupported === true) return false;
     if (modelMeta.supportsTools === false) return false;
@@ -74,7 +79,11 @@ export function passesAgenticGate(modelMeta) {
     if (modelMeta.capabilities?.tools === false || modelMeta.capabilities?.toolsUnsupported === true) {
       return false;
     }
+    if (modelMeta.supportsTools === true) toolsVerified = true;
+    if (modelMeta.tools === true) toolsVerified = true;
+    if (modelMeta.capabilities?.tools === true) toolsVerified = true;
   }
+  if (!toolsVerified) return false;
 
   // 2. Evaluasi Context Length
   let ctx = null;
@@ -332,13 +341,20 @@ export function assembleManagedCombos({
  * Mengambil kandidat model dari database/katalog, mengevaluasi agentic gate & benchmark,
  * lalu menyimpan atau memperbarui combo zenith-free, zenith-smart, zenith-fast,
  * zenith-cooldown, dan zenith-vision.
+ *
+ * `options.probe` (default true ketika kandidat diambil otomatis) menjalankan
+ * live health probe pada kandidat teratas tier smart: model yang gagal merespons
+ * atau terkena latency sentinel di-degradasi ke urutan bawah, bukan dibiarkan
+ * menempati posisi teratas zenith-smart.
  */
 export async function syncManagedCombos(options = {}) {
   let candidates = options.candidates;
+  let autoCandidates = false;
 
   if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
     try {
       candidates = getAvailableModels({ all: true });
+      autoCandidates = true;
     } catch {
       candidates = [];
     }
@@ -362,13 +378,23 @@ export async function syncManagedCombos(options = {}) {
     signals,
   });
 
+  // Live health probe: uji kandidat teratas smart tier sebelum combo disimpan.
+  // Probe hanya berjalan untuk sync otomatis (scheduler/scheduler startup) atau
+  // saat pemanggil memintanya eksplisit, agar unit test dan pemanggilan manual
+  // tidak menembak upstream.
+  let probed = assembled;
+  const shouldProbe = options.probe ?? autoCandidates;
+  if (shouldProbe) {
+    probed = await probeSmartTier(assembled, options.probeOptions || {});
+  }
+
   const strategy = options.strategy || "fallback";
 
-  const savedFree = saveCombo("zenith-free", assembled["zenith-free"], { strategy, enabled: 1 });
-  const savedSmart = saveCombo("zenith-smart", assembled["zenith-smart"], { strategy, enabled: 1 });
-  const savedFast = saveCombo("zenith-fast", assembled["zenith-fast"], { strategy, enabled: 1 });
-  const savedCooldown = saveCombo("zenith-cooldown", assembled["zenith-cooldown"], { strategy, enabled: 1 });
-  const savedVision = saveCombo("zenith-vision", assembled["zenith-vision"], { strategy, enabled: 1 });
+  const savedFree = saveCombo("zenith-free", probed["zenith-free"], { strategy, enabled: 1 });
+  const savedSmart = saveCombo("zenith-smart", probed["zenith-smart"], { strategy, enabled: 1 });
+  const savedFast = saveCombo("zenith-fast", probed["zenith-fast"], { strategy, enabled: 1 });
+  const savedCooldown = saveCombo("zenith-cooldown", probed["zenith-cooldown"], { strategy, enabled: 1 });
+  const savedVision = saveCombo("zenith-vision", probed["zenith-vision"], { strategy, enabled: 1 });
 
   return {
     ok: true,
@@ -379,7 +405,57 @@ export async function syncManagedCombos(options = {}) {
       "zenith-cooldown": savedCooldown,
       "zenith-vision": savedVision,
     },
-    assembled,
+    assembled: probed,
+  };
+}
+
+/**
+ * Live health probe untuk kandidat teratas zenith-smart.
+ *
+ * Model teratas (maks `PROBE_TOP_N`) ditembak dengan prompt mini via
+ * `testModelHealth`. Model yang gagal (dead) atau terparkir sentinel (quota)
+ * dipindahkan ke urutan paling bawah tier smart, sehingga request klien
+ * tidak langsung membentur model yang sedang tidak sehat. Kegagalan probe
+ * itu sendiri (router belum siap, misalnya) bersifat non-fatal: urutan
+ * awal dipertahankan.
+ */
+const PROBE_TOP_N = 3;
+const PROBE_TIMEOUT_MS = 8000;
+
+async function probeSmartTier(assembled, options = {}) {
+  const smart = [...(assembled["zenith-smart"] || [])];
+  if (smart.length <= 1) return assembled;
+
+  const topN = smart.slice(0, PROBE_TOP_N);
+  const rest = smart.slice(PROBE_TOP_N);
+  const healthy = [];
+  const degraded = [];
+
+  await Promise.all(
+    topN.map(async (id) => {
+      try {
+        const result = await testModelHealth(id, {
+          timeoutMs: options.timeoutMs ?? PROBE_TIMEOUT_MS,
+          ...(options.testOptions || {}),
+        });
+        if (result.ok || result.status === "active") {
+          healthy.push(id);
+        } else {
+          // quota (sentinel) atau dead -> degradasi ke urutan bawah tier
+          degraded.push(id);
+        }
+      } catch {
+        // Probe gagal total: jangan buang modelnya, pertahankan posisi.
+        healthy.push(id);
+      }
+    })
+  );
+
+  const reordered = [...healthy, ...degraded, ...rest];
+  return {
+    ...assembled,
+    "zenith-smart": reordered,
+    zenithSmart: reordered,
   };
 }
 

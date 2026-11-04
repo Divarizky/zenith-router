@@ -26,11 +26,24 @@ import { resolveCapabilities } from "./capabilities.js";
  * clients read capabilities.vision to decide whether image input is allowed and
  * capabilities.reasoning to decide whether reasoning_effort may be sent. A model
  * nobody has data for gets no field at all — better an absent claim than a wrong one.
+ * Satu pengecualian: `capabilities.tools` boleh berasal dari klaim provider
+ * (`providerTools`), karena registry menyatakan providernya melayani tool calling.
  */
-function modelCapabilityFields(modelId, storedCaps = null) {
+function modelCapabilityFields(modelId, storedCaps = null, providerTools = undefined) {
   const caps = storedCaps || resolveCapabilities(modelId, storedCaps);
-  if (!caps) return {};
+
+  // Klaim tool calling datang dari provider (gate agentic), jadi tetap berlaku
+  // meski model tidak punya entri capabilities sama sekali. Override eksplisit
+  // per model (caps.tools === false) selalu menang.
+  let tools;
+  if (caps?.tools === false) tools = false;
+  else if (providerTools === true) tools = true;
+  else if (caps?.tools === true) tools = true;
+
+  if (!caps) return tools === undefined ? {} : { capabilities: { tools } };
+
   const fields = { capabilities: { vision: caps.vision === true, reasoning: caps.reasoning === true } };
+  if (tools !== undefined) fields.capabilities.tools = tools;
   if (caps.contextWindow) fields.context_length = caps.contextWindow;
   if (caps.maxOutput) fields.max_completion_tokens = caps.maxOutput;
   return fields;
@@ -324,7 +337,7 @@ export function getAvailableModels({ all = false } = {}) {
         root: m.id,
         parent: null,
       };
-      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities), thinkingLevelFields(p.id));
+      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities, p.supportsTools === true ? true : undefined), thinkingLevelFields(p.id));
       result.push(entry);
     }
   }
@@ -344,7 +357,7 @@ export function getAvailableModels({ all = false } = {}) {
       parent: null,
       imported: true,
     };
-    Object.assign(entry, modelCapabilityFields(im.model_id), thinkingLevelFields(provider.id));
+    Object.assign(entry, modelCapabilityFields(im.model_id, null, provider.supportsTools === true ? true : undefined), thinkingLevelFields(provider.id));
     result.push(entry);
   }
 

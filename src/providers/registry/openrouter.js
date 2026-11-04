@@ -6,6 +6,9 @@ export default {
   keyUrl: "https://openrouter.ai/keys",
   // /api/v1/models is public; paid models in the list need an API key.
   freeModelSync: "merge",
+  // Model gratis OpenRouter (tag :free) umumnya melayani tool calling;
+  // taxonomi capability per model tidak tersedia, jadi klaimnya per provider.
+  supportsTools: true,
   format: "openai",
   transport: {
     baseUrl: "https://openrouter.ai/api/v1/chat/completions",

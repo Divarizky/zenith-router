@@ -8,6 +8,7 @@ export default {
   // GET /v1/usage reports it. Free models are tagged access_tier: "free" upstream.
   // The public models endpoint allows syncing without an account.
   freeModelSync: "merge",
+  supportsTools: true,
   format: "openai",
   transport: {
     baseUrl: "https://api.xkiro.com/v1/chat/completions",

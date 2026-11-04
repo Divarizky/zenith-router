@@ -4,6 +4,7 @@ export default {
   alias: ["llm7", "l7", "llm7-free"],
   category: "free",
   noAuth: true,
+  supportsTools: true,
   format: "openai",
   transport: {
     baseUrl: "https://api.llm7.io/v1/chat/completions",

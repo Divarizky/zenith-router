@@ -166,10 +166,15 @@ test("GET /v1/models - publishes capabilities and token limits, and omits them w
   assert.deepEqual(gpt.capabilities, { vision: true, reasoning: true });
   assert.equal(gpt.context_length, 1050000);
 
-  const unknown = find("oc/big-pickle");
+  const unknown = find("glm/codegeex-4");
   assert.ok(unknown, "unknown model is still listed");
-  assert.equal(unknown.capabilities, undefined, "unknown models get no capabilities field");
+  assert.equal(unknown.capabilities, undefined, "models without data or provider claim get no capabilities field");
   assert.equal(unknown.context_length, undefined);
+
+  // Klaim tool calling per provider (gate agentic combo) tetap diterbitkan untuk
+  // model yang detail kemampuannya belum diketahui.
+  const claimed = find("oc/big-pickle");
+  assert.deepEqual(claimed.capabilities, { tools: true });
 });
 
 test("GET /v1/models - Antigravity menggabungkan keluarga bawaan dengan inventaris akun", async () => {

@@ -6,6 +6,7 @@ export default {
   alias: ["kcf", "kilo-free"],
   category: "free",
   noAuth: true,
+  supportsTools: true,
   format: "openai",
   transport: {
     baseUrl: "https://api.kilo.ai/api/gateway/chat/completions",

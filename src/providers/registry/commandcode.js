@@ -7,6 +7,7 @@ export default {
   category: "oauth",
   executor: "commandcode",
   format: "openai",
+  supportsTools: true,
   // Model gratis (:free/-free) dari Provider API tersinkron otomatis;
   // impor manual menawarkan mode all saja.
   freeModelSync: "merge",

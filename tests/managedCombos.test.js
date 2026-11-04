@@ -337,3 +337,26 @@ test("syncManagedCombos - probe mendegradasi model smart yang gagal ke urutan ba
   assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-1"));
   assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-2"));
 });
+
+test("combo terkelola terisi dari katalog nyata: klaim tools per provider lolos gate", async () => {
+  const { getAvailableModels } = await import("../src/providers/index.js");
+  const { initDb } = await import("../src/db/index.js");
+  initDb(":memory:");
+  const candidates = getAvailableModels({ all: true });
+
+  // Regresi: gate agentic fail-closed pernah mengosongkan semua combo karena
+  // tidak ada satu pun sumber data yang menerbitkan sinyal tools.
+  assert.ok(candidates.length > 0, "katalog punya model");
+
+  const out = assembleManagedCombos({ candidates });
+  assert.ok(out["zenith-free"].length > 0, "zenith-free tidak boleh kosong");
+  assert.ok(out["zenith-smart"].length > 0, "zenith-smart tidak boleh kosong");
+
+  // Semua model yang lolos harus dari provider yang mengklaim tools, dan
+  // model dari provider tanpa klaim tidak ikut terpilih diam-diam.
+  const { getProvider } = await import("../src/providers/index.js");
+  for (const id of out["zenith-free"]) {
+    const owned = candidates.find((c) => c.id === id)?.owned_by;
+    assert.equal(getProvider(owned)?.supportsTools, true, `${id} harus dari provider berklaim tools`);
+  }
+});

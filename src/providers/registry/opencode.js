@@ -10,6 +10,8 @@ export default {
   alias: ["oc", "opencode"],
   category: "free",
   noAuth: true,
+  // Seluruh katalog live OpenCode melayani tool calling; dipakai gate agentic combo.
+  supportsTools: true,
   // Free models change often upstream; the synced list replaces the one below,
   // which only serves until the first successful sync. The authoritative source
   // is models.opencode.ai/api.json, not the inference gateway's own model list:

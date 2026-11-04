@@ -227,12 +227,14 @@ test("isExcludedFromManagedCombos: provider kiro (kr/) dikeluarkan", () => {
 test("assembleManagedCombos: model kr/ tidak muncul di combo mana pun dan model diurutkan sesuai skor terpadu", () => {
   const candidates = [
     { id: "kr/claude-opus-5.5", owned_by: "kiro", context_length: 200000 },
-    { id: "oc/deepseek-v4.1-flash-free", owned_by: "opencode", context_length: 200000 },
-    { id: "xkr/qwen/qwen3.8-max:free", owned_by: "xkiro", context_length: 200000 },
-    { id: "kcf/inclusionai/ling-3.1-flash-1019-free", owned_by: "kilo-free", context_length: 200000 },
-    { id: "llm7/GLM-5.3-Flash", owned_by: "llm7", context_length: 200000 },
-    { id: "or/nvidia/nemotron-3.5-content-safety:free", owned_by: "openrouter", context_length: 200000 },
+    { id: "oc/deepseek-v4.1-flash-free", owned_by: "opencode", context_length: 200000, capabilities: { tools: true } },
+    { id: "xkr/qwen/qwen3.8-max:free", owned_by: "xkiro", context_length: 200000, capabilities: { tools: true } },
+    { id: "kcf/inclusionai/ling-3.1-flash-1019-free", owned_by: "kilo-free", context_length: 200000, capabilities: { tools: true } },
+    { id: "llm7/GLM-5.3-Flash", owned_by: "llm7", context_length: 200000, capabilities: { tools: true } },
+    { id: "or/nvidia/nemotron-3.5-content-safety:free", owned_by: "openrouter", context_length: 200000, capabilities: { tools: true } },
   ];
+  // Bentuk data mengikuti entry nyata getAvailableModels: model dari provider
+  // dengan supportsTools: true membawa capabilities.tools (klaim per provider).
 
   const liveScores = {
     "oc/deepseek-v4.1-flash-free": { score: 75.2, tier: "A+" },

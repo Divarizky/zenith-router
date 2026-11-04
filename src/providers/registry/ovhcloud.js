@@ -5,6 +5,7 @@ export default {
   category: "free",
   keyUrl: "https://endpoints.ai.cloud.ovh.net",
   noAuth: true,
+  supportsTools: true,
   // Anonymous tier answers /chat/completions without API key (2 req/min per IP).
   // An optional OVHcloud key raises the limit to 400 req/min.
   // Free access is account-level credit, not a per-model free tier, so there

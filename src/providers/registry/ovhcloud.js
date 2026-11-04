@@ -9,6 +9,11 @@ export default {
   // An optional OVHcloud key raises the limit to 400 req/min.
   // Free access is account-level credit, not a per-model free tier, so there
   // is no free-model sync; use Import for the live chat list.
+  // Anonymous tier is capped at 2 req/min per IP, so a virtual (no-auth)
+  // connection must keep a cool-off between dispatches instead of bursting
+  // into consecutive 429s.
+  concurrency: 1,
+  throttleMs: 31_000,
   format: "openai",
   transport: {
     baseUrl: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",

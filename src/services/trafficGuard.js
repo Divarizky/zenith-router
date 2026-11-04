@@ -191,7 +191,18 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
   const isGuardEnabled = getSetting("traffic_guard_enabled", "true") === "true";
   // Virtual (no-auth) connections have no id and skip the concurrency guard, but they
   // still report as in-flight so the router topology shows the provider actually serving.
-  if (!connection.id || !isGuardEnabled) {
+  // When a provider declares a throttle/concurrency guard (e.g. anonymous tiers with strict rate limits),
+  // apply the guard state under the virtual connection identifier.
+  if (!connection.id) {
+    if (!isGuardEnabled) {
+      return enterProviderSlot(connection.provider);
+    }
+    const minThrottleMs = effectiveAccountThrottle(connection);
+    const declaredConcurrency = resolveProviderConcurrency(connection.provider);
+    if (!minThrottleMs && !declaredConcurrency) {
+      return enterProviderSlot(connection.provider);
+    }
+  } else if (!isGuardEnabled) {
     return enterProviderSlot(connection.provider);
   }
 
@@ -214,7 +225,8 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
     ? Math.max(AUX_QUEUE_TIMEOUT_MS, minThrottleMs + 2000, serialTurns ? AUX_SERIAL_QUEUE_TIMEOUT_MS : 0)
     : mainQueueTimeoutMs;
 
-  const state = getState(connection.id);
+  const virtualKey = !connection.id ? `virtual:${connection.provider}` : null;
+  const state = getState(virtualKey || connection.id);
 
   // At the cap, wait in the queue. A waiter is woken by releaseAccountSlot,
   // which hands over its slot without decrementing inFlight, so a request
@@ -289,7 +301,7 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
       try {
         await delay(minThrottleMs - elapsed, signal);
       } catch (err) {
-        releaseAccountSlot(connection.id);
+        releaseAccountSlot(virtualKey || connection.id);
         releaseProviderSlot();
         throw err;
       }
@@ -301,7 +313,7 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
       try {
         await delay(jitterMs, signal);
       } catch (err) {
-        releaseAccountSlot(connection.id);
+        releaseAccountSlot(virtualKey || connection.id);
         releaseProviderSlot();
         throw err;
       }
@@ -315,7 +327,7 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
     if (released) return;
     released = true;
     releaseProviderSlot();
-    releaseAccountSlot(connection.id);
+    releaseAccountSlot(virtualKey || connection.id);
   };
 }
 

@@ -28,9 +28,54 @@ const STRIKE_WINDOW_MS = 10 * 60 * 1000;
 
 const strikes = new Map();
 
+/**
+ * Default cooldown duration for virtual connections when hit with 429/5xx (10 menit).
+ */
+export const VIRTUAL_COOLDOWN_DEFAULT_MS = 10 * 60 * 1000;
+
+const virtualLocks = new Map();
+
+export function virtualLockKey(providerId, modelId = null) {
+  const p = String(providerId || "").toLowerCase();
+  return modelId ? `virtual:${p}:model:${modelId}` : `virtual:${p}`;
+}
+
+export function setVirtualCooldown(providerId, modelId, untilMs) {
+  const key = virtualLockKey(providerId, modelId);
+  const now = Date.now();
+  const current = virtualLocks.get(key) || 0;
+  if (untilMs > current && untilMs > now) {
+    virtualLocks.set(key, untilMs);
+  }
+}
+
+export function getVirtualCooldownUntil(providerId, modelId = null) {
+  const key = virtualLockKey(providerId, modelId);
+  const until = virtualLocks.get(key);
+  if (!until) return null;
+  if (Date.now() >= until) {
+    virtualLocks.delete(key);
+    return null;
+  }
+  return until;
+}
+
+export function isVirtualInCooldown(providerId, modelId = null) {
+  // Provider-wide virtual lock blocks everything on the provider
+  if (getVirtualCooldownUntil(providerId, null)) return true;
+  // Model-level virtual lock
+  if (modelId && getVirtualCooldownUntil(providerId, modelId)) return true;
+  return false;
+}
+
+export function resetVirtualCooldowns() {
+  virtualLocks.clear();
+}
+
 /** `model:<id>` follows the per-model rate limit lock, `account` the account lock. */
 function strikeKey(connection, scope) {
-  return `${connection.id}:${connection.provider || ""}:${scope}`;
+  const idPart = connection?.id ?? `virtual:${connection?.provider || ""}`;
+  return `${idPart}:${connection?.provider || ""}:${scope}`;
 }
 
 function recordStrike(key, requestId, now) {
@@ -51,9 +96,14 @@ function recordStrike(key, requestId, now) {
  * True when this failure is the second one recorded for the account across
  * separate client requests. Pass `modelId` to judge the per-model rate limit
  * lock, or leave it out for the account-wide auth lock.
+ *
+ * For virtual / anonymous connections (connection.id === null), account-wide
+ * parking is skipped, but model-level cooldown can be applied if modelId is provided.
  */
 export function parkThresholdReached(connection, { modelId = null, requestId = null } = {}) {
-  if (!connection?.id) return false;
+  if (!connection?.id) {
+    if (!connection?.provider || !modelId) return false;
+  }
   const scope = modelId ? `model:${modelId}` : "account";
   return recordStrike(strikeKey(connection, scope), requestId, Date.now());
 }

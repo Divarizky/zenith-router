@@ -20,7 +20,15 @@ import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
 import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
-import { ACCOUNT_PARK_MS, clearStrikes, parkThresholdReached } from "./accountCooldown.js";
+import {
+  ACCOUNT_PARK_MS,
+  clearStrikes,
+  parkThresholdReached,
+  setVirtualCooldown,
+  isVirtualInCooldown,
+  getVirtualCooldownUntil,
+  VIRTUAL_COOLDOWN_DEFAULT_MS,
+} from "./accountCooldown.js";
 
 // Callers that run several attempts for one client request pass the same id, so
 // internal retries never count as separate user attempts.
@@ -58,16 +66,18 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   const available = candidates.filter((c) => servesModel(c, request, antigravityInventory));
 
   if (available.length === 0 && providerDef?.noAuth) {
-    available.push({
-      id: null,
-      provider: providerId,
-      name: `${providerDef.name || providerId} (Virtual Free)`,
-      auth_type: "noauth",
-      credentials: {},
-      proxy_url: null,
-      is_active: 1,
-      cooldown_until: 0,
-    });
+    if (!isVirtualInCooldown(providerId, model)) {
+      available.push({
+        id: null,
+        provider: providerId,
+        name: `${providerDef.name || providerId} (Virtual Free)`,
+        auth_type: "noauth",
+        credentials: {},
+        proxy_url: null,
+        is_active: 1,
+        cooldown_until: 0,
+      });
+    }
   }
 
   return available;
@@ -280,6 +290,12 @@ function freeTierModelIds(provider, modelId) {
  */
 function applyRateLimitCooldown(connection, provider, res, errText, modelId, defaultMs) {
   const until = Date.now() + extractQuotaCooldownMs(res, errText, defaultMs);
+  if (!connection?.id) {
+    // Virtual / anonymous connection: apply virtual cooldown at model/provider level (5-15 min, default extracted)
+    const virtualMs = Math.max(5 * 60 * 1000, Math.min(15 * 60 * 1000, until - Date.now() || VIRTUAL_COOLDOWN_DEFAULT_MS));
+    setVirtualCooldown(provider.id, modelId, Date.now() + virtualMs);
+    return;
+  }
   if (res.status === 429 && res.headers?.get?.("x-ratelimit-scope") === "free") {
     for (const id of freeTierModelIds(provider, modelId)) setConnectionCooldown(connection.id, until, id);
     syncProviderQuota(connection, { quiet: true }).catch(() => {});
@@ -701,7 +717,7 @@ export async function executeWithFallback({
       // A transport failure means the path to upstream dropped, not that the
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
-      if (connection.id && !isTransportFailure(res, errText)) {
+      if (!isTransportFailure(res, errText)) {
         if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
           applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000 * attempt);
         }
@@ -766,7 +782,7 @@ export async function executeWithFallback({
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
           // Same rule as the main branch: a soft 429 is contention, so it never
           // locks the account and never counts as a park strike.
-          if (connection.id && !isSoftRateLimitResponse(provider, res) && !isTransportFailure(res, retryErrText)) {
+          if (!isSoftRateLimitResponse(provider, res) && !isTransportFailure(res, retryErrText)) {
             if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
               applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
             }
@@ -831,6 +847,8 @@ export async function executeWithFallback({
       if (lock) cooldownEnds.push(lock);
     }
   }
+  const virtualUntil = getVirtualCooldownUntil(provider.id, modelId) || getVirtualCooldownUntil(provider.id, null);
+  if (virtualUntil && virtualUntil > now) cooldownEnds.push(virtualUntil);
   const retryAfterSec = cooldownEnds.length ? Math.ceil((Math.min(...cooldownEnds) - now) / 1000) : 0;
   let message = `No available connection for provider '${provider.id}'.`;
   if (retryAfterSec) {

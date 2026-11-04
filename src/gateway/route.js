@@ -105,7 +105,7 @@ const CONTEXT_LIMIT =
   /(?:maximum\s+)?context[\s_-]*length[\s_-]*exceeded|context_length_exceeded|prompt\s+is\s+too\s+long|tokens?\s+exceeds?\s+model\s+window|max_tokens\s+is\s+too\s+large/i;
 
 const UNSUPPORTED_FEATURE =
-  /tools?\s+(?:are\s+)?not\s+supported|function\s+calling\s+(?:is\s+)?not\s+supported|system\s+messages?\s+(?:are|is)?\s*not\s+supported|thinking.*?not\s+supported|reasoning_effort.*?not\s+supported/i;
+  /tools?\s+(?:are\s+|is\s+)?not\s+supported|does\s+not\s+support\s+tools?|function\s+calling\s+(?:is\s+)?not\s+supported|does\s+not\s+support\s+function|system\s+messages?\s+(?:are|is)?\s*not\s+supported|thinking.*?not\s+supported|reasoning_effort.*?not\s+supported|invalid\s+(?:temperature|top_p)\s+for\s+reasoning|unsupported\s+parameter|unsupported\s+field|schema\s+validation|failed\s+schema\s+validation/i;
 
 const SAFETY_FILTER =
   /content[-_ ]?filter|content[-_ ]?safety|safety[-_ ]?policy[-_ ]?violation|prompt\s+flagged\s+as\s+sensitive/i;

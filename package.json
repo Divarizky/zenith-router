@@ -1,6 +1,6 @@
 {
   "name": "zenith-router",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Ultra-lightweight personal AI gateway for coding agents, built on Hono and node:sqlite",
   "type": "module",
   "main": "src/index.js",
@@ -23,7 +23,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "setup:bun": "node scripts/ensureBun.js",
-    "postinstall": "node scripts/ensureBun.js || true",
+    "postinstall": "node scripts/ensureBun.js || true; node scripts/ensurePi.js || true",
     "test": "node --test tests/*.test.js"
   },
   "engines": {

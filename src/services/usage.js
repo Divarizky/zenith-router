@@ -91,6 +91,15 @@ export function recordUsage({
       timestamp
     );
 
+    // Prune riwayat usage secara berkala (1 dari 50 request) agar tabel tidak membengkak
+    // Menyimpan maksimum 10.000 entri terbaru atau data dalam 90 hari terakhir
+    if (info.lastInsertRowid % 50 === 0) {
+      try {
+        const pruneThreshold = Date.now() - 90 * 86400 * 1000;
+        db.prepare("DELETE FROM usage_history WHERE timestamp < ?").run(pruneThreshold);
+      } catch {}
+    }
+
     let connName = null;
     if (connId) {
       try {

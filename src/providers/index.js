@@ -60,7 +60,7 @@ export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "
 function thinkingLevelFields(providerId) {
   return providerId === "claude" ? { thinking_levels: [...CLAUDE_OAUTH_THINKING_LEVELS] } : {};
 }
-import { getConnections, getAntigravityInventoryRows } from "../db/index.js";
+import { getConnections, getAntigravityInventoryRows, listCustomProviders } from "../db/index.js";
 import { buildAntigravityFamilies, resolveFamilyRuntime } from "../services/antigravityCatalog.js";
 
 /**
@@ -134,19 +134,82 @@ for (const p of REGISTRY) {
 }
 
 /**
+ * Format a custom provider row from SQLite into a Zenith provider node definition
+ */
+export function formatCustomProviderNode(cp) {
+  if (!cp) return null;
+  const prefix = String(cp.prefix || "").trim().toLowerCase();
+  const apiType = String(cp.api_type || "openai").trim().toLowerCase();
+  const baseUrl = String(cp.base_url || "").trim().replace(/\/+$/, "");
+
+  let customHeaders = {};
+  try {
+    customHeaders = typeof cp.custom_headers === "string" ? JSON.parse(cp.custom_headers || "{}") : (cp.custom_headers || {});
+  } catch {
+    customHeaders = {};
+  }
+
+  const endpointPath = apiType === "claude" ? "/messages" : "/chat/completions";
+  const endpointUrl = baseUrl.endsWith(endpointPath) ? baseUrl : `${baseUrl}${endpointPath}`;
+
+  return {
+    id: String(cp.id),
+    name: cp.name || prefix,
+    alias: [prefix],
+    category: "custom",
+    isCustom: true,
+    format: apiType,
+    supportsTools: true,
+    transport: {
+      baseUrl: endpointUrl,
+      format: apiType,
+      headers: customHeaders,
+    },
+    models: [],
+  };
+}
+
+/**
+ * Retrieve custom providers from DB and format them as provider nodes
+ */
+function getActiveCustomProviderNodes() {
+  try {
+    const rows = listCustomProviders();
+    return rows.map(formatCustomProviderNode).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get provider definition by ID or Alias
  */
 export function getProvider(idOrAlias) {
   if (!idOrAlias) return null;
   const key = String(idOrAlias).toLowerCase();
-  return providerMap.get(key) || aliasMap.get(key) || null;
+
+  const staticDef = providerMap.get(key) || aliasMap.get(key);
+  if (staticDef) return staticDef;
+
+  // Cek apakah cocok dengan id atau prefix custom provider di DB
+  const customNodes = getActiveCustomProviderNodes();
+  for (const node of customNodes) {
+    if (String(node.id).toLowerCase() === key) return node;
+    const aliases = Array.isArray(node.alias) ? node.alias : [node.alias || node.id];
+    for (const a of aliases) {
+      if (String(a).toLowerCase() === key) return node;
+    }
+  }
+
+  return null;
 }
 
 /**
- * Get all registered providers
+ * Get all registered providers (termasuk custom providers dinamis)
  */
 export function getAllProviders() {
-  return REGISTRY;
+  const customNodes = getActiveCustomProviderNodes();
+  return [...REGISTRY, ...customNodes];
 }
 
 /**
@@ -320,7 +383,8 @@ export function getAvailableModels({ all = false } = {}) {
     (Array.isArray(p.alias) ? p.alias : [p.alias || p.id]).some((a) => activeProviders.has(String(a).toLowerCase()));
 
   // Disabled registry models are filtered out.
-  for (const p of REGISTRY) {
+  const allProvidersList = getAllProviders();
+  for (const p of allProvidersList) {
     if (!providerVisible(p)) continue;
     const primaryAlias = Array.isArray(p.alias) ? p.alias[0] : (p.alias || p.id);
 

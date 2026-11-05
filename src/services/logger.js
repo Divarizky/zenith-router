@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 
 const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"];
-const MAX_LOG_LINES = 1000;
+const MAX_LOG_LINES = 250;
 const FLUSH_INTERVAL_MS = 100;
 const MAX_BATCH_LINES = 50;
 const ANSI_RE = /\x1b\[[0-9;]*m/g;

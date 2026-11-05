@@ -36,4 +36,4 @@ npm run typecheck
 ## Batasan
 
 - Belum diuji hidup di dalam sesi Pi yang berjalan. Pengujian di repo ini memakai server HTTP lokal dan fake `ExtensionAPI`.
-- `/v1/models` tidak mengirim metadata model, jadi konteks window, maksimum token, dan kemampuan reasoning memakai nilai konservatif.
+- Gateway Zenith Router mempublikasikan `capabilities` (`vision`, `reasoning`, `tools`), `context_length`, dan `max_completion_tokens` pada `/v1/models`. Jika suatu model kustom tidak memiliki metadata, extension akan menerapkan fallback konservatif.

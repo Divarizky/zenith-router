@@ -255,7 +255,37 @@ const IMPORTERS = {
 };
 
 export function getImporter(providerId) {
-  return IMPORTERS[providerId] || null;
+  if (!providerId) return null;
+  if (IMPORTERS[providerId]) return IMPORTERS[providerId];
+
+  // Dynamic importer untuk custom provider
+  const provider = typeof providerId === "object" ? providerId : getProvider(providerId);
+  if (provider && provider.isCustom) {
+    let baseUrl = provider.transport?.baseUrl || "";
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.pathname.endsWith("/chat/completions")) {
+        parsed.pathname = parsed.pathname.replace(/\/chat\/completions$/, "/models");
+      } else if (parsed.pathname.endsWith("/messages")) {
+        parsed.pathname = parsed.pathname.replace(/\/messages$/, "/models");
+      } else if (!parsed.pathname.endsWith("/models")) {
+        parsed.pathname = parsed.pathname.replace(/\/+$/, "") + "/models";
+      }
+      baseUrl = parsed.toString();
+    } catch {
+      baseUrl = baseUrl.replace(/\/(chat\/completions|messages)$/, "/models");
+    }
+
+    return {
+      url: baseUrl,
+      public: false,
+      useTransportHeaders: true,
+      modes: ["all"],
+      parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: false })),
+    };
+  }
+
+  return null;
 }
 
 /**

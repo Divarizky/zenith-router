@@ -1,6 +1,60 @@
 ## [Unreleased]
 
-## [2.0.0] - 26-10-2026
+### Fitur
+
+- **Pemasangan extension Pi saat `npm install`**:
+  - `scripts/ensurePi.js` dijalankan dari `postinstall` setelah `ensureBun.js`.
+  - Memeriksa Pi lewat `pi --version`, lalu memasang extension `extensions/pi` bila belum terdaftar di `pi list`.
+  - Jika Pi belum terpasang, menawarkan pemasangan `@earendil-works/pi-coding-agent`. Di terminal non-interaktif hanya mencetak perintah manual.
+
+### Dokumentasi
+
+- README.md disusun ulang mengikuti struktur repo open-source umum, dengan tabel provider dan referensi environment variable yang disinkronkan dengan kode.
+- `extensions/pi/README.md`: batasan metadata `/v1/models` diperbarui.
+
+## [2.1.0] - 05-11-2026
+
+Zenith Router v2.1.0 menghadirkan perancangan ulang visual Router Topology bertema Neobrutalism murni dengan arsitektur Stacked Horizon Monolith, integrasi OpenCode Bridge berbasis Bun worker, dukungan ZCode Start-Plan, DLP opt-in, smart super-combos berbasis benchmark kualitas, penguatan keamanan (upgrade verification, izin berkas DB), serta penanganan failover otomatis saat upstream menolak parameter reasoning atau kapabilitas tool calls.
+
+### Fitur
+
+- **Redesign Router Topology (Usage & Kuota)**:
+  - Arsitektur visual Neobrutalism simetris: Zenith Router Core di tengah, diapit cluster Authenticated Providers (atas) dan Keyless & Local Bridges (bawah).
+  - Dedicated Patch Trace: Setiap provider memiliki jalur kabel ortogonal 90° mandiri dengan pin konektor padat di router. Saat 2 atau lebih provider aktif bersamaan, animasi aliran data dan lampu indikator hijau (`var(--success)`) menyala secara independen tanpa saling tumpang tindih.
+  - Kartu provider 3-baris anti-overlap: Nama provider menggunakan 100% lebar kartu terlindungi `<clipPath>`, metrik akun & request di baris kedua, dan footer terisolasi untuk volume token dan badge status (`LIVE`, `LAST`, `IDLE`).
+- **Custom Providers**:
+  - Provider HTTP generik (OpenAI-compatible atau Anthropic-compatible) dapat didaftarkan langsung dari dashboard maupun API, disimpan di tabel SQLite `custom_providers`.
+  - Wire syntax dinamis: model dipanggil lewat prefix sendiri (mis. `lms/llama-3-8b`), ikut terdaftar di `getProvider`, `getAllProviders`, `resolveModel`, dan `getAvailableModels`.
+  - Formulir dashboard untuk tambah dan hapus provider, plus impor daftar model otomatis dari endpoint `${baseUrl}/models` dan tombol uji koneksi.
+- **OpenCode Bridge**:
+  - Runtime worker berbasis Bun (`scripts/ensureBun.js`, `src/services/opencodeBridge/worker.ts`) untuk bypass batasan TLS Cloudflare pada model OpenCode keyless.
+  - Penanganan request streaming dan non-streaming dengan penerusan status error upstream yang transparan.
+- **ZCode Start-Plan (GLM)**:
+  - Penambahan executor `zcodePlan` untuk pemanfaatan kuota harian model GLM ZCode menggunakan `plan_token`.
+  - Pelacakan kuota ganda pada UI: kuota PaaS dan kuota harian Start-Plan per model.
+- **Data Loss Prevention (DLP)**:
+  - Filter opt-in di pengaturan untuk redaksi otomatis kredensial, token API, dan private key pada payload keluar.
+- **Smart Super-Combos**:
+  - Penyusunan otomatis super-combo cerdas berbasis benchmark empiris kualitas koding dan heuristik kapabilitas model.
+  - Integrasi provider keyless baru: `kilo-free` dan `llm7`.
+- **Integrasi Pi Agent Extension**:
+  - Ekspor modul root pada `pi-setup` untuk integrasi mulus dengan harness agent Pi.
+
+### Perbaikan & Keamanan
+
+- **Penanganan Error Fitur Upstream pada Combos**:
+  - Failover otomatis ke anggota combo berikutnya ketika upstream menolak fitur `reasoning_effort` (HTTP 400/422).
+  - Failover otomatis ketika upstream menolak kapabilitas `tool calls` atau `tool_choice`.
+- **Hardening Keamanan & Upgrade**:
+  - Mekanisme upgrade tag git kini memverifikasi hash commit terhadap aset `release-manifest.json` di GitHub Release (fail-closed, bypass `ZENITH_UPGRADE_SKIP_PIN=1`).
+  - Pengetatan izin akses berkas SQLite (`chmod 0o600`) pada database utama `zenith.db`, WAL, SHM, dan hasil backup VACUUM.
+  - Akuntabilitas token pada request yang dibatalkan klien melalui hook `cancel()` di `TransformStream`.
+  - Pembatasan parameter rentang hari riwayat usage (clamped ke 1–365 hari).
+- **Stabilitas Gateway & Relay**:
+  - Perbaikan kebocoran slot concurrency, perbaikan urutan ranking probe, dan perlindungan race condition pada throttle akun.
+  - Cooldown model terisolasi per model pada koneksi anonim.
+  - Perbaikan pairing `tool_use` pada riwayat pesan Claude dan pembersihan entri null pada riwayat sebelum dikirim ke upstream.
+  - Penanganan thinking Claude melalui prefix `cc/` dengan konfigurasi level per model.
 
 Zenith Router v2.0.0 menyatukan tema dashboard neo-brutalism (putih dan pastel), tema gelap dengan toggle, perapihan topologi Usage & Kuota, endpoint uji koneksi provider, prompt cache Claude, serta perbaikan router, relay gateway, dan streaming.
 

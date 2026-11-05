@@ -6,6 +6,8 @@ import {
   getConnectionById,
   updateConnection,
   getProxyPoolById,
+  createCustomProvider,
+  deleteCustomProvider,
 } from "../../db/index.js";
 import { getAllProviders, getProvider, getProviderModels } from "../../providers/index.js";
 import { isConnectionFullyCooledDown } from "../../services/auth.js";
@@ -48,6 +50,7 @@ import { getSetting, setSetting, deleteSetting } from "../../services/settings.j
 import { getProviderIconPath } from "../assets.js";
 
 const SECTIONS = [
+  { category: "custom", title: "Custom Providers", hint: "Endpoint kustom OpenAI / Anthropic-compatible (Local LLM, LM Studio, vLLM, self-hosted, dll)." },
   { category: "session", title: "Session Providers", hint: "Butuh token sesi dari browser yang sudah login, bukan API key. Pemakaian tidak resmi berisiko pembatasan atau pemblokiran akun." },
   { category: "oauth", title: "OAuth Providers", hint: "Login dengan akun langganan, lalu tempel token di sini." },
   { category: "free", title: "Free Tier Providers", hint: "Provider gratis. Yang berlabel Siap bisa dipakai tanpa akun." },
@@ -81,6 +84,10 @@ const IMPORT_MODE_LABELS = {
 
 /** Fixed notice texts keyed by the result code in the redirect query; never echo raw input. */
 function importNotice(query = {}) {
+  if (query.notice === "custom_provider_added") return { ok: true, text: "Custom provider berhasil ditambahkan." };
+  if (query.notice === "custom_provider_deleted") return { ok: true, text: "Custom provider berhasil dihapus." };
+  if (query.notice === "custom_provider_invalid") return { ok: false, text: "Gagal: Nama, Prefix unik, dan Base URL wajib diisi dengan benar." };
+  if (query.notice === "custom_provider_conflict") return { ok: false, text: "Gagal: Prefix sudah dipakai oleh provider lain." };
   if (query.notice === "test_ok") {
     return { ok: true, text: query.msg ? `Koneksi berhasil: ${escapeHtml(String(query.msg))}` : "Koneksi berhasil." };
   }
@@ -362,15 +369,58 @@ export function renderProvidersPage(port = 20120, query = {}) {
   }).join("");
 
   const tabBar = `
-    <div class="page-tabs">
-      <a class="page-tab ${activeTab === "providers" ? "active" : ""}" href="/dashboard/providers">Providers</a>
-      <a class="page-tab ${activeTab === "combos" ? "active" : ""}" href="/dashboard/providers?tab=combos">Combos</a>
+    <div class="page-tabs" style="display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; gap: 8px;">
+        <a class="page-tab ${activeTab === "providers" ? "active" : ""}" href="/dashboard/providers">Providers</a>
+        <a class="page-tab ${activeTab === "combos" ? "active" : ""}" href="/dashboard/providers?tab=combos">Combos</a>
+      </div>
+      <div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('add-custom-provider-modal')">+ Custom Provider</button>
+      </div>
+    </div>`;
+
+  const addCustomProviderModal = `
+    <div class="modal-backdrop" id="add-custom-provider-modal">
+      <div class="modal">
+        <h3>Tambah Custom Provider</h3>
+        <form action="/dashboard/providers/custom/add" method="POST">
+          <div class="field">
+            <label for="cp-name">Nama Provider</label>
+            <input type="text" id="cp-name" name="name" placeholder="contoh: LM Studio Local, Private vLLM" required />
+          </div>
+          <div class="field">
+            <label for="cp-prefix">Prefix Model (Wire Syntax)</label>
+            <input type="text" id="cp-prefix" name="prefix" placeholder="contoh: lms, vllm, local" required pattern="[a-zA-Z0-9_-]+" />
+            <p class="hint">Prefix untuk memanggil model, misal <code>lms/&lt;model&gt;</code>.</p>
+          </div>
+          <div class="field">
+            <label for="cp-base-url">Base URL</label>
+            <input type="url" id="cp-base-url" name="base_url" placeholder="http://127.0.0.1:1234/v1" required />
+            <p class="hint">URL endpoint API root (misal <code>http://127.0.0.1:1234/v1</code> atau <code>https://api.mistral.ai/v1</code>).</p>
+          </div>
+          <div class="field">
+            <label for="cp-api-type">Tipe Protokol API</label>
+            <select id="cp-api-type" name="api_type">
+              <option value="openai">OpenAI Compatible (/chat/completions)</option>
+              <option value="claude">Anthropic Compatible (/messages)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cp-headers">Custom Headers (Opsional, Format JSON)</label>
+            <input type="text" id="cp-headers" name="custom_headers" placeholder='{"X-Custom-Header": "value"}' />
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn" data-close-modal="add-custom-provider-modal">Batal</button>
+            <button type="submit" class="btn btn-primary">Simpan Provider</button>
+          </div>
+        </form>
+      </div>
     </div>`;
 
   const content =
     activeTab === "combos"
       ? tabBar + renderCombosContent(query)
-      : tabBar + sections;
+      : tabBar + sections + addCustomProviderModal;
 
   return renderLayout({
     title:
@@ -1056,7 +1106,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           ${providerIconHtml(p, 40)}
           <div class="provider-text">
             <h3 style="font-size: 1.1rem;">${escapeHtml(p.name)}</h3>
-            <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : p.category === "session" ? "Sesi Browser" : "API Key"}</p>
+            <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "custom" ? "Custom" : p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : p.category === "session" ? "Sesi Browser" : "API Key"}</p>
           </div>
         </div>
         ${statusPill(p, stats, accounts)}
@@ -1071,6 +1121,16 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
           : ""
       }
       ${p.keyUrl ? `<p class="hint" style="margin-top: 10px;">${keyLink(p, p.noAuth ? "Buat API key (opsional)" : "Buat API key")}</p>` : ""}
+      ${
+        p.isCustom
+          ? `<div style="margin-top: 12px; padding-top: 10px; border-top: var(--bw) solid var(--line);">
+              <form action="/dashboard/providers/custom/delete" method="POST" data-confirm="Hapus custom provider ini beserta semua akun dan modelnya?">
+                <input type="hidden" name="provider" value="${id}" />
+                <button type="submit" class="btn btn-danger btn-sm">Hapus Custom Provider</button>
+              </form>
+            </div>`
+          : ""
+      }
       <p class="hint" style="margin-top: 6px; font-size: var(--text-xs);">Data traffic & slot difetch pada ${trafficUpdated} WIB. Segarkan halaman untuk memperbarui.</p>
     </div>
 
@@ -1519,3 +1579,64 @@ export async function handleEnableModel(c) {
   const countParam = ids.length > 1 ? `&count=${ids.length}` : "";
   return c.redirect(`${backTo(provider.id)}?notice=model_enabled${countParam}`);
 }
+
+export async function handleAddCustomProvider(c) {
+  const body = await c.req.parseBody();
+  const name = String(body.name || "").trim();
+  const prefix = String(body.prefix || "").trim().toLowerCase();
+  const baseUrl = String(body.base_url || "").trim();
+  const apiType = String(body.api_type || "openai").trim().toLowerCase();
+  const customHeaders = String(body.custom_headers || "").trim();
+
+  if (!name || !prefix || !baseUrl) {
+    return c.redirect("/dashboard/providers?notice=custom_provider_invalid");
+  }
+
+  // Cek apakah prefix sudah dipakai oleh provider statis atau custom lain
+  const existing = getProvider(prefix);
+  if (existing) {
+    return c.redirect("/dashboard/providers?notice=custom_provider_conflict");
+  }
+
+  try {
+    let headersObj = {};
+    if (customHeaders) {
+      try {
+        headersObj = JSON.parse(customHeaders);
+      } catch {
+        // jika bukan JSON valid, abaikan
+      }
+    }
+
+    const created = createCustomProvider({
+      id: `cp_${prefix}`,
+      name,
+      prefix,
+      baseUrl,
+      apiType: apiType === "claude" ? "claude" : "openai",
+      customHeaders: headersObj,
+    });
+
+    if (!created) {
+      return c.redirect("/dashboard/providers?notice=custom_provider_invalid");
+    }
+
+    return c.redirect(`/dashboard/providers/${encodeURIComponent(created.id)}?notice=custom_provider_added`);
+  } catch (err) {
+    return c.redirect("/dashboard/providers?notice=custom_provider_invalid");
+  }
+}
+
+export async function handleDeleteCustomProvider(c) {
+  const body = await c.req.parseBody();
+  const providerId = String(body.provider || "").trim();
+  const provider = getProvider(providerId);
+
+  if (!provider || !provider.isCustom) {
+    return c.redirect("/dashboard/providers");
+  }
+
+  deleteCustomProvider(provider.id);
+  return c.redirect("/dashboard/providers?notice=custom_provider_deleted");
+}
+

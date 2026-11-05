@@ -223,6 +223,17 @@ CREATE TABLE IF NOT EXISTS model_sync_state (
   count INTEGER NOT NULL DEFAULT 0,
   error TEXT
 );
+
+-- Custom provider nodes (OpenAI/Anthropic compatible endpoints with custom prefix and base URL)
+CREATE TABLE IF NOT EXISTS custom_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL UNIQUE,
+  base_url TEXT NOT NULL,
+  api_type TEXT NOT NULL DEFAULT 'openai',
+  custom_headers TEXT DEFAULT '{}',
+  created_at INTEGER NOT NULL
+);
 `;
 
 /**
@@ -251,7 +262,12 @@ export function initDb(dbPath = null) {
 
   if (effectivePath !== ":memory:") {
     try {
-      db.exec("PRAGMA journal_mode = WAL;");
+      db.exec(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA cache_size = -500;
+        PRAGMA wal_autocheckpoint = 100;
+        PRAGMA synchronous = NORMAL;
+      `);
     } catch {}
     // Berisi kredensial provider: hanya pemilik yang boleh membaca. WAL/SHM yang dibuat setelah init belum tercakup.
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -316,6 +332,17 @@ function migrateSchema(db) {
   if (comboColumns.length && !comboColumns.some((col) => col.name === "updated_at")) {
     db.exec("ALTER TABLE combos ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0");
   }
+
+  // Ensure custom_providers table exists on older databases
+  db.exec(`CREATE TABLE IF NOT EXISTS custom_providers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL UNIQUE,
+    base_url TEXT NOT NULL,
+    api_type TEXT NOT NULL DEFAULT 'openai',
+    custom_headers TEXT DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  );`);
 
   // Move model-scoped locks written by the previous single-column design
   // (connections.cooldown_model) into the per-pair table, then drop the column.
@@ -817,3 +844,75 @@ export function updateProxyPool(id, fields) {
 export function removeProxyPool(id) {
   getDb().prepare("DELETE FROM proxy_pools WHERE id = ?").run(Number(id));
 }
+
+/**
+ * Custom provider nodes registry
+ */
+export function listCustomProviders() {
+  return getDb().prepare("SELECT * FROM custom_providers ORDER BY created_at ASC").all();
+}
+
+export function getCustomProviderById(id) {
+  if (!id) return null;
+  return getDb().prepare("SELECT * FROM custom_providers WHERE id = ?").get(String(id)) || null;
+}
+
+export function getCustomProviderByPrefix(prefix) {
+  if (!prefix) return null;
+  return getDb().prepare("SELECT * FROM custom_providers WHERE LOWER(prefix) = LOWER(?)").get(String(prefix)) || null;
+}
+
+export function createCustomProvider({ id, name, prefix, baseUrl, apiType = "openai", customHeaders = "{}" }) {
+  const db = getDb();
+  const cleanId = String(id || `cp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const cleanPrefix = String(prefix || cleanId).trim().toLowerCase();
+  const cleanName = String(name || cleanPrefix).trim();
+  const cleanBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
+  const cleanApiType = String(apiType || "openai").trim().toLowerCase();
+  const cleanHeaders = typeof customHeaders === "string" ? customHeaders : JSON.stringify(customHeaders || {});
+
+  db.prepare(
+    `INSERT INTO custom_providers (id, name, prefix, base_url, api_type, custom_headers, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(cleanId, cleanName, cleanPrefix, cleanBaseUrl, cleanApiType, cleanHeaders, Date.now());
+
+  return getCustomProviderById(cleanId);
+}
+
+export function updateCustomProvider(id, fields = {}) {
+  const current = getCustomProviderById(id);
+  if (!current) return null;
+  const db = getDb();
+
+  const name = fields.name !== undefined ? String(fields.name).trim() : current.name;
+  const prefix = fields.prefix !== undefined ? String(fields.prefix).trim().toLowerCase() : current.prefix;
+  const baseUrl = fields.baseUrl !== undefined ? String(fields.baseUrl).trim().replace(/\/+$/, "") : current.base_url;
+  const apiType = fields.apiType !== undefined ? String(fields.apiType).trim().toLowerCase() : current.api_type;
+  const customHeaders =
+    fields.customHeaders !== undefined
+      ? (typeof fields.customHeaders === "string" ? fields.customHeaders : JSON.stringify(fields.customHeaders || {}))
+      : current.custom_headers;
+
+  db.prepare(
+    `UPDATE custom_providers
+     SET name = ?, prefix = ?, base_url = ?, api_type = ?, custom_headers = ?
+     WHERE id = ?`
+  ).run(name, prefix, baseUrl, apiType, customHeaders, String(id));
+
+  return getCustomProviderById(id);
+}
+
+export function deleteCustomProvider(id) {
+  if (!id) return false;
+  const current = getCustomProviderById(id);
+  if (!current) return false;
+
+  const db = getDb();
+  // Hapus provider, serta hapus koneksi dan imported/custom model yang memakai provider id ini
+  db.prepare("DELETE FROM custom_providers WHERE id = ?").run(String(id));
+  db.prepare("DELETE FROM connections WHERE provider = ?").run(String(id));
+  db.prepare("DELETE FROM imported_models WHERE provider = ?").run(String(id));
+  db.prepare("DELETE FROM custom_models WHERE provider = ?").run(String(id));
+  return true;
+}
+

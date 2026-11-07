@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
+import { fileURLToPath } from "node:url";
 import {
   generateOpencodeSessionId,
   prepareOpenCodePayload,
@@ -424,6 +425,16 @@ test("opencode bridge - findBunBinary detects Windows bun.exe in AppData or .bun
     execFn: () => "C:\\Program Files\\bun\\bun.exe\r\n",
   });
   assert.strictEqual(foundPath, "C:\\Program Files\\bun\\bun.exe");
+});
+
+test("opencode bridge - bridge script path resolves valid cross-platform path", () => {
+  // URL standard dengan path Windows drive letter dan spasi
+  const fakeWinUrl = "file:///C:/Users/User%20Name/zenith-router/src/services/opencodeBridge.js";
+  const resolved = fileURLToPath(new URL("../bridge/opencode-bridge.js", fakeWinUrl), { windows: true });
+
+  assert.strictEqual(resolved.includes("%20"), false, "URL encoding must be decoded");
+  assert.strictEqual(resolved.startsWith("/C:"), false, "Must not have leading forward-slash before Windows drive letter");
+  assert.match(resolved, /C:[/\\]Users[/\\]User Name[/\\]zenith-router[/\\]src[/\\]bridge[/\\]opencode-bridge\.js/);
 });
 
 test("opencode bridge - installBunSoft handles offline/failed installer softly without throwing", () => {

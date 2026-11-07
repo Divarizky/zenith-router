@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { spawn, execSync } from "node:child_process";
 import { captureLine } from "./logger.js";
 import {
@@ -145,12 +146,12 @@ export async function startOpencodeBridgeService({
     return { ok: false, error: "bun_not_found" };
   }
 
-  const bridgeScript = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    "../bridge/opencode-bridge.js"
+  const bridgeScript = fileURLToPath(
+    new URL("../bridge/opencode-bridge.js", import.meta.url)
   );
 
   if (!fs.existsSync(bridgeScript)) {
+    if (!silent) captureLine(`[opencode-bridge] Bridge script not found at ${bridgeScript}`);
     return { ok: false, error: "bridge_script_not_found" };
   }
 
@@ -183,7 +184,7 @@ export async function startOpencodeBridgeService({
 
     return { ok: false, error: "bridge_startup_timeout" };
   } catch (err) {
-    captureLine(`[opencode-bridge] Failed to start bridge: ${err.message}`);
+    if (!silent) captureLine(`[opencode-bridge] Failed to start bridge: ${err.message}`);
     return { ok: false, error: err.message };
   }
 }

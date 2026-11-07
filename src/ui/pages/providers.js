@@ -48,6 +48,7 @@ import {
 import { escapeHtml } from "../html.js";
 import { getSetting, setSetting, deleteSetting } from "../../services/settings.js";
 import { getProviderIconPath } from "../assets.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 const SECTIONS = [
   { category: "custom", title: "Custom Providers", hint: "Endpoint kustom OpenAI / Anthropic-compatible (Local LLM, LM Studio, vLLM, self-hosted, dll)." },
@@ -304,7 +305,8 @@ function sessionHealthCell(connection) {
 /**
  * Providers list: cards grouped by category, each linking to its detail page.
  */
-export function renderProvidersPage(port = 20120, query = {}) {
+export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const activeTab = query.tab === "combos" ? "combos" : "providers";
   const connections = getConnections();
   const byProvider = new Map();
@@ -419,19 +421,20 @@ export function renderProvidersPage(port = 20120, query = {}) {
 
   const content =
     activeTab === "combos"
-      ? tabBar + renderCombosContent(query)
+      ? tabBar + renderCombosContent(query, currentLang)
       : tabBar + sections + addCustomProviderModal;
 
   return renderLayout({
     title:
       activeTab === "combos"
-        ? "Combos"
+        ? (currentLang === "en" ? "Model Combos" : "Combos")
         : activeTab === "proxy"
-          ? "Proxy — Zenith Router"
-          : "Providers",
+          ? (currentLang === "en" ? "Proxy Pools — Zenith Router" : "Proxy — Zenith Router")
+          : (currentLang === "en" ? "Providers & Accounts" : "Providers"),
     activeTab: "providers",
     content,
     port,
+    lang: currentLang,
   });
 }
 
@@ -897,7 +900,8 @@ function accountIdentityCell(c) {
  * Provider detail: accounts, models (built-in + custom) with enable/disable.
  * Returns null when the provider id is unknown.
  */
-export function renderProviderDetailPage(port, idOrAlias, query = {}) {
+export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const p = getProvider(idOrAlias);
   if (!p) return null;
   const importModes = getImportModes(p);
@@ -1301,7 +1305,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}) {
     </div>
   `;
 
-  return renderLayout({ title: p.name, activeTab: "providers", content, port });
+  return renderLayout({ title: p.name, activeTab: "providers", content, port, lang: currentLang });
 }
 
 /** Manual paste: an API key, or a token the provider's login would normally produce. */

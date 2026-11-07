@@ -1,6 +1,7 @@
-import { getAllSettings, setSetting } from "../../services/settings.js";
+import { getAllSettings, setSetting, getSetting } from "../../services/settings.js";
 import { renderLayout, icon } from "../layout.js";
 import { escapeHtml } from "../html.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { getBindHost, isLoopbackHost } from "../../security.js";
 import { countActiveApiKeys } from "../../services/apiKeys.js";
 import { listCombos } from "../../services/combos.js";
@@ -83,8 +84,10 @@ function sectionCard({ id, iconName, title, hint, rows }) {
 /**
  * Render Settings Control page
  */
-export function renderSettingsPage(port = 20120, query = {}) {
+export function renderSettingsPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const settings = getAllSettings();
+  const uiLang = getSetting("ui_language", currentLang);
 
   const isRequireAuth = settings.require_api_key === "true";
   const comboHoldCount = settings.combo_round_robin_count || "1";
@@ -126,6 +129,26 @@ export function renderSettingsPage(port = 20120, query = {}) {
         : ""
     }
     <form action="/dashboard/settings" method="POST">
+      ${sectionCard({
+        id: "general",
+        iconName: "gear",
+        title: currentLang === "en" ? "General &amp; Appearance" : "Umum &amp; Tampilan",
+        hint: currentLang === "en" ? "Interface preferences and language settings." : "Preferensi antarmuka dan pengaturan bahasa.",
+        rows: `
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>${currentLang === "en" ? "Dashboard Language" : "Bahasa Dashboard"}</strong>
+            <p class="hint">${currentLang === "en" ? "Web dashboard interface language." : "Bahasa tampilan antarmuka web dashboard."}</p>
+          </div>
+          <div class="setting-action">
+            <select name="ui_language" class="input-select" style="min-width: 180px;">
+              <option value="id" ${uiLang === "id" ? "selected" : ""}>Bahasa Indonesia</option>
+              <option value="en" ${uiLang === "en" ? "selected" : ""}>English</option>
+            </select>
+          </div>
+        </div>`,
+      })}
+
       ${sectionCard({
         id: "access",
         iconName: "key",
@@ -331,10 +354,11 @@ export function renderSettingsPage(port = 20120, query = {}) {
   `;
 
   return renderLayout({
-    title: "Settings",
+    title: currentLang === "en" ? "Settings" : "Pengaturan",
     activeTab: "settings",
     content,
     port,
+    lang: currentLang,
   });
 }
 
@@ -356,6 +380,7 @@ export async function handleSaveSettings(c) {
   const comboHoldCount = String(Math.max(1, Math.trunc(Number(body.combo_round_robin_count) || 1)));
   const fallbackModel = String(body.default_fallback_model || "").trim();
   const rawDlpMode = String(body.dlp_mode || "").toLowerCase().trim();
+  const rawUiLang = String(body.ui_language || "").toLowerCase().trim();
   const tokenSaverRtk = body.token_saver_rtk === "true" || body.token_saver_rtk === "on" ? "true" : "false";
   const tokenSaverCaveman = body.token_saver_caveman === "true" || body.token_saver_caveman === "on" ? "true" : "false";
 
@@ -378,6 +403,16 @@ export async function handleSaveSettings(c) {
   setSetting("default_fallback_model", fallbackModel);
   if (rawDlpMode === "off" || rawDlpMode === "redact" || rawDlpMode === "block") {
     setSetting("dlp_mode", rawDlpMode);
+  }
+  if (rawUiLang === "id" || rawUiLang === "en") {
+    setSetting("ui_language", rawUiLang);
+    const { setCookie } = await import("hono/cookie");
+    setCookie(c, "zr_lang", rawUiLang, {
+      path: "/",
+      maxAge: 31536000,
+      httpOnly: false,
+      sameSite: "Lax",
+    });
   }
   if (body.token_saver_rtk !== undefined) {
     setSetting("token_saver_rtk", tokenSaverRtk);

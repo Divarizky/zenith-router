@@ -11,6 +11,7 @@ import {
 import { getAllProviders } from "../../providers/index.js";
 import { escapeHtml } from "../html.js";
 import { renderLayout, icon } from "../layout.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 function fmtTestTime(ms) {
   const d = new Date(ms);
@@ -360,7 +361,8 @@ export function renderProxyContent(query = {}) {
   `;
 }
 
-export function renderProxiesPage(port = 20120, query = {}) {
+export function renderProxiesPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const content = renderProxyContent(query);
   const extraScripts = `
 <script>
@@ -376,11 +378,12 @@ export function renderProxiesPage(port = 20120, query = {}) {
 </script>
 `;
   return renderLayout({
-    title: "Proxy Pools",
+    title: currentLang === "en" ? "Proxy Pools" : "Pool Proxy",
     activeTab: "proxies",
     content,
     port,
     extraScripts,
+    lang: currentLang,
   });
 }
 

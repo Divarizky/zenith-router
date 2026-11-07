@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html.js";
 import { THEME_TOKENS_CSS } from "../theme.js";
+import { resolveLanguage, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import {
   buildSessionCookieClearHeader,
   buildSessionCookieHeader,
@@ -40,7 +41,9 @@ export function renderDashboardLoginPage({
   remaining = null,
   lockout = false,
   retryAfter = 0,
+  lang = DEFAULT_LANGUAGE,
 } = {}) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const safeNext = sanitizeAdminNext(next);
   const isAdminMode = isAdminProtected();
   const showDefaultHint = isUsingDefaultPassword() && !isAdminMode;
@@ -48,16 +51,16 @@ export function renderDashboardLoginPage({
 
   let alertHtml = "";
   if (lockout) {
-    alertHtml = `<div class="alert alert-danger" role="alert">Terlalu banyak percobaan gagal. Coba lagi dalam <strong>${escapeHtml(retryAfter)} detik</strong>.</div>`;
+    alertHtml = `<div class="alert alert-danger" role="alert">${currentLang === "en" ? "Too many failed attempts. Try again in" : "Terlalu banyak percobaan gagal. Coba lagi dalam"} <strong>${escapeHtml(retryAfter)} ${currentLang === "en" ? "seconds" : "detik"}</strong>.</div>`;
   } else if (error) {
-    const attemptsText = remaining !== null ? ` Sisa ${escapeHtml(remaining)} percobaan sebelum terkunci.` : "";
+    const attemptsText = remaining !== null ? (currentLang === "en" ? ` ${escapeHtml(remaining)} attempts remaining.` : ` Sisa ${escapeHtml(remaining)} percobaan sebelum terkunci.`) : "";
     alertHtml = `<div class="alert alert-danger" role="alert">${escapeHtml(error)}.${attemptsText}</div>`;
   } else if (showDefaultHint) {
-    alertHtml = `<div class="alert alert-info">Password awal: <code>${escapeHtml(DEFAULT_INITIAL_PASSWORD)}</code>. Ganti lewat menu Settings setelah masuk.</div>`;
+    alertHtml = `<div class="alert alert-info">${currentLang === "en" ? "Initial password:" : "Password awal:"} <code>${escapeHtml(DEFAULT_INITIAL_PASSWORD)}</code>. ${currentLang === "en" ? "Change it in Settings after logging in." : "Ganti lewat menu Settings setelah masuk."}</div>`;
   }
 
   return `<!DOCTYPE html>
-<html lang="id">
+<html lang="${escapeHtml(currentLang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -84,10 +87,11 @@ export function renderDashboardLoginPage({
       color: var(--text);
       line-height: 1.5;
       min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 1.5rem;
+      padding: clamp(0.75rem, 4vw, 1.5rem);
     }
     code {
       background: var(--surface-2); padding: 0.15rem 0.4rem; border-radius: 0;
@@ -95,12 +99,12 @@ export function renderDashboardLoginPage({
       font-size: 0.82rem; color: var(--text);
     }
     .login-card {
-      width: 100%; max-width: 360px;
+      width: 100%; max-width: 380px;
       background: var(--surface);
       border: 2px solid var(--text);
       border-radius: 0;
       box-shadow: var(--hard);
-      padding: 1.5rem;
+      padding: clamp(1rem, 4vw, 1.75rem);
     }
     .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
     .brand img { width: 36px; height: 36px; border-radius: 0; object-fit: cover; display: block; }
@@ -173,7 +177,7 @@ export function handleDashboardLoginPage(c) {
   if (!required || alreadyAuth) {
     return c.redirect(next);
   }
-  return c.html(renderDashboardLoginPage({ next }), 200);
+  return c.html(renderDashboardLoginPage({ next, lang: resolveLanguage(c) }), 200);
 }
 
 /**
@@ -188,9 +192,10 @@ export async function handleDashboardLogin(c) {
 
   // Periksa apakah IP sedang terkunci oleh limiter
   const lock = checkLoginLock(clientId);
+  const lang = resolveLanguage(c);
   if (lock.locked) {
     return c.html(
-      renderDashboardLoginPage({ next, lockout: true, retryAfter: lock.retryAfter }),
+      renderDashboardLoginPage({ next, lockout: true, retryAfter: lock.retryAfter, lang }),
       429
     );
   }
@@ -228,7 +233,7 @@ export async function handleDashboardLogin(c) {
   const fail = recordLoginFailure(clientId);
   if (fail.locked) {
     return c.html(
-      renderDashboardLoginPage({ next, lockout: true, retryAfter: fail.retryAfter }),
+      renderDashboardLoginPage({ next, lockout: true, retryAfter: fail.retryAfter, lang }),
       429
     );
   }
@@ -236,7 +241,12 @@ export async function handleDashboardLogin(c) {
   // Jika proteksi admin aktif, kembalikan 403 Forbidden dengan pesan token admin salah
   if (isAdminProtected()) {
     return c.html(
-      renderDashboardLoginPage({ next, error: "Token admin salah", remaining: fail.remaining }),
+      renderDashboardLoginPage({
+        next,
+        error: lang === "en" ? "Invalid admin token" : "Token admin salah",
+        remaining: fail.remaining,
+        lang,
+      }),
       403
     );
   }
@@ -245,8 +255,9 @@ export async function handleDashboardLogin(c) {
   return c.html(
     renderDashboardLoginPage({
       next,
-      error: "Password salah",
+      error: lang === "en" ? "Invalid password" : "Password salah",
       remaining: fail.remaining,
+      lang,
     }),
     401
   );

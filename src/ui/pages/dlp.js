@@ -1,8 +1,10 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
 import { dlpModeFrom } from "../../services/dlp.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
-export function renderDlpPage(port = 20120, query = {}) {
+export function renderDlpPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const settings = getAllSettings();
   const currentMode = dlpModeFrom(settings);
   const isSaved = query.saved === "1" || query.saved === "true";
@@ -52,7 +54,7 @@ export function renderDlpPage(port = 20120, query = {}) {
     </div>
   `;
 
-  return renderLayout({ title: "DLP", activeTab: "dlp", content, port });
+  return renderLayout({ title: "DLP", activeTab: "dlp", content, port, lang: currentLang });
 }
 
 export async function handleSaveDlp(c) {

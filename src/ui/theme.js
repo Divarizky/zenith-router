@@ -109,5 +109,9 @@ export const LAYOUT_TOKENS_CSS = `
   --leading: 1.55;
   /* Target sentuh minimal 44x44 px pada layar sempit. */
   --touch-min: 44px;
+  /* Shell responsif: lebar sidebar, padding halaman, dan batas konten di layar ultrawide. */
+  --sidebar-w: 256px;
+  --page-pad: clamp(0.9rem, 0.6rem + 1.1vw, 2.25rem);
+  --content-max: 1720px;
 }
 `;

@@ -7,6 +7,7 @@ import {
 import { isApiKeyRequired, getLocalBaseUrl } from "../../security.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 function formatTime(ms) {
   if (!ms) return `<span style="color: var(--text-muted);">belum pernah</span>`;
@@ -36,7 +37,8 @@ function renderNewKeyNotice(newKey, port) {
 /**
  * Render API Keys page. `newKey` is passed only right after creation.
  */
-export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
+export function renderApiKeysPage(port = 20120, newKey = null, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const keys = listApiKeys();
   const required = isApiKeyRequired();
   const activeCount = keys.filter((k) => k.is_active === 1).length;
@@ -154,6 +156,7 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}) {
     activeTab: "keys",
     content,
     port,
+    lang: currentLang,
   });
 }
 

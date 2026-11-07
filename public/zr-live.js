@@ -68,6 +68,10 @@
       return;
     }
     var scrollY = window.scrollY;
+    // Drawer mobile harus tertutup setelah navigasi, termasuk saat halaman diganti tanpa reload.
+    document.body.classList.remove("nav-open");
+    var navToggle = document.querySelector(".sidebar-toggle");
+    if (navToggle) navToggle.setAttribute("aria-expanded", "false");
     runCleanups();
     if (doc.title) document.title = doc.title;
     currentMain.innerHTML = nextMain.innerHTML;

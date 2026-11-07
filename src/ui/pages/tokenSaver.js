@@ -1,7 +1,9 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
-export function renderTokenSaverPage(port = 20120, query = {}) {
+export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const settings = getAllSettings();
   const isRtkEnabled = settings.token_saver_rtk !== "false";
   const isCavemanEnabled = settings.token_saver_caveman === "true";
@@ -51,7 +53,7 @@ export function renderTokenSaverPage(port = 20120, query = {}) {
     </div>
   `;
 
-  return renderLayout({ title: "Token Saver", activeTab: "tokensaver", content, port });
+  return renderLayout({ title: "Token Saver", activeTab: "tokensaver", content, port, lang: currentLang });
 }
 
 export async function handleSaveTokenSaver(c) {

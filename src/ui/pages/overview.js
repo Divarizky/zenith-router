@@ -8,11 +8,13 @@ import { isFreeModel } from "../../services/managedCombos.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getLocalBaseUrl } from "../../security.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 /**
  * Render Overview Dashboard page with Live Console Logs and Bento HUD
  */
-export function renderOverviewPage(port = 20120) {
+export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const connections = getConnections();
   const activeCount = connections.filter(
     (c) => (c.is_active !== 0) && !isConnectionFullyCooledDown(c) && !isConnectionExhausted(c)
@@ -232,8 +234,8 @@ export function renderOverviewPage(port = 20120) {
 
     <!-- Live Console Log Card -->
     <div class="card console-log-card" style="padding: 0; overflow: hidden; margin-bottom: 2rem;">
-      <div class="window-header window-header-blue" style="flex-wrap: wrap;" aria-label="Console Log">
-        <div style="display: flex; align-items: center; gap: 0.65rem;">
+      <div class="window-header window-header-blue" style="flex-wrap: wrap; gap: 0.5rem;" aria-label="Console Log">
+        <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
           <span class="window-title" style="color: #ffffff; font-weight: 900;">CONSOLE.LOG</span>
           <span id="log-status" class="pill pill-success" style="font-size: var(--text-xs); border: 1.5px solid #000000; box-shadow: 2px 2px 0 #000000;">
             <span class="dot dot-success" style="width:6px;height:6px;"></span>
@@ -241,12 +243,12 @@ export function renderOverviewPage(port = 20120) {
           </span>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 0.6rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
           <input
             type="text"
             id="log-filter"
             placeholder="Saring log..."
-            style="width: 160px; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface); color: var(--text); border: 1.5px solid #000000; box-shadow: 2px 2px 0 #000000;"
+            style="width: 140px; max-width: 100%; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface); color: var(--text); border: 1.5px solid #000000; box-shadow: 2px 2px 0 #000000;"
             oninput="applyLogFilter()"
           />
           <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: #ffffff; font-weight: 800; cursor: pointer; user-select: none;">
@@ -554,9 +556,10 @@ export function renderOverviewPage(port = 20120) {
   `;
 
   return renderLayout({
-    title: "Overview",
+    title: currentLang === "en" ? "Overview" : "Ringkasan",
     activeTab: "overview",
     content,
     port,
+    lang: currentLang,
   });
 }

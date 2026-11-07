@@ -10,11 +10,13 @@ import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getProviderIconPath } from "../assets.js";
 import { buildAntigravityFamilies, familyFromDisplayName, LEVEL_DISPLAY_ORDER } from "../../services/antigravityCatalog.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 /**
  * Render Usage Analytics and Quota page
  */
-export function renderUsagePage(port = 20120, query = {}) {
+export function renderUsagePage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const stats = getUsageStats({ days: 30 });
   // Hide accounts whose provider exposes no quota data. Fetcher-backed accounts stay
   // until they have been synced (so Sync is reachable) or when they report an error.
@@ -125,7 +127,12 @@ function renderTopologyPane(topology) {
         .recent-panel { grid-column: 1; grid-row: 3; width: 100%; }
       }
       .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-      @media (max-width: 760px) { .quota-grid { grid-template-columns: minmax(0, 1fr); } }
+      @media (max-width: 760px) {
+        .quota-grid { grid-template-columns: minmax(0, 1fr); }
+        /* Peta topologi tetap terbaca di ponsel: kanvas dipertahankan lebarnya, wadahnya yang di-scroll. */
+        .topology-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .topology-canvas { min-width: 620px; }
+      }
       .quota-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 var(--shadow-ink); }
       .q-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--logo-tile); border: var(--bw) solid var(--line); font-size: var(--text-xs); font-weight: 800; color: var(--text); }
@@ -1231,6 +1238,7 @@ function renderQuotaCard(s, antigravityInventory = null) {
     activeTab: "usage",
     content,
     port,
+    lang: currentLang,
     extraScripts: `<script>
     (function () {
       var body = document.getElementById("recent-body");

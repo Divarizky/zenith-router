@@ -58,6 +58,7 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · OpenRouter · BYOP..
 - **Live Quota Scraper (10 Provider):** Memantau sisa kuota, jendela batas pemakaian (5 jam, harian, mingguan), dan waktu reset akun secara akurat tanpa perlu membuka situs provider.
 - **Data Loss Prevention (DLP):** Redaksi dan sensor otomatis kredensial, kunci API, dan token privat sebelum meninggalkan mesin Anda.
 - **Zero-Overhead Token Saver:** Pemadatan prompt otomatis menggunakan algoritma RTK dan mode Caveman opsional untuk menghemat konsumsi token konteks.
+- **Dukungan Multi-Language (ID & EN):** Antarmuka web dashboard mendukung dwi-bahasa (Bahasa Indonesia dan English) dengan tombol switcher cepat di sidebar atau melalui menu Pengaturan.
 - **Web Dashboard & Admin Security:** Dilengkapi antarmuka Web modern dengan dark/light theme, visualisasi kuota, audit log penggunaan, dan proteksi login password / admin token.
 
 ---
@@ -159,6 +160,12 @@ Fitur Combos memungkinkan Anda membuat alias virtual yang menggabungkan beberapa
 * **RTK (Repetitive Token Killer):** Algoritma pemadatan prompt cerdas untuk memangkas duplikasi dan histori berulang tanpa mengurangi akurasi model.
 * **Mode Caveman:** Pemadatan agresif untuk prompt yang sangat panjang guna menghemat kuota dan mempercepat respon upstream.
 * Dapat dimatikan per-request menggunakan header HTTP `x-zenith-token-saver: false`.
+
+### Multi-Language Dashboard (Indonesia & Inggris)
+Zenith Router mendukung peralihan bahasa antarmuka secara instan:
+* **Tombol Cepat:** Klik tombol switcher `EN` / `ID` di bagian bawah sidebar untuk beralih bahasa.
+* **Pengaturan Permanen:** Pilih preferensi bahasa pada menu **Settings → General & Appearance** (tersimpan di SQLite dan cookie `zr_lang`).
+* **Query Parameter:** Tambahkan `?lang=id` atau `?lang=en` pada URL untuk melihat tampilan dalam bahasa tertentu tanpa mengubah setting permanen.
 
 ---
 

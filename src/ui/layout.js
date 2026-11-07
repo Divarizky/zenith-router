@@ -1,16 +1,17 @@
 import { escapeHtml } from "./html.js";
 import { THEME_TOKENS_CSS, LAYOUT_TOKENS_CSS } from "./theme.js";
 import { isUsingDefaultPassword } from "../services/dashboardAuth.js";
+import { t, DEFAULT_LANGUAGE } from "./i18n/index.js";
 // Versi sidebar dibaca dari package.json, sama dengan banner CLI dan User-Agent upstream.
 import pkg from "../../package.json" with { type: "json" };
 
-const NAV = [
-  { id: "overview", label: "Overview", href: "/dashboard", icon: "home" },
-  { id: "providers", label: "Providers & Combos", href: "/dashboard/providers", icon: "link" },
-  { id: "proxies", label: "Proxy Pools", href: "/dashboard/proxies", icon: "lan" },
-  { id: "usage", label: "Usage & Quota", href: "/dashboard/usage", icon: "chart" },
-  { id: "keys", label: "API Keys", href: "/dashboard/keys", icon: "key" },
-  { id: "settings", label: "Settings", href: "/dashboard/settings", icon: "gear" },
+const NAV_ITEMS = [
+  { id: "overview", key: "nav.overview", href: "/dashboard", icon: "home" },
+  { id: "providers", key: "nav.providers", href: "/dashboard/providers", icon: "link" },
+  { id: "proxies", key: "nav.proxies", href: "/dashboard/proxies", icon: "lan" },
+  { id: "usage", key: "nav.usage", href: "/dashboard/usage", icon: "chart" },
+  { id: "keys", key: "nav.api_keys", href: "/dashboard/keys", icon: "key" },
+  { id: "settings", key: "nav.settings", href: "/dashboard/settings", icon: "gear" },
 ];
 
 const ICONS = {
@@ -33,6 +34,8 @@ const ICONS = {
   check: '<polyline points="20 6 9 17 4 12"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
+  close: '<path d="M6 6l12 12"/><path d="M18 6 6 18"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
 };
 
@@ -57,17 +60,18 @@ export function capabilityIcons(capabilities) {
   return `<span class="cap-icons" aria-label="Kemampuan model">${badges.join("")}</span>`;
 }
 
-export function renderLayout({ title = "Zenith Router", activeTab = "overview", content = "", port = 20120, extraScripts = "" }) {
-  const navHtml = NAV.map(
-    (t) => `
-      <a href="${t.href}" class="nav-link ${t.id === activeTab ? "active" : ""}"${t.id === activeTab ? ' aria-current="page"' : ""}>
-        ${icon(t.icon)}
-        <span>${t.label}</span>
+export function renderLayout({ title = "Zenith Router", activeTab = "overview", content = "", port = 20120, extraScripts = "", lang = DEFAULT_LANGUAGE }) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
+  const navHtml = NAV_ITEMS.map(
+    (item) => `
+      <a href="${item.href}" class="nav-link ${item.id === activeTab ? "active" : ""}"${item.id === activeTab ? ' aria-current="page"' : ""}>
+        ${icon(item.icon)}
+        <span>${t(item.key, {}, currentLang)}</span>
       </a>`
   ).join("");
 
   return `<!DOCTYPE html>
-<html lang="id">
+<html lang="${escapeHtml(currentLang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -105,24 +109,27 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .app-shell {
       display: flex;
       min-height: 100vh;
+      min-height: 100dvh;
       width: 100%;
       background: var(--bg);
     }
     .sidebar {
-      width: 256px;
-      min-width: 256px;
-      max-width: 256px;
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      max-width: var(--sidebar-w);
       background: var(--surface);
       border-right: var(--bw-thick) solid var(--line);
       position: sticky;
       top: 0;
       height: 100vh;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
       padding: 1.25rem 1rem 1rem;
       box-sizing: border-box;
       z-index: 50;
       overflow-y: auto;
+      overscroll-behavior: contain;
     }
     .sidebar-header {
       margin-bottom: 1.25rem;
@@ -298,8 +305,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .main-header {
       background: var(--surface);
       border-bottom: var(--bw-thick) solid var(--line);
-      margin: 0 -2.25rem 1.75rem -2.25rem;
-      padding: 1rem 2.25rem;
+      margin: 0 calc(var(--page-pad) * -1) 1.75rem calc(var(--page-pad) * -1);
+      padding: 1rem var(--page-pad);
       box-shadow: 0 2px 0 var(--shadow-ink);
     }
     .main-header .topbar {
@@ -307,12 +314,15 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1rem;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
     }
     .main-header-title {
       display: flex;
       flex-direction: column;
       gap: 0.2rem;
+      min-width: 0;
+      flex: 1 1 auto;
     }
     .main-header-title .crumb {
       margin-bottom: 0;
@@ -330,9 +340,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     }
     .main-header-title h2 {
       margin: 0;
-      font-size: 1.35rem;
+      font-size: clamp(1.1rem, 1rem + 0.35vw, 1.35rem);
       font-weight: 900;
       letter-spacing: -0.02em;
+      overflow-wrap: anywhere;
     }
     .main-header-status {
       display: flex;
@@ -345,7 +356,35 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       border: var(--bw) solid var(--line);
       box-shadow: 2px 2px 0 var(--shadow-ink);
     }
-    .main { min-width: 0; padding: 0 2.25rem 5rem; }
+    .main { min-width: 0; width: 100%; max-width: var(--content-max); margin-inline: auto; padding: 0 var(--page-pad) 5rem; }
+    .sidebar-toggle {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: var(--touch-min);
+      height: var(--touch-min);
+      flex-shrink: 0;
+      padding: 0;
+      background: var(--surface);
+      color: var(--text);
+      border: var(--bw) solid var(--line);
+      box-shadow: var(--hard-sm);
+      cursor: pointer;
+    }
+    .sidebar-toggle:hover { background: var(--surface-2); }
+    .sidebar-toggle:active { transform: translate(2px, 2px); box-shadow: none; }
+    .sidebar-toggle .icon-close { display: none; }
+    body.nav-open .sidebar-toggle .icon-menu { display: none; }
+    body.nav-open .sidebar-toggle .icon-close { display: inline-flex; }
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      background: rgba(10, 10, 10, 0.55);
+      border: none;
+      padding: 0;
+    }
     /* Window bar retro: judul, indikator, dan kontrol _ □ ✕ */
     .window-header { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.5rem 0.75rem; background: var(--accent); color: #ffffff; border-bottom: var(--bw) solid var(--line); }
     .window-header-lime { background: var(--accent-lime, #ccff00); color: #000000; border-bottom: var(--bw) solid #000000; }
@@ -778,7 +817,9 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 
     /* ===== Tabel ===== */
     table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); border: var(--bw) solid var(--line); background: var(--surface); }
-    .card:has(> table) { overflow-x: auto; }
+    .card:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .card:has(table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 1rem; }
     th, td { padding: var(--space-2) var(--space-3); line-height: var(--leading); text-align: left; vertical-align: middle; border-bottom: var(--bw) solid var(--border-subtle); }
     /* Header tabel: permukaan sedikit lebih gelap dari badan tabel, teks mengikuti tema. */
     th { color: var(--text); background: var(--surface-3); font-weight: 800; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.07em; border-bottom: var(--bw) solid var(--line); }
@@ -1083,36 +1124,87 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .stat .sub { color: var(--text-subtle); font-size: var(--text-xs); margin-top: 0.2rem; }
 
     /* ===== Responsif ===== */
-    @media (max-width: 860px) {
-      .main { padding: 0 1rem 4rem; }
-      .main-header { margin: 0 -1rem 1.25rem -1rem; padding: 0.85rem 1rem; }
-      /* Target sentuh interaktif minimal 44x44 px pada layar sempit. */
-      .btn, .btn-sm, .btn-icon, .nav-link, .btn-ghost { min-height: var(--touch-min); min-width: var(--touch-min); }
-      .btn-sm { padding: 0.5rem 0.9rem; }
+    @media (max-width: 1200px) {
+      .sidebar-user { display: none; }
+      .main-header { margin: 0 calc(var(--page-pad) * -1) 1.25rem calc(var(--page-pad) * -1); padding: 0.85rem var(--page-pad); }
+    }
+    @media (max-width: 900px) {
+      .bento-split-grid { grid-template-columns: 1fr; }
+      .main { padding: 0 var(--page-pad) 4rem; }
       .setting-row { flex-direction: column; align-items: stretch; gap: 0.6rem; }
       .setting-action .input-select { width: 100%; }
-      .setting-stack { width: 100%; }
       .settings-actions { flex-direction: column-reverse; align-items: stretch; }
       .settings-actions .btn { width: 100%; }
     }
+    @media (max-width: 860px) {
+      /* Target sentuh interaktif minimal 44x44 px pada layar tablet dan ponsel. */
+      .btn, .btn-sm, .btn-icon, .nav-link, .btn-ghost { min-height: var(--touch-min); min-width: var(--touch-min); }
+      .btn-sm { padding: 0.5rem 0.9rem; }
+      .setting-stack { width: 100%; }
+    }
     @media (max-width: 768px) {
       .app-shell { flex-direction: column; }
-      .sidebar {
-        width: 100%; min-width: 100%; max-width: 100%; height: auto; position: sticky; top: 0;
-        border-right: none; border-bottom: var(--bw-thick) solid var(--line);
-        padding: 0.6rem 1rem; gap: 0.5rem; box-shadow: 0 2px 0 var(--shadow-ink);
+      .main-content { overflow: visible; }
+      body.nav-open { overflow: hidden; }
+      body.nav-open .sidebar-backdrop { display: block; }
+      .main-header {
+        position: sticky; top: 0; z-index: 60;
+        margin: 0 calc(var(--page-pad) * -1) 1rem calc(var(--page-pad) * -1);
+        padding: 0.6rem var(--page-pad);
       }
-      .sidebar-header { margin-bottom: 0; }
+      .sidebar-toggle { display: flex; }
+      .sidebar {
+        position: fixed; top: 0; left: 0; height: 100vh; height: 100dvh;
+        width: var(--sidebar-w); max-width: 85vw;
+        transform: translateX(-100%); transition: transform 0.25s ease-out;
+        border-right: var(--bw-thick) solid var(--line); border-bottom: none;
+        box-shadow: 4px 0 0 var(--shadow-ink);
+      }
+      body.nav-open .sidebar { transform: translateX(0); }
       .sidebar-nav {
-        flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch;
-        gap: 0.35rem; padding-bottom: 0.25rem;
+        flex-direction: column; overflow-x: visible; overflow-y: auto;
+        gap: 0.25rem; padding-bottom: 0;
       }
       .sidebar-footer {
-        flex-direction: row; align-items: center; justify-content: space-between;
-        margin-top: 0; padding-top: 0.5rem; border-top: var(--bw) solid var(--border-subtle);
+        flex-direction: column; align-items: stretch; justify-content: center;
+        margin-top: auto; padding-top: 0.75rem; border-top: var(--bw) solid var(--border-subtle);
+        gap: 0.5rem;
       }
       .sidebar-status { display: none; }
-      .sidebar-actions { width: 100%; justify-content: space-between; }
+      .sidebar-actions { width: 100%; justify-content: center; gap: 0.5rem; }
+      .sidebar-actions form, .sidebar-actions button { width: 100%; }
+      .main-header-title h2 { font-size: 1.1rem; }
+      .nav-link { padding: 0.5rem 0.65rem; font-size: var(--text-sm); }
+    }
+    @media (max-width: 640px) {
+      .brand-text h1 { font-size: 0.85rem; }
+      .brand small { font-size: var(--text-xs); }
+      .main-header-status { display: none; }
+      .stat .value { font-size: 1.4rem; }
+      .quota-grid { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .btn-row { flex-direction: column; }
+      .btn-row .btn { width: 100%; }
+      .proxy-row { flex-direction: column; align-items: stretch; gap: 0.5rem; padding: 0.75rem 0; }
+      .proxy-actions { justify-content: flex-end; }
+    }
+    @media (max-width: 480px) {
+      :root { --sidebar-w: 280px; }
+      .sidebar { max-width: 90vw; }
+      .main { padding: 0 var(--page-pad) 3rem; }
+      .card { padding: 1rem; margin-bottom: 1rem; }
+      .window-header { flex-wrap: wrap; }
+      .window-controls { order: -1; }
+      table { font-size: var(--text-xs); }
+      th, td { padding: 0.5rem 0.4rem; }
+    }
+    @media (max-width: 380px) {
+      :root { --sidebar-w: 260px; --page-pad: 0.75rem; }
+      .brand { gap: 0.4rem; }
+      .brand-logo { width: 28px; height: 28px; }
+      .brand-text h1 { font-size: 0.8rem; }
+      .nav-link span { display: none; }
+      .nav-link { justify-content: center; padding: 0.5rem; }
     }
 
     /* ===== Toast hasil aksi & tombol sibuk ===== */
@@ -1153,7 +1245,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
+    <button type="button" class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true" tabindex="-1"></button>
+    <aside class="sidebar" id="sidebar" role="navigation" aria-label="Navigasi utama">
       <div class="sidebar-header">
         <div class="brand">
           <img src="/logo.png" alt="Zenith Router" class="brand-logo" width="36" height="36" />
@@ -1170,12 +1263,18 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
           <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
         </div>
         <div class="sidebar-actions">
+          <form action="/dashboard/language" method="POST" style="display:inline;">
+            <input type="hidden" name="lang" value="${currentLang === "id" ? "en" : "id"}">
+            <button type="submit" class="btn btn-secondary btn-sm" title="${currentLang === "id" ? "Switch to English" : "Ganti ke Bahasa Indonesia"}">
+              ${currentLang === "id" ? "EN" : "ID"}
+            </button>
+          </form>
           <button type="button" class="btn btn-secondary btn-icon" id="theme-toggle" aria-label="Ubah tema" title="Ubah tema">
             <span class="theme-icon theme-icon-moon">${icon("moon")}</span>
             <span class="theme-icon theme-icon-sun">${icon("sun")}</span>
           </button>
           <form action="/dashboard/logout" method="POST">
-            <button type="submit" class="btn btn-danger btn-sm" title="Logout">Keluar</button>
+            <button type="submit" class="btn btn-danger btn-sm" title="${escapeHtml(t("common.logout", {}, currentLang))}">${escapeHtml(t("common.logout", {}, currentLang))}</button>
           </form>
         </div>
       </div>
@@ -1184,6 +1283,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       <main class="main">
         <header class="main-header">
           <div class="topbar">
+            <button type="button" class="sidebar-toggle" aria-label="Toggle navigasi" aria-expanded="false" aria-controls="sidebar">
+              <span class="icon-menu">${icon("menu", 20)}</span>
+              <span class="icon-close">${icon("close", 20)}</span>
+            </button>
             <div class="main-header-title">
               <div class="crumb"><a href="/dashboard">Zenith Router</a> / <strong>${escapeHtml(title)}</strong></div>
               <h2>${escapeHtml(title)}</h2>
@@ -1272,6 +1375,36 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       if (e.key === 'Escape') {
         document.querySelectorAll('.modal-backdrop.open').forEach(function(m) { m.classList.remove('open'); });
       }
+    });
+
+    // Toggle drawer sidebar untuk mobile.
+    var sidebarToggle = document.querySelector ? document.querySelector('.sidebar-toggle') : null;
+    var sidebarBackdrop = document.getElementById('sidebar-backdrop');
+    var sidebar = document.getElementById('sidebar');
+    function closeNav() {
+      if (document.body && document.body.classList) document.body.classList.remove('nav-open');
+      if (sidebarToggle) sidebarToggle.setAttribute('aria-expanded', 'false');
+      if (sidebar) sidebar.setAttribute('aria-hidden', 'true');
+    }
+    function openNav() {
+      if (document.body && document.body.classList) document.body.classList.add('nav-open');
+      if (sidebarToggle) sidebarToggle.setAttribute('aria-expanded', 'true');
+      if (sidebar) sidebar.setAttribute('aria-hidden', 'false');
+      // Fokus ke link pertama di sidebar untuk aksesibilitas.
+      var firstLink = sidebar && sidebar.querySelector ? sidebar.querySelector('.nav-link') : null;
+      if (firstLink) setTimeout(function() { firstLink.focus(); }, 100);
+    }
+    if (sidebarToggle) {
+      sidebarToggle.addEventListener('click', function() {
+        var isOpen = document.body.classList.contains('nav-open');
+        (isOpen ? closeNav : openNav)();
+      });
+    }
+    if (sidebarBackdrop) {
+      sidebarBackdrop.addEventListener('click', closeNav);
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && document.body.classList.contains('nav-open')) closeNav();
     });
 
     // Row selection: checkboxes share data-select-group; data-select-all toggles the group,

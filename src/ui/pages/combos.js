@@ -9,6 +9,7 @@ import {
   listCombos,
 } from "../../services/combos.js";
 import { escapeHtml } from "../html.js";
+import { DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 // The chain is ordered under fallback and rotates under round-robin.
 const STRATEGY_OPTIONS = [
@@ -186,7 +187,8 @@ function renderMasterItem(combo, isSelected) {
     </a>`;
 }
 
-export function renderCombosContent(query = {}) {
+export function renderCombosContent(query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const combos = listCombos();
 
   const notice =
@@ -304,20 +306,20 @@ export function renderCombosContent(query = {}) {
         gap: 1.25rem;
         align-items: flex-start;
       }
-      @media (max-width: 860px) {
+      @media (max-width: 1080px) {
         .combos-layout {
           flex-direction: column;
         }
       }
       .combos-master-pane {
-        flex: 0 0 340px;
-        width: 340px;
+        flex: 0 0 clamp(240px, 26vw, 340px);
+        width: clamp(240px, 26vw, 340px);
         min-width: 0;
         display: flex;
         flex-direction: column;
         gap: 0.75rem;
       }
-      @media (max-width: 860px) {
+      @media (max-width: 1080px) {
         .combos-master-pane {
           width: 100%;
           flex: 1 1 auto;

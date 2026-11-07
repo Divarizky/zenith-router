@@ -87,6 +87,7 @@ import {
   handleSaveSettings,
   handleResetDashboardPassword,
 } from "./ui/pages/settings.js";
+import { resolveLanguage } from "./ui/i18n/index.js";
 import {
   renderApiKeysPage,
   handleCreateApiKey,
@@ -177,8 +178,8 @@ app.post("/dashboard/login", handleDashboardLogin);
 app.post("/dashboard/logout", handleDashboardLogout);
 
 // Home & Dashboard Overview
-app.get("/", (c) => c.html(renderOverviewPage(PORT)));
-app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT)));
+app.get("/", (c) => c.html(renderOverviewPage(PORT, resolveLanguage(c))));
+app.get("/dashboard", (c) => c.html(renderOverviewPage(PORT, resolveLanguage(c))));
 
 // Dashboard Providers: accounts + models per provider, list and detail views
 app.get("/dashboard/providers", (c) => {
@@ -188,7 +189,7 @@ app.get("/dashboard/providers", (c) => {
     const qs = q.toString();
     return c.redirect(qs ? `/dashboard/proxies?${qs}` : "/dashboard/proxies");
   }
-  return c.html(renderProvidersPage(PORT, c.req.query()));
+  return c.html(renderProvidersPage(PORT, c.req.query(), resolveLanguage(c)));
 });
 app.post("/dashboard/providers/accounts/add", handleAddAccount);
 app.post("/dashboard/providers/accounts/delete", handleDeleteAccount);
@@ -229,7 +230,7 @@ app.get("/dashboard/providers/:id", async (c) => {
     const accounts = getConnections(provider.id).filter((connection) => connection.auth_type === "session");
     await Promise.all(accounts.map((connection) => ensureSessionHealth(connection)));
   }
-  const html = renderProviderDetailPage(PORT, c.req.param("id"), c.req.query());
+  const html = renderProviderDetailPage(PORT, c.req.param("id"), c.req.query(), resolveLanguage(c));
   return html ? c.html(html) : c.redirect("/dashboard/providers");
 });
 // Old pages merged into Providers; keep bookmarks working.
@@ -237,15 +238,32 @@ app.get("/dashboard/connections", (c) => c.redirect("/dashboard/providers"));
 app.get("/dashboard/models", (c) => c.redirect("/dashboard/providers"));
 
 // Dashboard Usage & Settings UI & Actions
-app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT, c.req.query())));
+app.get("/dashboard/usage", (c) => c.html(renderUsagePage(PORT, c.req.query(), resolveLanguage(c))));
 // Old pages merged into Settings; keep bookmarks working.
 app.get("/dashboard/token-saver", (c) => c.redirect("/dashboard/settings#tokensaver"));
 app.post("/dashboard/token-saver", handleSaveTokenSaver);
 app.get("/dashboard/dlp", (c) => c.redirect("/dashboard/settings#access"));
 app.post("/dashboard/dlp", handleSaveDlp);
-app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query())));
+app.get("/dashboard/settings", (c) => c.html(renderSettingsPage(PORT, c.req.query(), resolveLanguage(c))));
 app.post("/dashboard/settings", handleSaveSettings);
 app.post("/dashboard/settings/password/reset", handleResetDashboardPassword);
+app.post("/dashboard/language", async (c) => {
+  const body = await c.req.parseBody().catch(() => ({}));
+  const lang = String(body.lang || "").toLowerCase();
+  const redirectTo = String(body.redirect || c.req.header("referer") || "/dashboard");
+  if (lang === "id" || lang === "en") {
+    const { setCookie } = await import("hono/cookie");
+    const { setSetting } = await import("./services/settings.js");
+    setCookie(c, "zr_lang", lang, {
+      path: "/",
+      maxAge: 31536000, // 1 tahun
+      httpOnly: false,
+      sameSite: "Lax",
+    });
+    setSetting("ui_language", lang);
+  }
+  return c.redirect(redirectTo);
+});
 
 // Dashboard Combos UI & Actions
 app.get("/dashboard/combos", (c) => {
@@ -261,7 +279,7 @@ app.post("/dashboard/combos/delete", (c) => handleDeleteCombo(c));
 
 // Dashboard Proxy Tab UI & Actions
 // Dashboard Proxy Pools UI & Actions
-app.get("/dashboard/proxies", (c) => c.html(renderProxiesPage(PORT, c.req.query())));
+app.get("/dashboard/proxies", (c) => c.html(renderProxiesPage(PORT, c.req.query(), resolveLanguage(c))));
 app.get("/dashboard/proxy-pools", (c) => c.redirect("/dashboard/proxies"));
 app.post("/dashboard/proxies/add", (c) => handleAddProxy(c));
 app.post("/dashboard/proxies/import", (c) => handleImportProxies(c));
@@ -281,7 +299,7 @@ app.post("/dashboard/providers/proxies/update", (c) => handleUpdateProxy(c));
 app.post("/dashboard/providers/proxies/delete", (c) => handleDeleteProxy(c));
 
 // Dashboard API Keys UI & Actions
-app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT, null, c.req.query())));
+app.get("/dashboard/keys", (c) => c.html(renderApiKeysPage(PORT, null, c.req.query(), resolveLanguage(c))));
 app.post("/dashboard/keys/create", (c) => handleCreateApiKey(c, PORT));
 app.post("/dashboard/keys/toggle", handleToggleApiKey);
 app.post("/dashboard/keys/delete", handleDeleteApiKey);

@@ -470,7 +470,7 @@ function renderTopologyPane(topology) {
             titleClip.innerHTML = '<rect x="38" y="6" width="118" height="22" rx="0"/>';
             defs.appendChild(titleClip);
 
-            var sub = n.noAuth && !n.accounts ? "NO-AUTH READY" : n.accounts + " ACC &middot; " + fmt(n.requests) + " REQ";
+            var sub = n.noAuth && !n.accounts ? "NO-AUTH READY" : n.accounts + " Akun &middot; " + fmt(n.requests) + " Req";
             var tokenStr = fmt(n.tokens) + " TOKENS";
 
             g.innerHTML =

@@ -407,3 +407,64 @@ test("Database - the wrapper leaves other statement behaviour untouched", () => 
   assert.strictEqual(db.prepare("SELECT count(*) c FROM probe").get().c, 1);
   assert.strictEqual(db.prepare("SELECT v FROM probe").all()[0].v, "first", "all tetap membaca baris");
 });
+
+// Mencegah: lock model dari skema cooldown_model lama (mis. 26 jam) lolos dari batas
+// MODEL_LOCK_MAX_MS karena jalur carry tidak ikut dibatasi.
+test("Migration - legacy model lock shorter than the cap is kept as-is", () => {
+  const tmp = join(tmpdir(), `zenith-migrate-short-${process.pid}-${Math.floor(process.uptime() * 1000)}.db`);
+  try {
+    const legacy = new DatabaseSync(tmp);
+    const deadline = Date.now() + 5 * 60_000;
+    legacy.exec(`
+      CREATE TABLE connections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, name TEXT,
+        auth_type TEXT NOT NULL DEFAULT 'api_key', credentials TEXT NOT NULL DEFAULT '{}',
+        proxy_url TEXT, is_active INTEGER NOT NULL DEFAULT 1, last_used_at INTEGER DEFAULT 0,
+        cooldown_until INTEGER DEFAULT 0, created_at INTEGER NOT NULL
+      );
+      ALTER TABLE connections ADD COLUMN cooldown_model TEXT;
+      INSERT INTO connections (provider, name, credentials, cooldown_until, cooldown_model, created_at)
+        VALUES ('glm', 'Pendek', '{"api_key":"g"}', ${deadline}, 'glm-4-flash', 1);
+    `);
+    legacy.close();
+    initDb(tmp);
+    assert.strictEqual(getModelLockUntil(1, "glm-4-flash"), deadline, "lock di bawah batas tidak boleh berubah");
+  } finally {
+    closeDb();
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(tmp + suffix, { force: true });
+  }
+});
+
+test("Migration - legacy model lock is capped like new ones", () => {
+  const tmp = join(tmpdir(), `zenith-migrate-cap-${process.pid}-${Math.floor(process.uptime() * 1000)}.db`);
+  try {
+    const legacy = new DatabaseSync(tmp);
+    legacy.exec(`
+      CREATE TABLE connections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL,
+        name TEXT,
+        auth_type TEXT NOT NULL DEFAULT 'api_key',
+        credentials TEXT NOT NULL DEFAULT '{}',
+        proxy_url TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        last_used_at INTEGER DEFAULT 0,
+        cooldown_until INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      ALTER TABLE connections ADD COLUMN cooldown_model TEXT;
+      INSERT INTO connections (provider, name, credentials, cooldown_until, cooldown_model, created_at)
+        VALUES ('glm', 'Lama', '{"api_key":"g"}', ${Date.now() + 26 * 3600_000}, 'glm-4-flash', 1);
+    `);
+    legacy.close();
+
+    initDb(tmp);
+
+    const until = getModelLockUntil(1, "glm-4-flash");
+    assert.ok(until > Date.now(), "lock model tetap berlaku sebelum batas");
+    assert.ok(until <= Date.now() + 60 * 60_000, "lock lama tidak boleh melewati 60 menit");
+  } finally {
+    closeDb();
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(tmp + suffix, { force: true });
+  }
+});

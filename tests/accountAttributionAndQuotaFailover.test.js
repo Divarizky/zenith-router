@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
-import { initDb, addConnection, getDb, getConnections, getModelLockUntil } from "../src/db/index.js";
+import { initDb, addConnection, getDb, getConnections, getModelLockUntil, MODEL_LOCK_MAX_MS } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 import { extractQuotaCooldownMs } from "../src/services/fallback.js";
 import { getRecentUsage, getUsageStats, recordUsage } from "../src/services/usage.js";
@@ -164,8 +164,10 @@ test("quota failover - account 1 exhausted 429 locks for full duration and immed
 
     const lockUntil = getModelLockUntil(conn1.id, MODEL_ID);
     assert.ok(lockUntil, "lock per model harus ada setelah kegagalan kedua");
-    const diffHours = (lockUntil - Date.now()) / (3600 * 1000);
-    assert.ok(diffHours > 135 && diffHours < 140, `harus sekitar 138 jam, dapat ${diffHours} jam`);
+    // Upstream meminta 497880s (~138 jam). Lock dibatasi ke MODEL_LOCK_MAX_MS
+    // supaya durasi upstream yang salah tidak mengunci model berhari-hari.
+    assert.ok(lockUntil <= Date.now() + MODEL_LOCK_MAX_MS, "lock tidak melebihi batas 60 menit");
+    assert.ok(lockUntil > Date.now() + MODEL_LOCK_MAX_MS - 10_000, "lock tetap diberi batas penuh");
 
     // Next immediate request must directly use account 2 without attempting account 1
     attemptedAccounts.length = 0;

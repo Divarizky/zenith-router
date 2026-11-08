@@ -9,7 +9,7 @@ import {
 import { getProvider, getProviderModels, resolveProviderRuntime } from "../providers/index.js";
 import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { disableModel } from "./modelOverrides.js";
-import { isConnectionExhausted, syncProviderQuota } from "./quota.js";
+import { isQuotaBlocking, isQuotaProbeDue, syncProviderQuota } from "./quota.js";
 import { isAntigravityPoolExhausted } from "./antigravityPools.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { extractClaudeSessionId } from "./claudeIdentity.js";
@@ -55,7 +55,7 @@ export function listAvailableConnections(providerId, { model = null, effort = un
     (c) =>
       c.is_active === 1 &&
       !isConnectionInCooldown(c, model) &&
-      !isConnectionExhausted(c) &&
+      !isQuotaBlocking(c) &&
       // an account whose list proxy is inactive or gone is skipped
       // here and never falls back to a direct connection.
       !resolveConnectionProxy(c).blocked
@@ -64,6 +64,24 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   // account left after filtering is the highest-ranked one that can serve. A
   // spare is reached only while every account above it is unavailable.
   const available = candidates.filter((c) => servesModel(c, request, antigravityInventory));
+
+  // One account whose cached quota says spent but carries no reset time is
+  // probed once per window, highest priority first. Routing skips exhausted
+  // accounts, so without this an account whose quota endpoint never recovers
+  // stays parked forever: no request reaches it, so nothing refreshes the cache.
+  const quotaProbe = connections.find(
+    (c) =>
+      c !== available[0] &&
+      !available.includes(c) &&
+      c.is_active === 1 &&
+      isQuotaProbeDue(c) &&
+      !isConnectionInCooldown(c, model) &&
+      !resolveConnectionProxy(c).blocked &&
+      servesModel(c, request, antigravityInventory)
+  );
+  // A probe only runs when nothing healthy can serve. Placing it ahead of a
+  // healthy account would let a lower-priority, stale-cache account jump the queue.
+  if (quotaProbe && available.length === 0) available.push(quotaProbe);
 
   if (available.length === 0 && providerDef?.noAuth) {
     if (!isVirtualInCooldown(providerId, model)) {

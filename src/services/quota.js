@@ -1,4 +1,4 @@
-import { getConnections, mergeConnectionCredentials, replaceAntigravityAccountModels } from "../db/index.js";
+import { getConnectionById, getConnections, mergeConnectionCredentials, replaceAntigravityAccountModels } from "../db/index.js";
 import { fetchLiveQuota } from "./quota/index.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { logQuiet } from "./logger.js";
@@ -27,15 +27,107 @@ export function isConnectionExhausted(connection) {
 }
 
 /**
+ * How long a cached exhausted snapshot without a reset time may hold an account
+ * back before routing probes it once. Without this, an account whose quota
+ * endpoint never answers again stays excluded forever: routing skips it, so no
+ * request ever reaches it, so nothing ever refreshes the cache.
+ */
+export const QUOTA_PROBE_MS = 30 * 60 * 1000;
+
+function toEpochMs(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value > 0 ? value : null;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+/**
+ * Latest reset timestamp advertised by a cached quota snapshot, or null when
+ * the provider does not publish one. Providers describe resets in different
+ * shapes, so every place a timestamp can appear is read: top-level fields,
+ * per-window rows, GLM-style session/weekly rows, and Antigravity pools. The
+ * latest one wins: an account stays spent until its last window resets.
+ */
+export function quotaResetAt(quota) {
+  if (!quota || typeof quota !== "object") return null;
+  const found = [];
+  const push = (value) => {
+    const ms = toEpochMs(value);
+    if (ms !== null) found.push(ms);
+  };
+  push(quota.reset_at);
+  push(quota.resetAt);
+  push(quota.reset_time);
+  for (const row of Object.values(quota.quotas || {})) {
+    if (!row || typeof row !== "object") continue;
+    push(row.resetAt);
+    push(row.reset_at);
+    push(row.reset_time);
+  }
+  for (const row of [quota.session_quota, quota.weekly_quota]) {
+    if (!row || typeof row !== "object") continue;
+    push(row.resetAt);
+    push(row.reset_at);
+    push(row.reset_time);
+  }
+  for (const pool of Array.isArray(quota.pools) ? quota.pools : []) {
+    if (!pool || typeof pool !== "object") continue;
+    push(pool.resetAt);
+    push(pool.reset_at);
+    push(pool.reset_time);
+  }
+  return found.length ? Math.max(...found) : null;
+}
+
+/**
+ * True when the cached exhaustion has a reset time that has already passed, so
+ * the account may be routed to again. The cache itself is only rewritten by the
+ * next sync; this predicate is what keeps a stale snapshot from parking an
+ * account indefinitely.
+ */
+export function isQuotaExpired(connection, now = Date.now()) {
+  if (!isConnectionExhausted(connection)) return false;
+  const resetAt = quotaResetAt(connection?.credentials?.quota);
+  return resetAt !== null && resetAt <= now;
+}
+
+/**
+ * Routing gate: the cached snapshot says spent AND its reset window has not
+ * passed. An expired window no longer blocks, so the account is retried and the
+ * next sync corrects the numbers.
+ */
+export function isQuotaBlocking(connection, now = Date.now()) {
+  if (!isConnectionExhausted(connection)) return false;
+  return !isQuotaExpired(connection, now);
+}
+
+/**
+ * True when a quota-blocked account has no reset time and its cache is older
+ * than QUOTA_PROBE_MS. Routing lets the highest-priority such account through
+ * once per window so the snapshot can be refreshed by a real request.
+ */
+export function isQuotaProbeDue(connection, now = Date.now()) {
+  if (!isQuotaBlocking(connection, now)) return false;
+  const quota = connection?.credentials?.quota;
+  if (quotaResetAt(quota) !== null) return false;
+  const updatedAt = Number(quota?.updated_at) || 0;
+  return updatedAt > 0 && now - updatedAt >= QUOTA_PROBE_MS;
+}
+
+/**
  * Fetch live quota/balance for a connection from provider endpoint
  */
 export async function syncProviderQuota(connection, { quiet = false } = {}) {
   if (!connection || !connection.id) return null;
 
   let quotaData = null;
+  let fetchedOk = false;
 
   if (customQuotaFetcher) {
     quotaData = await customQuotaFetcher(connection);
+    fetchedOk = !!quotaData && !quotaData.error;
   } else {
     // Quota endpoints reject expired tokens. Refresh first when the token is
     // (nearly) expired, and once more reactively if the provider still says 401/403.
@@ -51,6 +143,7 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
       }
       if (live) {
         quotaData = live;
+        fetchedOk = !live.error;
       }
     } catch (err) {
       const msg = `[zenith] Failed to fetch live quota for ${connection.provider} (#${connection.id}): ${err.message}`;
@@ -83,7 +176,12 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
       else console.warn(msg);
     }
   }
-  const quota = { ...quotaDataOnly, updated_at: Date.now() };
+  // updated_at is the age of the last *successful* fetch. A failed sync keeps the
+  // previous stamp so a stale account can become due for a probe again.
+  // Read the stored row: `connection` may be a snapshot from before the awaits above.
+  const prevUpdatedAt = getConnectionById(connection.id)?.credentials?.quota?.updated_at;
+  const stamp = fetchedOk || prevUpdatedAt == null ? Date.now() : prevUpdatedAt;
+  const quota = { ...quotaDataOnly, updated_at: stamp };
   mergeConnectionCredentials(connection.id, { quota });
   return quota;
 }

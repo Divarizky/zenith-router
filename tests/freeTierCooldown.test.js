@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
-import { initDb, getDb, addConnection, getConnections, getModelLockUntil } from "../src/db/index.js";
+import { initDb, getDb, addConnection, getConnections, getModelLockUntil, MODEL_LOCK_MAX_MS } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 import { setCustomQuotaFetcher } from "../src/services/quota.js";
 
@@ -73,7 +73,7 @@ test("Free tier - 429 scope free mengunci semua model gratis di akun, model berb
     assert.deepStrictEqual(attempts, ["Bearer key-1", "Bearer key-2"], "percobaan kedua masih mencoba akun 1");
 
     const until = getModelLockUntil(acc1.id, FREE_BUILTIN);
-    assert.ok(until > Date.now() + 27_000_000, "model yang dipanggil dikunci sampai reset (retry-after)");
+    assert.ok(until > Date.now() && until <= Date.now() + MODEL_LOCK_MAX_MS, "model yang dipanggil dikunci, dibatasi MODEL_LOCK_MAX_MS");
     assert.ok(getModelLockUntil(acc1.id, FREE_SYNCED) > Date.now(), "model gratis hasil sync ikut terkunci");
     assert.ok(getModelLockUntil(acc1.id, FREE_SYNCED_PLAIN) > Date.now(), "model hasil sync tanpa suffix :free ikut terkunci");
     assert.ok(getModelLockUntil(acc1.id, FREE_BUILTIN_OTHER) > Date.now(), "model builtin :free yang tidak dipanggil ikut terkunci");

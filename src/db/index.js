@@ -58,6 +58,11 @@ function isTestRun() {
   return process.env.NODE_ENV === "test" || Boolean(process.env.NODE_TEST_CONTEXT);
 }
 
+// A per-model lock is a guess at how long an upstream stays throttled. Past this
+// cap the model is retried and a repeat failure parks it again, so a wrong
+// upstream duration cannot keep a model blocked for hours.
+export const MODEL_LOCK_MAX_MS = 60 * 60 * 1000;
+
 function defaultDbPath() {
   if (process.env.ZENITH_DB_PATH) return process.env.ZENITH_DB_PATH;
   if (isTestRun()) return ":memory:";
@@ -90,6 +95,7 @@ CREATE TABLE IF NOT EXISTS connection_model_locks (
   connection_id INTEGER NOT NULL,
   model TEXT NOT NULL,
   locked_until INTEGER NOT NULL,
+  locked_at INTEGER,
   PRIMARY KEY (connection_id, model)
 );
 
@@ -297,6 +303,16 @@ export function initDb(dbPath = null) {
  * skips existing tables, so an index on a new column would fail before the column exists.
  */
 function migrateSchema(db) {
+  const lockColumns = db.prepare("PRAGMA table_info(connection_model_locks)").all();
+  if (lockColumns.length && !lockColumns.some((col) => col.name === "locked_at")) {
+    db.exec("ALTER TABLE connection_model_locks ADD COLUMN locked_at INTEGER");
+    // Locks taken before this column existed have no start time. Stamp them now
+    // and clip them to the cap, so a stale multi-hour lock cannot outlive it.
+    const now = Date.now();
+    db.prepare(
+      `UPDATE connection_model_locks SET locked_at = ?, locked_until = MIN(locked_until, ? + ?) WHERE locked_at IS NULL`
+    ).run(now, now, MODEL_LOCK_MAX_MS);
+  }
   const usageColumns = db.prepare("PRAGMA table_info(usage_history)").all();
   if (!usageColumns.some((col) => col.name === "api_key_id")) {
     db.exec("ALTER TABLE usage_history ADD COLUMN api_key_id INTEGER");
@@ -370,10 +386,15 @@ function migrateSchema(db) {
       .prepare(`SELECT id, cooldown_until, cooldown_model FROM connections WHERE cooldown_model IS NOT NULL`)
       .all();
     const carry = db.prepare(
-      `INSERT INTO connection_model_locks (connection_id, model, locked_until) VALUES (?, ?, ?)
+      `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(connection_id, model) DO UPDATE SET locked_until = MAX(locked_until, excluded.locked_until)`
     );
-    for (const row of orphaned) carry.run(row.id, row.cooldown_model, row.cooldown_until);
+    // Carried locks get the same cap as new ones; otherwise a legacy multi-day lock escapes it.
+    const carryAt = Date.now();
+    for (const row of orphaned) {
+      const capped = Math.min(Number(row.cooldown_until), carryAt + MODEL_LOCK_MAX_MS);
+      carry.run(row.id, row.cooldown_model, capped, carryAt);
+    }
     // In that design cooldown_until held the model's lock, not an account lock;
     // carrying it over as-is would silently widen the lock to the whole account.
     db.exec(`UPDATE connections SET cooldown_until = 0 WHERE cooldown_model IS NOT NULL`);
@@ -625,16 +646,19 @@ export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null) 
       Number(id),
       Date.now()
     );
+    const now = Date.now();
+    const capped = Math.min(Number(cooldownUntilTimestamp), now + MODEL_LOCK_MAX_MS);
     db.prepare(
-      `INSERT INTO connection_model_locks (connection_id, model, locked_until) VALUES (?, ?, ?)
-       ON CONFLICT(connection_id, model) DO UPDATE SET locked_until = MAX(locked_until, excluded.locked_until)`
-    ).run(Number(id), String(model), Number(cooldownUntilTimestamp));
+      `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(connection_id, model) DO UPDATE SET
+         locked_until = MAX(locked_until, excluded.locked_until),
+         locked_at = excluded.locked_at`
+    ).run(Number(id), String(model), capped, now);
     return true;
   }
-  const now = Date.now();
   db.prepare(
-    `UPDATE connections SET cooldown_until = CASE WHEN cooldown_until > ? THEN cooldown_until ELSE ? END WHERE id = ?`
-  ).run(now, Number(cooldownUntilTimestamp), Number(id));
+    `UPDATE connections SET cooldown_until = MAX(COALESCE(cooldown_until, 0), ?) WHERE id = ?`
+  ).run(Number(cooldownUntilTimestamp), Number(id));
   return true;
 }
 
@@ -644,13 +668,45 @@ export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null) 
  */
 export function getModelLockUntil(connectionId, model) {
   if (!connectionId || !model) return null;
-  const row = getDb()
+  const db = getDb();
+  const now = Date.now();
+  const row = db
     .prepare(
-      `SELECT locked_until FROM connection_model_locks
+      `SELECT locked_until, locked_at FROM connection_model_locks
        WHERE connection_id = ? AND model = ? AND locked_until > ?`
     )
-    .get(Number(connectionId), String(model), Date.now());
-  return row ? Number(row.locked_until) : null;
+    .get(Number(connectionId), String(model), now);
+  if (!row) return null;
+  if (lockReleasedBySync(db, connectionId, String(model), row.locked_at)) {
+    db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ? AND model = ?`).run(
+      Number(connectionId),
+      String(model)
+    );
+    return null;
+  }
+  return Number(row.locked_until);
+}
+
+/**
+ * Antigravity only: a lock is released when the account's model inventory was
+ * synced after the lock was taken and the model (or a variant of it, such as
+ * `gemini-3.8-flash-high` for `gemini-3.8-flash`) still has quota left. Only the
+ * model and its own variants count, so a sibling model's quota never releases it.
+ * Other providers have no inventory, so their locks run out by the cap or the clock.
+ */
+function lockReleasedBySync(db, connectionId, model, lockedAt) {
+  if (!lockedAt) return false;
+  const conn = db.prepare(`SELECT provider FROM connections WHERE id = ?`).get(Number(connectionId));
+  if (conn?.provider !== "antigravity") return false;
+  const row = db
+    .prepare(
+      `SELECT MAX(synced_at) AS synced_at,
+              MAX(CASE WHEN model_id = ? OR model_id IN (?, ?, ?, ?) THEN quota_remaining END) AS remaining
+       FROM antigravity_account_models WHERE connection_id = ?`
+    )
+    .get(model, `${model}-high`, `${model}-low`, `${model}-medium`, `${model}-tiered`, Number(connectionId));
+  if (!row || row.synced_at == null) return false;
+  return Number(row.synced_at) > Number(lockedAt) && Number(row.remaining) > 0;
 }
 
 /**

@@ -205,11 +205,37 @@ export async function parseSseStreamToChatCompletion(streamOrResponse, fallbackM
   return completion;
 }
 
+const INCOMING_SESSION_HEADERS = [
+  "x-session-id",
+  "x-session-affinity",
+  "x-opencode-session-id",
+  "x-opencode-session",
+  "x-conversation-id",
+];
+
+function readHeader(headers, name) {
+  if (!headers) return null;
+  const value = typeof headers.get === "function" ? headers.get(name) : headers[name];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * Returns the first session ID sent by the client, so the same conversation keeps
+ * one upstream session instead of a fresh random ID per request.
+ */
+export function extractIncomingSessionId(incomingHeaders = {}) {
+  for (const name of INCOMING_SESSION_HEADERS) {
+    const value = readHeader(incomingHeaders, name);
+    if (value) return value;
+  }
+  return null;
+}
+
 /**
  * Builds standard upstream headers required by OpenCode Cloudflare / JA4 gates.
  */
 export function buildOpenCodeHeaders(incomingHeaders = {}, sessionId = null) {
-  const sid = sessionId || generateOpencodeSessionId();
+  const sid = sessionId || extractIncomingSessionId(incomingHeaders) || generateOpencodeSessionId();
   const auth =
     (typeof incomingHeaders.get === "function" ? incomingHeaders.get("authorization") : incomingHeaders.authorization) ||
     "Bearer public";
@@ -258,7 +284,8 @@ export async function handleBridgeRequest(req) {
 
     const clientWantsStream = rawBody.stream !== false;
     const payload = prepareOpenCodePayload(rawBody);
-    const headers = buildOpenCodeHeaders(req.headers);
+    const incomingSessionId = extractIncomingSessionId(req.headers);
+    const headers = buildOpenCodeHeaders(req.headers, incomingSessionId);
     const upstreamUrl = process.env.OPENCODE_UPSTREAM_URL || OPENCODE_UPSTREAM_URL;
 
     try {

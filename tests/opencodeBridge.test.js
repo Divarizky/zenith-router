@@ -457,3 +457,47 @@ test("opencode bridge - installBunSoft handles offline/failed installer softly w
 });
 
 
+
+test("opencode bridge - incoming client session header is forwarded upstream instead of a random id", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    const seen = [];
+    globalThis.fetch = async (url, init) => {
+      seen.push(init.headers);
+      return new Response('data: {"id":"c","choices":[{"index":0,"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    };
+
+    const send = (headers) =>
+      handleBridgeRequest(
+        new Request("http://127.0.0.1:20129/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ model: "glm-5.3-flash-free", messages: [{ role: "user", content: "hi" }] }),
+        })
+      );
+
+    await send({ "x-conversation-id": "conv-abc" });
+    await send({ "x-session-id": "ses_client_one", "x-conversation-id": "conv-other" });
+    await send({});
+
+    assert.strictEqual(seen[0]["x-session-id"], "conv-abc", "x-conversation-id dipakai bila tidak ada header session lain");
+    assert.strictEqual(seen[0]["x-opencode-session-id"], "conv-abc");
+    assert.strictEqual(seen[1]["x-session-id"], "ses_client_one", "x-session-id lebih diprioritaskan");
+    assert.strictEqual(seen[1]["x-session-affinity"], "ses_client_one");
+    assert.match(seen[2]["x-session-id"], /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, "tanpa header client tetap generate id baru");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("opencode bridge - buildOpenCodeHeaders reads incoming session header from a plain object", () => {
+  const headers = buildOpenCodeHeaders({ "x-opencode-session": "ses_from_plain_obj" });
+  assert.strictEqual(headers["x-opencode-session-id"], "ses_from_plain_obj");
+  assert.strictEqual(headers["x-session-id"], "ses_from_plain_obj");
+
+  const explicit = buildOpenCodeHeaders({ "x-session-id": "ses_ignored" }, "ses_explicit");
+  assert.strictEqual(explicit["x-session-id"], "ses_explicit", "sessionId eksplisit tetap menang atas header client");
+});

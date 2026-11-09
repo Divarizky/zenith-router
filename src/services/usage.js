@@ -16,8 +16,11 @@ export function normalizeUsage(usage) {
   if (typeof usage.prompt_tokens === "number" || typeof usage.completion_tokens === "number") {
     out.inputTokens = positive(usage.prompt_tokens);
     out.outputTokens = positive(usage.completion_tokens);
-    out.cacheReadTokens = positive(usage.prompt_tokens_details?.cached_tokens);
-    out.cacheWriteTokens = positive(usage.prompt_tokens_details?.cache_write_tokens);
+    // DeepSeek reports prompt_cache_hit_tokens / prompt_cache_miss_tokens at the top level.
+    const cached = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens;
+    const cacheWrite = usage.prompt_tokens_details?.cache_write_tokens ?? usage.prompt_cache_miss_tokens;
+    out.cacheReadTokens = positive(cached);
+    out.cacheWriteTokens = positive(cacheWrite);
     out.reasoningTokens = positive(usage.completion_tokens_details?.reasoning_tokens);
     return out;
   }

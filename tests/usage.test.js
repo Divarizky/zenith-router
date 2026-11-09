@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { initDb, addConnection } from "../src/db/index.js";
-import { recordUsage, getUsageStats, getLastProvider } from "../src/services/usage.js";
+import { recordUsage, getUsageStats, getLastProvider, normalizeUsage } from "../src/services/usage.js";
 import { app } from "../src/index.js";
 
 test("usage service - no-auth traffic records its provider so getLastProvider stays truthful", () => {
@@ -187,4 +187,26 @@ test("usage service - getUsageStats aggregates by_provider via connections", () 
   assert.ok(glm);
   assert.strictEqual(glm.count, 2);
   assert.strictEqual(glm.total_tokens, 450);
+});
+
+test("normalizeUsage - DeepSeek prompt_cache_hit/miss tokens map to cache read/write", () => {
+  const u = normalizeUsage({
+    prompt_tokens: 1000,
+    completion_tokens: 40,
+    prompt_cache_hit_tokens: 700,
+    prompt_cache_miss_tokens: 300,
+  });
+  assert.strictEqual(u.inputTokens, 1000, "prompt_tokens tetap menjadi input total");
+  assert.strictEqual(u.cacheReadTokens, 700, "hit dipetakan ke cache read");
+  assert.strictEqual(u.cacheWriteTokens, 300, "miss dipetakan ke cache write sesuai spesifikasi");
+});
+
+test("normalizeUsage - OpenAI cached_tokens takes precedence over DeepSeek hit tokens", () => {
+  const u = normalizeUsage({
+    prompt_tokens: 1000,
+    completion_tokens: 10,
+    prompt_tokens_details: { cached_tokens: 800 },
+    prompt_cache_hit_tokens: 100,
+  });
+  assert.strictEqual(u.cacheReadTokens, 800, "nilai OpenAI standar tidak boleh ditimpa field DeepSeek");
 });

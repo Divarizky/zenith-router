@@ -150,9 +150,49 @@ test("opencode bridge - lifecycle detection and URL routing override", () => {
   setOpencodeBridgeActive(false);
 });
 
-test("opencode bridge - bun binary detection finds local bun", () => {
+test("opencode bridge - bun binary detection finds local bun when present or returns null", (t) => {
   const bun = findBunBinary();
-  assert.ok(bun, "bun binary should be found in system or ~/.bun/bin/bun");
+  if (!bun) {
+    t.skip("Bun binary tidak ditemukan di host/runner environment (installer offline/skipped)");
+    return;
+  }
+  assert.strictEqual(typeof bun, "string");
+  assert.ok(bun.length > 0, "path bun tidak boleh kosong");
+});
+
+test("opencode bridge - findBunBinary resolves posix candidates and falls back to null deterministically", () => {
+  const mockFs = {
+    existsSync(p) {
+      return p === "/home/tester/.bun/bin/bun";
+    },
+    statSync() {
+      return { isDirectory: () => false };
+    },
+    accessSync() {
+      return true;
+    },
+    constants: { F_OK: 0, X_OK: 1 },
+  };
+
+  const found = findBunBinary({
+    platform: "linux",
+    env: { HOME: "/home/tester" },
+    fsImpl: mockFs,
+  });
+  assert.strictEqual(found, "/home/tester/.bun/bin/bun");
+
+  const notFound = findBunBinary({
+    platform: "linux",
+    env: { HOME: "/home/tester" },
+    fsImpl: {
+      existsSync: () => false,
+      constants: { F_OK: 0, X_OK: 1 },
+    },
+    execFn: () => {
+      throw new Error("not found");
+    },
+  });
+  assert.strictEqual(notFound, null, "harus mengembalikan null jika binary tidak ada di disk atau PATH");
 });
 
 test("opencode bridge - FreeUsageLimitError detection and cooldown handling", async () => {

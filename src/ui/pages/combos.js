@@ -9,7 +9,7 @@ import {
   listCombos,
 } from "../../services/combos.js";
 import { escapeHtml } from "../html.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 // The chain is ordered under fallback and rotates under round-robin.
 const STRATEGY_OPTIONS = [
@@ -212,10 +212,10 @@ export function renderCombosContent(query = {}, lang = DEFAULT_LANGUAGE) {
     <div class="combos-master-pane">
       <div class="combos-master-header">
         <h3 class="combos-section-title">Combos (${combos.length})</h3>
-        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('create-combo-modal')">+ Buat Combo Baru</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openModal('create-combo-modal')">+ ${escapeHtml(t("combos.btn_create", {}, currentLang))}</button>
       </div>
       <div class="combo-search-box">
-        <input type="search" id="combo-search-input" placeholder="Saring nama combo…" autocomplete="off" oninput="filterComboList(this.value)" />
+        <input type="search" id="combo-search-input" placeholder="${escapeHtml(t("combos.combo_filter_placeholder", {}, currentLang))}" autocomplete="off" oninput="filterComboList(this.value)" />
       </div>
       <div class="combo-master-list" id="combo-master-list">
         ${combos.map((c) => renderMasterItem(c, selectedCombo && c.name === selectedCombo.name)).join("")}
@@ -291,11 +291,11 @@ export function renderCombosContent(query = {}, lang = DEFAULT_LANGUAGE) {
 
     <div class="modal-backdrop" id="model-picker-modal">
       <div class="modal combo-picker">
-        <h3>Pilih model</h3>
-        <input type="search" id="combo-picker-search" placeholder="Cari model atau provider…" autocomplete="off" />
+        <h3>${currentLang === "en" ? "Select model" : "Pilih model"}</h3>
+        <input type="search" id="combo-picker-search" placeholder="${escapeHtml(t("combos.add_model_placeholder", {}, currentLang))}" autocomplete="off" />
         <div id="combo-picker-list" class="combo-picker-list"></div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-primary" data-close-modal="model-picker-modal">Selesai</button>
+          <button type="button" class="btn btn-primary" data-close-modal="model-picker-modal">${currentLang === "en" ? "Done" : "Selesai"}</button>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
   const currentLang = lang || DEFAULT_LANGUAGE;
@@ -16,14 +16,14 @@ export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LA
         : ""
     }
     <div class="card">
-      <h3>Token Saver</h3>
-      <p class="hint" style="margin-bottom: 1.25rem;">Kurangi pemakaian token tanpa mengubah struktur tool. Tool result dan pesan asisten tidak disentuh.</p>
+      <h3>${escapeHtml(t("token_saver.title", {}, currentLang))}</h3>
+      <p class="hint" style="margin-bottom: 1.25rem;">${escapeHtml(t("token_saver.subtitle", {}, currentLang))}</p>
 
       <form action="/dashboard/token-saver" method="POST">
         <div class="setting-row">
           <div class="setting-info">
-            <strong>RTK (Reduced Token Kit)</strong>
-            <p class="hint">Memadatkan baris berulang pada teks yang kamu ketik. Output tool dan turn asisten dibiarkan utuh.</p>
+            <strong>${escapeHtml(t("token_saver.rtk_label", {}, currentLang))}</strong>
+            <p class="hint">${escapeHtml(t("token_saver.rtk_hint", {}, currentLang))}</p>
           </div>
           <div class="setting-action">
             <label class="switch" aria-label="RTK">
@@ -35,8 +35,8 @@ export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LA
 
         <div class="setting-row">
           <div class="setting-info">
-            <strong>Caveman Conciseness Compactor</strong>
-            <p class="hint">Menambahkan aturan ringkas ke system prompt. Default mati karena mengubah perilaku agent.</p>
+            <strong>${escapeHtml(t("token_saver.caveman_label", {}, currentLang))}</strong>
+            <p class="hint">${escapeHtml(t("token_saver.caveman_hint", {}, currentLang))}</p>
           </div>
           <div class="setting-action">
             <label class="switch" aria-label="Caveman">

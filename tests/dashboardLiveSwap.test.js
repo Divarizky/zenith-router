@@ -119,3 +119,98 @@ test("no-reload - kontrak server form dashboard tetap redirect untuk fallback no
   assert.strictEqual(res.status, 302, "handler tetap redirect; engine mengikuti redirect lalu swap");
   assert.ok(res.headers.get("location").startsWith("/dashboard/settings"));
 });
+
+test("no-reload - swapFromDoc memperbarui sidebar dan atribut lang dokumen", () => {
+  let docElementAttrs = {};
+  let currentSidebarHtml = '<button class="sidebar-lang-btn">EN</button>';
+  let currentMainHtml = '<div id="old">old</div>';
+
+  const mockDoc = {
+    title: "New Title",
+    documentElement: {
+      getAttribute: (name) => (name === "lang" ? "en" : null),
+    },
+    querySelector: (selector) => {
+      if (selector === "main") return { innerHTML: '<div id="new">new</div>' };
+      if (selector === "#sidebar") return { innerHTML: '<button class="sidebar-lang-btn">ID</button>' };
+      return null;
+    },
+  };
+
+  let onSubmit = null;
+  const sandbox = {
+    URL,
+    FormData: class {
+      forEach() {}
+      entries() { return []; }
+    },
+    setTimeout: () => 0,
+    window: {
+      location: { href: PAGE_URL, origin: "http://127.0.0.1:20120", pathname: "/dashboard/usage", assign() {} },
+      history: { replaceState() {} },
+      scrollTo() {},
+      scrollY: 0,
+    },
+    document: {
+      title: "Old Title",
+      documentElement: {
+        setAttribute: (name, val) => { docElementAttrs[name] = val; },
+      },
+      createElement: () => fakeEl("DIV"),
+      body: {
+        classList: { remove() {} },
+        querySelectorAll: () => [],
+        appendChild: () => {},
+      },
+      addEventListener: (type, fn) => {
+        if (type === "submit") onSubmit = fn;
+      },
+      querySelector: (selector) => {
+        if (selector === "main") {
+          return {
+            get innerHTML() { return currentMainHtml; },
+            set innerHTML(v) { currentMainHtml = v; },
+          };
+        }
+        if (selector === "#sidebar") {
+          return {
+            get innerHTML() { return currentSidebarHtml; },
+            set innerHTML(v) { currentSidebarHtml = v; },
+          };
+        }
+        if (selector === ".sidebar-toggle") {
+          return { setAttribute() {} };
+        }
+        return null;
+      },
+    },
+    DOMParser: class {
+      parseFromString() { return mockDoc; }
+    },
+  };
+
+  let fetchResolve;
+  sandbox.fetch = () => new Promise((resolve) => {
+    fetchResolve = resolve;
+  });
+
+  vm.runInNewContext(ENGINE_SRC, sandbox);
+
+  assert.ok(onSubmit, "engine memasang listener submit");
+  const form = fakeEl("FORM", { action: "/dashboard/language", method: "POST" });
+  onSubmit({ defaultPrevented: false, target: form, preventDefault() {} });
+
+  assert.ok(fetchResolve, "fetch harus dipanggil oleh form submit");
+  fetchResolve({
+    ok: true,
+    url: "http://127.0.0.1:20120/dashboard/usage",
+    headers: { get: () => "text/html" },
+    text: () => Promise.resolve("<html>dummy</html>"),
+  });
+
+  return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+    assert.strictEqual(docElementAttrs.lang, "en", "html lang attribute harus di-update ke 'en'");
+    assert.ok(currentSidebarHtml.includes('button class="sidebar-lang-btn">ID<'), "isi sidebar harus ter-swap dengan sidebar baru");
+    assert.ok(currentMainHtml.includes('<div id="new">new</div>'), "isi main harus ter-swap");
+  });
+});

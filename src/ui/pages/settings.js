@@ -87,7 +87,7 @@ function sectionCard({ id, iconName, title, hint, rows }) {
 export function renderSettingsPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
   const currentLang = lang || DEFAULT_LANGUAGE;
   const settings = getAllSettings();
-  const uiLang = getSetting("ui_language", currentLang);
+  const selectedLang = currentLang === "en" ? "en" : "id";
 
   const isRequireAuth = settings.require_api_key === "true";
   const comboHoldCount = settings.combo_round_robin_count || "1";
@@ -142,8 +142,8 @@ export function renderSettingsPage(port = 20120, query = {}, lang = DEFAULT_LANG
           </div>
           <div class="setting-action">
             <select name="ui_language" class="input-select" style="min-width: 180px;">
-              <option value="id" ${uiLang === "id" ? "selected" : ""}>Bahasa Indonesia</option>
-              <option value="en" ${uiLang === "en" ? "selected" : ""}>English</option>
+              <option value="id" ${selectedLang === "id" ? "selected" : ""}>Bahasa Indonesia</option>
+              <option value="en" ${selectedLang === "en" ? "selected" : ""}>English</option>
             </select>
           </div>
         </div>`,
@@ -203,20 +203,20 @@ export function renderSettingsPage(port = 20120, query = {}, lang = DEFAULT_LANG
           </div>
           <div class="setting-action setting-stack">
             <div class="field">
-              <label for="current_password" class="field-label">Password saat ini</label>
+              <label for="current_password" class="field-label">${currentLang === "en" ? "Current password" : "Password saat ini"}</label>
               <div class="input-password-wrap">
                 <input type="password" id="current_password" name="current_password" placeholder="••••••" autocomplete="current-password" />
-                <button type="button" class="btn-toggle-pw" data-toggle-password="current_password" title="Lihat password" aria-label="Lihat password">
+                <button type="button" class="btn-toggle-pw" data-toggle-password="current_password" title="${currentLang === "en" ? "Toggle password visibility" : "Lihat password"}" aria-label="${currentLang === "en" ? "Toggle password visibility" : "Lihat password"}">
                   <span class="icon-eye">${icon("eye", 15)}</span>
                   <span class="icon-eye-off">${icon("eyeOff", 15)}</span>
                 </button>
               </div>
             </div>
             <div class="field">
-              <label for="new_password" class="field-label">Password baru</label>
+              <label for="new_password" class="field-label">${currentLang === "en" ? "New password" : "Password baru"}</label>
               <div class="input-password-wrap">
-                <input type="password" id="new_password" name="new_password" placeholder="Minimal ${MIN_PASSWORD_LENGTH} karakter" autocomplete="new-password" />
-                <button type="button" class="btn-toggle-pw" data-toggle-password="new_password" title="Lihat password" aria-label="Lihat password">
+                <input type="password" id="new_password" name="new_password" placeholder="${t("settings.password_len_hint", { min: MIN_PASSWORD_LENGTH }, currentLang)}" autocomplete="new-password" />
+                <button type="button" class="btn-toggle-pw" data-toggle-password="new_password" title="${currentLang === "en" ? "Toggle password visibility" : "Lihat password"}" aria-label="${currentLang === "en" ? "Toggle password visibility" : "Lihat password"}">
                   <span class="icon-eye">${icon("eye", 15)}</span>
                   <span class="icon-eye-off">${icon("eyeOff", 15)}</span>
                 </button>

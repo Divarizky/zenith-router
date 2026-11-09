@@ -8,7 +8,7 @@ import { isFreeModel } from "../../services/managedCombos.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getLocalBaseUrl } from "../../security.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 /**
  * Render Overview Dashboard page with Live Console Logs and Bento HUD
@@ -51,31 +51,31 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
     <div class="grid" style="margin-bottom: 1.5rem;">
       <div class="card stat">
         <span class="stat-index">01</span>
-        <div class="label">Status Gateway</div>
+        <div class="label">${escapeHtml(t("overview.gateway_status", {}, currentLang))}</div>
         <div class="value" style="font-size: 1.5rem;">
           <span class="pill pill-success" style="font-size: var(--text-xs); font-weight: 800; border: var(--bw) solid var(--line); box-shadow: 2px 2px 0 var(--shadow-ink);">
-            <span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Aktif
+            <span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> ${escapeHtml(t("common.active", {}, currentLang))}
           </span>
         </div>
         <div class="sub">Port ${port} &middot; 127.0.0.1</div>
       </div>
       <div class="card stat">
         <span class="stat-index">02</span>
-        <div class="label">Koneksi Aktif</div>
+        <div class="label">${escapeHtml(t("overview.active_connections", {}, currentLang))}</div>
         <div class="value">${activeCount} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">/ ${connections.length}</span></div>
-        <div class="sub">Akun terkonfigurasi</div>
+        <div class="sub">${currentLang === "en" ? "Configured accounts" : "Akun terkonfigurasi"}</div>
       </div>
       <div class="card stat">
         <span class="stat-index">03</span>
-        <div class="label">Token &amp; Permintaan Hari Ini</div>
+        <div class="label">${currentLang === "en" ? "Tokens & Requests Today" : "Token &amp; Permintaan Hari Ini"}</div>
         <div class="value">${usageToday.summary.total_tokens.toLocaleString()} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">tok</span></div>
-        <div class="sub">${usageToday.summary.total_requests} permintaan tercatat</div>
+        <div class="sub">${usageToday.summary.total_requests} ${currentLang === "en" ? "requests recorded" : "permintaan tercatat"}</div>
       </div>
       <div class="card stat">
         <span class="stat-index">04</span>
-        <div class="label">Total Model Gratis / Managed Combos</div>
-        <div class="value">${freeModelsCount} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">gratis</span> / ${zenithCombos.length} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">combos</span></div>
-        <div class="sub"><a href="/dashboard/providers" style="color: inherit; text-decoration: underline;">Kelola di Providers &amp; Combos &rarr;</a></div>
+        <div class="label">${currentLang === "en" ? "Total Free Models / Managed Combos" : "Total Model Gratis / Managed Combos"}</div>
+        <div class="value">${freeModelsCount} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">${currentLang === "en" ? "free" : "gratis"}</span> / ${zenithCombos.length} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">combos</span></div>
+        <div class="sub"><a href="/dashboard/providers" style="color: inherit; text-decoration: underline;">${currentLang === "en" ? "Manage in Providers & Combos &rarr;" : "Kelola di Providers &amp; Combos &rarr;"}</a></div>
       </div>
     </div>
 
@@ -85,8 +85,8 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
       <div class="card bento-card client-endpoints-card">
         <div class="card-header-neo">
           <div>
-            <h3 style="margin: 0; font-size: 1rem; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase;">Client Integration Endpoints</h3>
-            <p style="margin: 0.25rem 0 0; font-size: var(--text-xs); color: var(--text-muted);">Integrasikan tool AI dan coding agent ke endpoint lokal Zenith Router</p>
+            <h3 style="margin: 0; font-size: 1rem; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase;">${escapeHtml(t("overview.integration_endpoints", {}, currentLang))}</h3>
+            <p style="margin: 0.25rem 0 0; font-size: var(--text-xs); color: var(--text-muted);">${escapeHtml(t("overview.integration_hint", {}, currentLang))}</p>
           </div>
           <span class="pill pill-info" style="font-size: var(--text-xs); font-weight: 800; border: var(--bw) solid var(--line); box-shadow: 2px 2px 0 var(--shadow-ink);">Local Loopback</span>
         </div>
@@ -158,8 +158,8 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
       <div class="card bento-card managed-combos-card">
         <div class="card-header-neo">
           <div>
-            <h3 style="margin: 0; font-size: 1rem; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase;">Managed Super-Combos</h3>
-            <p style="margin: 0.25rem 0 0; font-size: var(--text-xs); color: var(--text-muted);">Routing multi-provider otomatis tier gratis</p>
+            <h3 style="margin: 0; font-size: 1rem; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase;">${escapeHtml(t("overview.super_combos", {}, currentLang))}</h3>
+            <p style="margin: 0.25rem 0 0; font-size: var(--text-xs); color: var(--text-muted);">${escapeHtml(t("overview.super_combos_hint", {}, currentLang))}</p>
           </div>
           <span class="pill pill-lime" style="font-size: var(--text-xs); font-weight: 800; border: var(--bw) solid var(--line); box-shadow: 2px 2px 0 var(--shadow-ink); color: #0a0a0a;">100% Free Tier</span>
         </div>
@@ -247,7 +247,7 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
           <input
             type="text"
             id="log-filter"
-            placeholder="Saring log..."
+            placeholder="${escapeHtml(t("overview.filter_placeholder", {}, currentLang))}"
             style="width: 140px; max-width: 100%; padding: 0.25rem 0.6rem; font-size: var(--text-xs); border-radius: 0; background: var(--surface); color: var(--text); border: 1.5px solid #000000; box-shadow: 2px 2px 0 #000000;"
             oninput="applyLogFilter()"
           />
@@ -256,7 +256,7 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
             Auto-scroll
           </label>
           <button type="button" class="btn btn-sm" onclick="clearLogs()" style="font-size: var(--text-xs); padding: 0.25rem 0.65rem; background: #ffffff; color: #000000; border: 1.5px solid #000000; box-shadow: 2px 2px 0 #000000; font-weight: 800;">
-            Clear
+            ${escapeHtml(t("common.delete", {}, currentLang))}
           </button>
         </div>
         <div class="window-controls" aria-hidden="true"><span>_</span><span>&#9633;</span><span class="wc-close">&#10005;</span></div>

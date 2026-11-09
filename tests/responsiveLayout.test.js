@@ -54,3 +54,14 @@ test("responsive layout: script closes drawer on ESC and backdrop click", () => 
   assert.match(html, /document\.body\.classList\.remove\('nav-open'\)/);
   assert.match(html, /sidebarBackdrop\.addEventListener\('click',\s*closeNav\)/);
 });
+
+test("responsive layout: sidebar logout button text is protected against clipping", () => {
+  const htmlId = renderLayout({ title: "Test ID", content: "", lang: "id" });
+  assert.match(htmlId, /class="btn btn-danger btn-sm sidebar-logout-btn"/);
+  assert.match(htmlId, />Keluar<\/button>/);
+  assert.match(htmlId, /\.sidebar-actions \.sidebar-logout-btn\s*\{[\s\S]*?white-space:\s*nowrap;/);
+  assert.match(htmlId, /\.sidebar-actions \.sidebar-lang-form\s*\{[\s\S]*?flex:\s*0 0 auto;/);
+
+  const htmlEn = renderLayout({ title: "Test EN", content: "", lang: "en" });
+  assert.match(htmlEn, />Log out<\/button>/);
+});

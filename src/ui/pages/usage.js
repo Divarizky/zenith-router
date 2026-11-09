@@ -10,7 +10,7 @@ import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
 import { getProviderIconPath } from "../assets.js";
 import { buildAntigravityFamilies, familyFromDisplayName, LEVEL_DISPLAY_ORDER } from "../../services/antigravityCatalog.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 /**
  * Render Usage Analytics and Quota page
@@ -1108,21 +1108,21 @@ function renderQuotaCard(s, antigravityInventory = null) {
 
   const syncedNotice =
     query.synced === "1" || query.synced === "true"
-      ? `<div class="notice notice-ok"><span>Kuota semua akun tertaut berhasil disegarkan.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+      ? `<div class="notice notice-ok"><span>${escapeHtml(t("usage.sync_success_notice", {}, currentLang))}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
       : "";
   // Auto sync runs on a server timer; the label tells the user when it happens.
   const syncIntervalMs = getQuotaSyncIntervalMs();
   const autoSyncLabel = syncIntervalMs
-    ? `Auto setiap ${Math.round(syncIntervalMs / 60000)} menit`
-    : "Auto sync mati (env)";
+    ? t("usage.auto_sync_every", { minutes: Math.round(syncIntervalMs / 60000) }, currentLang)
+    : t("usage.auto_sync_off", {}, currentLang);
   const quotaHeader = `
       <div class="card-head">
         <div>
-          <h3>Account Quotas &amp; Balance</h3>
-          <p class="hint" style="margin-top: 0.25rem;">${autoSyncLabel}. Tombol ikon menyegarkan semua akun sekarang.</p>
+          <h3>${escapeHtml(t("usage.quotas_title", {}, currentLang))}</h3>
+          <p class="hint" style="margin-top: 0.25rem;">${autoSyncLabel}. ${currentLang === "en" ? "Icon button refreshes all accounts now." : "Tombol ikon menyegarkan semua akun sekarang."}</p>
         </div>
         <form action="/dashboard/quota/sync/all" method="POST" style="margin: 0;">
-          <button type="submit" class="btn btn-sm btn-icon" title="Segarkan semua kuota sekarang" aria-label="Segarkan semua kuota sekarang">
+          <button type="submit" class="btn btn-sm btn-icon" title="${escapeHtml(t("usage.sync_all_title", {}, currentLang))}" aria-label="${escapeHtml(t("usage.sync_all_title", {}, currentLang))}">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 4v4h-4"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 20v-4h4"/></svg>
           </button>
         </form>
@@ -1130,43 +1130,43 @@ function renderQuotaCard(s, antigravityInventory = null) {
   const content = `
     ${syncedNotice}
     <div class="card">
-      <h3>Router Topology</h3>
-      <p class="hint">Provider aktif terhubung langsung ke Zenith Transit Gateway melalui terminal konektor patch. Warna dan lampu indikator menandai status trafik: request berjalan (live), terakhir dipakai (last), atau idle.</p>
+      <h3>${escapeHtml(t("usage.router_topology", {}, currentLang))}</h3>
+      <p class="hint">${escapeHtml(t("usage.router_topology_hint", {}, currentLang))}</p>
       <div class="topo-layout">
         <div class="topo-main">${renderTopologyPane(topology)}</div>
         ${renderRecentPanel(recent)}
         <div class="topology-legend">
-          <span><i class="dot dot-router"></i>Zenith Master Matrix</span>
-          <span><i class="dot dot-active"></i>Active / Live</span>
-          <span><i class="dot dot-last"></i>Last Used</span>
-          <span><i class="dot dot-idle"></i>Standby / Idle</span>
+          <span><i class="dot dot-router"></i>${escapeHtml(t("usage.legend_master", {}, currentLang))}</span>
+          <span><i class="dot dot-active"></i>${escapeHtml(t("usage.legend_active", {}, currentLang))}</span>
+          <span><i class="dot dot-last"></i>${escapeHtml(t("usage.legend_last", {}, currentLang))}</span>
+          <span><i class="dot dot-idle"></i>${escapeHtml(t("usage.legend_idle", {}, currentLang))}</span>
         </div>
       </div>
     </div>
 
     <div class="grid">
       <div class="card stat">
-        <div class="label">Total Permintaan (30 hari)</div>
+        <div class="label">${escapeHtml(t("usage.stat_total_requests", {}, currentLang))}</div>
         <div class="value">${stats.summary.total_requests}</div>
-        <div class="sub">Rata-rata: ${stats.summary.avg_duration_ms}ms</div>
+        <div class="sub">${t("usage.stat_avg_duration", { duration: stats.summary.avg_duration_ms }, currentLang)}</div>
       </div>
       <div class="card stat">
-        <div class="label">Token Masukan</div>
+        <div class="label">${escapeHtml(t("usage.stat_input_tokens", {}, currentLang))}</div>
         <div class="value">${stats.summary.total_input_tokens.toLocaleString()}</div>
-        <div class="sub">Konteks prompt</div>
+        <div class="sub">${escapeHtml(t("usage.stat_input_sub", {}, currentLang))}</div>
       </div>
       <div class="card stat">
-        <div class="label">Token Keluaran</div>
+        <div class="label">${escapeHtml(t("usage.stat_output_tokens", {}, currentLang))}</div>
         <div class="value">${stats.summary.total_output_tokens.toLocaleString()}</div>
-        <div class="sub">Konten hasil</div>
+        <div class="sub">${escapeHtml(t("usage.stat_output_sub", {}, currentLang))}</div>
       </div>
       <div class="card stat">
-        <div class="label">Total Token</div>
+        <div class="label">${escapeHtml(t("usage.stat_combined_tokens", {}, currentLang))}</div>
         <div class="value">${stats.summary.total_tokens.toLocaleString()}</div>
-        <div class="sub">Pemakaian gabungan</div>
+        <div class="sub">${escapeHtml(t("usage.stat_combined_sub", {}, currentLang))}</div>
       </div>
       <div class="card stat">
-        <div class="label">Token dari Cache</div>
+        <div class="label">${escapeHtml(t("usage.stat_cache_tokens", {}, currentLang))}</div>
         <div class="value">${stats.summary.total_cache_read_tokens.toLocaleString()}</div>
         <div class="sub">${cacheHitLabel(stats.summary)}</div>
       </div>
@@ -1176,19 +1176,19 @@ function renderQuotaCard(s, antigravityInventory = null) {
       ${quotaHeader}
       ${
         quotas.length === 0
-          ? `<div class="empty"><p class="big">Belum ada data kuota</p><p>Hanya akun dengan data kuota dari provider yang ditampilkan di sini.</p></div>`
+          ? `<div class="empty"><p class="big">${escapeHtml(t("usage.empty_quotas", {}, currentLang))}</p><p>${escapeHtml(t("usage.empty_quotas_hint", {}, currentLang))}</p></div>`
           : `<div class="quota-grid">${quotas.map((q) => renderQuotaCard(q, antigravityInventory)).join("")}</div>`
       }
     </div>
 
     <div class="card">
-      <h3>Token Consumption by Model</h3>
+      <h3>${escapeHtml(t("usage.token_by_model", {}, currentLang))}</h3>
       ${
         stats.by_model.length === 0
-          ? `<div class="empty"><p class="big">Belum ada catatan pemakaian</p><p>Kirim request ke /v1 untuk melihat statistik.</p></div>`
+          ? `<div class="empty"><p class="big">${escapeHtml(t("usage.empty_usage", {}, currentLang))}</p><p>${escapeHtml(t("usage.empty_usage_hint", {}, currentLang))}</p></div>`
           : `<table>
         <thead>
-          <tr><th>Model</th><th>Permintaan</th><th>Total Token</th></tr>
+          <tr><th>${escapeHtml(t("usage.col_model", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_requests", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_total_tokens", {}, currentLang))}</th></tr>
         </thead>
         <tbody>
           ${stats.by_model
@@ -1209,10 +1209,10 @@ function renderQuotaCard(s, antigravityInventory = null) {
     ${
       stats.by_account && stats.by_account.length > 0
         ? `<div class="card">
-      <h3>Token Consumption by Account</h3>
+      <h3>${escapeHtml(t("usage.token_by_account", {}, currentLang))}</h3>
       <table>
         <thead>
-          <tr><th>Akun / Koneksi</th><th>Provider</th><th>Permintaan</th><th>Total Token</th></tr>
+          <tr><th>${escapeHtml(t("usage.col_account", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_provider", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_requests", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_total_tokens", {}, currentLang))}</th></tr>
         </thead>
         <tbody>
           ${stats.by_account

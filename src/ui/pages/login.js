@@ -1,6 +1,6 @@
 import { escapeHtml } from "../html.js";
 import { THEME_TOKENS_CSS } from "../theme.js";
-import { resolveLanguage, DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { resolveLanguage, t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import {
   buildSessionCookieClearHeader,
   buildSessionCookieHeader,
@@ -156,9 +156,9 @@ export function renderDashboardLoginPage({
 
     <form action="/dashboard/login" method="post">
       <input type="hidden" name="next" value="${escapeHtml(safeNext)}">
-      <label for="${fieldId}">${isAdminMode ? "Token admin" : "Password dashboard"}</label>
+      <label for="${fieldId}">${isAdminMode ? (currentLang === "en" ? "Admin token" : "Token admin") : (currentLang === "en" ? "Dashboard password" : "Password dashboard")}</label>
       <input type="password" id="${fieldId}" name="${fieldId}" autocomplete="current-password" autofocus required ${lockout ? "disabled" : ""}>
-      <button type="submit" ${lockout ? "disabled" : ""}>Masuk</button>
+      <button type="submit" ${lockout ? "disabled" : ""}>${escapeHtml(t("auth.login_button", {}, currentLang))}</button>
     </form>
 
     <p class="foot">Hanya dari loopback &middot; Sesi berlaku 24 jam</p>

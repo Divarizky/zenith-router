@@ -48,7 +48,7 @@ import {
 import { escapeHtml } from "../html.js";
 import { getSetting, setSetting, deleteSetting } from "../../services/settings.js";
 import { getProviderIconPath } from "../assets.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 const SECTIONS = [
   { category: "custom", title: "Custom Providers", hint: "Endpoint kustom OpenAI / Anthropic-compatible (Local LLM, LM Studio, vLLM, self-hosted, dll)." },
@@ -387,33 +387,33 @@ export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LAN
         <h3>Tambah Custom Provider</h3>
         <form action="/dashboard/providers/custom/add" method="POST">
           <div class="field">
-            <label for="cp-name">Nama Provider</label>
-            <input type="text" id="cp-name" name="name" placeholder="contoh: LM Studio Local, Private vLLM" required />
+            <label for="cp-name">${currentLang === "en" ? "Provider Name" : "Nama Provider"}</label>
+            <input type="text" id="cp-name" name="name" placeholder="${escapeHtml(t("providers.form_name_placeholder", {}, currentLang))}" required />
           </div>
           <div class="field">
-            <label for="cp-prefix">Prefix Model (Wire Syntax)</label>
-            <input type="text" id="cp-prefix" name="prefix" placeholder="contoh: lms, vllm, local" required pattern="[a-zA-Z0-9_-]+" />
-            <p class="hint">Prefix untuk memanggil model, misal <code>lms/&lt;model&gt;</code>.</p>
+            <label for="cp-prefix">${currentLang === "en" ? "Model Prefix (Wire Syntax)" : "Prefix Model (Wire Syntax)"}</label>
+            <input type="text" id="cp-prefix" name="prefix" placeholder="${escapeHtml(t("providers.form_prefix_placeholder", {}, currentLang))}" required pattern="[a-zA-Z0-9_-]+" />
+            <p class="hint">${currentLang === "en" ? "Prefix to invoke models, e.g. " : "Prefix untuk memanggil model, misal "}<code>lms/&lt;model&gt;</code>.</p>
           </div>
           <div class="field">
             <label for="cp-base-url">Base URL</label>
-            <input type="url" id="cp-base-url" name="base_url" placeholder="http://127.0.0.1:1234/v1" required />
-            <p class="hint">URL endpoint API root (misal <code>http://127.0.0.1:1234/v1</code> atau <code>https://api.mistral.ai/v1</code>).</p>
+            <input type="url" id="cp-base-url" name="base_url" placeholder="${escapeHtml(t("providers.form_base_url_placeholder", {}, currentLang))}" required />
+            <p class="hint">${currentLang === "en" ? "Root API endpoint URL (e.g. " : "URL endpoint API root (misal "}<code>http://127.0.0.1:1234/v1</code>${currentLang === "en" ? " or " : " atau "}<code>https://api.mistral.ai/v1</code>).</p>
           </div>
           <div class="field">
-            <label for="cp-api-type">Tipe Protokol API</label>
+            <label for="cp-api-type">${currentLang === "en" ? "API Protocol Type" : "Tipe Protokol API"}</label>
             <select id="cp-api-type" name="api_type">
               <option value="openai">OpenAI Compatible (/chat/completions)</option>
               <option value="claude">Anthropic Compatible (/messages)</option>
             </select>
           </div>
           <div class="field">
-            <label for="cp-headers">Custom Headers (Opsional, Format JSON)</label>
+            <label for="cp-headers">${currentLang === "en" ? "Custom Headers (Optional, JSON format)" : "Custom Headers (Opsional, Format JSON)"}</label>
             <input type="text" id="cp-headers" name="custom_headers" placeholder='{"X-Custom-Header": "value"}' />
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn" data-close-modal="add-custom-provider-modal">Batal</button>
-            <button type="submit" class="btn btn-primary">Simpan Provider</button>
+            <button type="button" class="btn" data-close-modal="add-custom-provider-modal">${escapeHtml(t("common.cancel", {}, currentLang))}</button>
+            <button type="submit" class="btn btn-primary">${currentLang === "en" ? "Save Provider" : "Simpan Provider"}</button>
           </div>
         </form>
       </div>

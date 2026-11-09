@@ -87,7 +87,7 @@ import {
   handleSaveSettings,
   handleResetDashboardPassword,
 } from "./ui/pages/settings.js";
-import { resolveLanguage } from "./ui/i18n/index.js";
+import { resolveLanguage, sanitizeRedirect } from "./ui/i18n/index.js";
 import {
   renderApiKeysPage,
   handleCreateApiKey,
@@ -250,17 +250,26 @@ app.post("/dashboard/settings/password/reset", handleResetDashboardPassword);
 app.post("/dashboard/language", async (c) => {
   const body = await c.req.parseBody().catch(() => ({}));
   const lang = String(body.lang || "").toLowerCase();
-  const redirectTo = String(body.redirect || c.req.header("referer") || "/dashboard");
+  const rawTarget = body.redirect || c.req.header("referer") || "/dashboard";
+  const redirectTo = sanitizeRedirect(rawTarget, c.req.url, "/dashboard");
   if (lang === "id" || lang === "en") {
     const { setCookie } = await import("hono/cookie");
-    const { setSetting } = await import("./services/settings.js");
     setCookie(c, "zr_lang", lang, {
       path: "/",
       maxAge: 31536000, // 1 tahun
       httpOnly: false,
       sameSite: "Lax",
     });
-    setSetting("ui_language", lang);
+
+    // Lindungi perubahan setting global ui_language:
+    // Hanya simpan ke DB bila login dashboard tidak diwajibkan atau sesi terautentikasi.
+    const { hasValidDashboardSession, isLoginRequired } = await import("./services/dashboardAuth.js");
+    const remote = c.env?.incoming?.socket?.remoteAddress;
+    const isRealHttp = Boolean(remote);
+    if (!isLoginRequired(isRealHttp) || hasValidDashboardSession(c)) {
+      const { setSetting } = await import("./services/settings.js");
+      setSetting("ui_language", lang);
+    }
   }
   return c.redirect(redirectTo);
 });

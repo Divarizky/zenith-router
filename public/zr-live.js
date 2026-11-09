@@ -74,6 +74,14 @@
     if (navToggle) navToggle.setAttribute("aria-expanded", "false");
     runCleanups();
     if (doc.title) document.title = doc.title;
+    if (doc.documentElement && doc.documentElement.getAttribute("lang")) {
+      document.documentElement.setAttribute("lang", doc.documentElement.getAttribute("lang"));
+    }
+    var nextSidebar = doc.querySelector("#sidebar");
+    var currentSidebar = document.querySelector("#sidebar");
+    if (nextSidebar && currentSidebar) {
+      currentSidebar.innerHTML = nextSidebar.innerHTML;
+    }
     currentMain.innerHTML = nextMain.innerHTML;
     reexecScripts(document.body);
     runInits();

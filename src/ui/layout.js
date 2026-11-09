@@ -231,10 +231,29 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       align-items: center;
       gap: 0.5rem;
     }
-    .sidebar-actions form { margin: 0; flex: 1; }
-    .sidebar-actions .btn-danger {
+    .sidebar-actions .sidebar-lang-form {
+      margin: 0;
+      flex: 0 0 auto;
+    }
+    .sidebar-actions .sidebar-lang-btn {
+      min-width: 2.2rem;
+      padding: 0.4rem 0.55rem;
+      font-weight: 800;
+    }
+    .sidebar-actions #theme-toggle {
+      flex: 0 0 auto;
+    }
+    .sidebar-actions .sidebar-logout-form {
+      margin: 0;
+      flex: 1;
+      min-width: 0;
+    }
+    .sidebar-actions .sidebar-logout-btn {
       width: 100%;
       justify-content: center;
+      white-space: nowrap;
+      padding: 0.4rem 0.65rem;
+      font-weight: 800;
     }
     .sidebar-user { color: var(--text-subtle); font-size: var(--text-xs); }
     @media (max-width: 1100px) { .sidebar-user { display: none; } }
@@ -1171,8 +1190,12 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
         gap: 0.5rem;
       }
       .sidebar-status { display: none; }
-      .sidebar-actions { width: 100%; justify-content: center; gap: 0.5rem; }
-      .sidebar-actions form, .sidebar-actions button { width: 100%; }
+      .sidebar-actions { width: 100%; justify-content: flex-start; gap: 0.5rem; }
+      .sidebar-actions .sidebar-lang-form { flex: 0 0 auto; width: auto; }
+      .sidebar-actions .sidebar-lang-btn { width: auto; }
+      .sidebar-actions #theme-toggle { flex: 0 0 auto; width: auto; }
+      .sidebar-actions .sidebar-logout-form { flex: 1; min-width: 0; width: auto; }
+      .sidebar-actions .sidebar-logout-btn { width: 100%; white-space: nowrap; }
       .main-header-title h2 { font-size: 1.1rem; }
       .nav-link { padding: 0.5rem 0.65rem; font-size: var(--text-sm); }
     }
@@ -1260,21 +1283,21 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       <nav aria-label="Navigasi utama" class="sidebar-nav">${navHtml}</nav>
       <div class="sidebar-footer">
         <div class="sidebar-status">
-          <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
+          <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> ${escapeHtml(t("common.online", {}, currentLang))} &middot; ${escapeHtml(t("common.port", {}, currentLang))} ${escapeHtml(port)}</span>
         </div>
         <div class="sidebar-actions">
-          <form action="/dashboard/language" method="POST" style="display:inline;">
+          <form action="/dashboard/language" method="POST" class="sidebar-lang-form">
             <input type="hidden" name="lang" value="${currentLang === "id" ? "en" : "id"}">
-            <button type="submit" class="btn btn-secondary btn-sm" title="${currentLang === "id" ? "Switch to English" : "Ganti ke Bahasa Indonesia"}">
+            <button type="submit" class="btn btn-secondary btn-sm sidebar-lang-btn" title="${currentLang === "id" ? "Switch to English" : "Ganti ke Bahasa Indonesia"}">
               ${currentLang === "id" ? "EN" : "ID"}
             </button>
           </form>
-          <button type="button" class="btn btn-secondary btn-icon" id="theme-toggle" aria-label="Ubah tema" title="Ubah tema">
+          <button type="button" class="btn btn-secondary btn-icon" id="theme-toggle" aria-label="${escapeHtml(t("common.toggle_theme", {}, currentLang))}" title="${escapeHtml(t("common.toggle_theme", {}, currentLang))}">
             <span class="theme-icon theme-icon-moon">${icon("moon")}</span>
             <span class="theme-icon theme-icon-sun">${icon("sun")}</span>
           </button>
-          <form action="/dashboard/logout" method="POST">
-            <button type="submit" class="btn btn-danger btn-sm" title="${escapeHtml(t("common.logout", {}, currentLang))}">${escapeHtml(t("common.logout", {}, currentLang))}</button>
+          <form action="/dashboard/logout" method="POST" class="sidebar-logout-form">
+            <button type="submit" class="btn btn-danger btn-sm sidebar-logout-btn" title="${escapeHtml(t("common.logout", {}, currentLang))}">${escapeHtml(t("common.logout", {}, currentLang))}</button>
           </form>
         </div>
       </div>
@@ -1292,14 +1315,14 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
               <h2>${escapeHtml(title)}</h2>
             </div>
             <div class="main-header-status">
-              <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> Online &middot; Port ${escapeHtml(port)}</span>
+              <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> ${escapeHtml(t("common.online", {}, currentLang))} &middot; ${escapeHtml(t("common.port", {}, currentLang))} ${escapeHtml(port)}</span>
             </div>
           </div>
         </header>
         ${isUsingDefaultPassword() ? `
         <div class="banner banner-warning">
-          <span><strong>Perhatian:</strong> dashboard masih memakai password awal <code>123456</code>. Ubah lewat menu Settings.</span>
-          <a href="/dashboard/settings#password" class="btn btn-ghost">Ubah Password</a>
+          <span><strong>${currentLang === "en" ? "Warning:" : "Perhatian:"}</strong> ${escapeHtml(t("common.default_password_warning", {}, currentLang))}</span>
+          <a href="/dashboard/settings#password" class="btn btn-ghost">${escapeHtml(t("common.change_password_btn", {}, currentLang))}</a>
         </div>` : ""}
         ${content}
       </main>
@@ -1307,11 +1330,11 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
   </div>
   <div class="zr-confirm-backdrop" id="zr-confirm">
     <div class="zr-confirm" role="dialog" aria-modal="true" aria-labelledby="zr-confirm-title" aria-describedby="zr-confirm-msg">
-      <h3 id="zr-confirm-title">Konfirmasi</h3>
+      <h3 id="zr-confirm-title">${escapeHtml(t("common.confirm_title", {}, currentLang))}</h3>
       <p id="zr-confirm-msg"></p>
       <div class="modal-actions">
-        <button type="button" class="btn" id="zr-confirm-cancel">Batal</button>
-        <button type="button" class="btn btn-danger" id="zr-confirm-ok">Lanjutkan</button>
+        <button type="button" class="btn" id="zr-confirm-cancel">${escapeHtml(t("common.confirm_cancel", {}, currentLang))}</button>
+        <button type="button" class="btn btn-danger" id="zr-confirm-ok">${escapeHtml(t("common.confirm_proceed", {}, currentLang))}</button>
       </div>
     </div>
   </div>
@@ -1331,7 +1354,11 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     function zrSyncThemeButton() {
       var btn = document.getElementById('theme-toggle');
       if (!btn) return;
-      var label = zrCurrentTheme() === 'dark' ? 'Aktifkan tema terang' : 'Aktifkan tema gelap';
+      var isEn = document.documentElement.getAttribute('lang') === 'en';
+      var isDark = zrCurrentTheme() === 'dark';
+      var label = isDark
+        ? (isEn ? 'Switch to light mode' : 'Aktifkan tema terang')
+        : (isEn ? 'Switch to dark mode' : 'Aktifkan tema gelap');
       btn.setAttribute('aria-label', label);
       btn.setAttribute('title', label);
     }

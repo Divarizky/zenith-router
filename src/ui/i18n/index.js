@@ -1,6 +1,6 @@
 import id from "./id.js";
 import en from "./en.js";
-import { getCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 import { getSetting } from "../../services/settings.js";
 
 export const SUPPORTED_LANGUAGES = ["id", "en"];
@@ -77,7 +77,18 @@ export function resolveLanguage(c) {
   try {
     const queryLang = c.req.query("lang");
     if (queryLang && SUPPORTED_LANGUAGES.includes(queryLang.toLowerCase())) {
-      return queryLang.toLowerCase();
+      const selected = queryLang.toLowerCase();
+      try {
+        setCookie(c, "zr_lang", selected, {
+          path: "/",
+          maxAge: 365 * 24 * 60 * 60,
+          httpOnly: false,
+          sameSite: "Lax",
+        });
+      } catch {
+        // Abaikan error penulisan cookie bila header sudah terkirim
+      }
+      return selected;
     }
   } catch {
     // Abaikan error pembacaan query
@@ -111,6 +122,41 @@ export function resolveLanguage(c) {
  */
 export function createTranslator(lang = DEFAULT_LANGUAGE) {
   return (key, params) => t(key, params, lang);
+}
+
+/**
+ * Memastikan URL pengalihan aman dari serangan open-redirect.
+ * Hanya menerima path relatif (diawali '/' dan bukan '//' atau '/\')
+ * atau URL absolut yang origin-nya sama persis dengan request.
+ *
+ * @param {string} [target]
+ * @param {string} [reqUrl]
+ * @param {string} [fallback="/dashboard"]
+ * @returns {string}
+ */
+export function sanitizeRedirect(target, reqUrl, fallback = "/dashboard") {
+  if (!target || typeof target !== "string") return fallback;
+  const trimmed = target.trim();
+  // Cegah control characters / newline injection
+  if (/[\r\n\t\x00-\x1f]/.test(trimmed)) return fallback;
+
+  // Path relatif: wajib diawali '/' dan tidak boleh '//' atau '/\'
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//") && !trimmed.startsWith("/\\")) {
+    return trimmed;
+  }
+
+  // URL absolut: hanya terima jika origin sama persis dengan origin request
+  if (reqUrl) {
+    try {
+      const ref = new URL(trimmed);
+      const reqOrigin = new URL(reqUrl).origin;
+      if (ref.origin === reqOrigin && ref.pathname.startsWith("/") && !ref.pathname.startsWith("//") && !ref.pathname.startsWith("/\\")) {
+        return ref.pathname + ref.search + ref.hash;
+      }
+    } catch {}
+  }
+
+  return fallback;
 }
 
 export { id, en };

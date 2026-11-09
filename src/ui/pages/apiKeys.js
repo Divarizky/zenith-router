@@ -7,7 +7,7 @@ import {
 import { isApiKeyRequired, getLocalBaseUrl } from "../../security.js";
 import { renderLayout } from "../layout.js";
 import { escapeHtml } from "../html.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 function formatTime(ms) {
   if (!ms) return `<span style="color: var(--text-muted);">belum pernah</span>`;
@@ -79,21 +79,21 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}, lang 
     <div class="card" style="margin-bottom: 1.5rem;">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <h3 style="margin-bottom: 0;">Keys (${keys.length})</h3>
-        <button class="btn btn-primary" onclick="openModal('create-key-modal')">Create API Key</button>
+        <button class="btn btn-primary" onclick="openModal('create-key-modal')">${escapeHtml(t("api_keys.btn_create", {}, currentLang))}</button>
       </div>
     </div>
 
     <div class="modal-backdrop" id="create-key-modal">
       <div class="modal">
-        <h3>Create API Key</h3>
+        <h3>${escapeHtml(t("api_keys.modal_title", {}, currentLang))}</h3>
         <form action="/dashboard/keys/create" method="POST">
           <div class="field">
-            <label for="name">Label</label>
-            <input type="text" id="name" name="name" placeholder="mis. Claude Code laptop" maxlength="80" required />
+            <label for="name">${escapeHtml(t("api_keys.label_field", {}, currentLang))}</label>
+            <input type="text" id="name" name="name" placeholder="${escapeHtml(t("api_keys.placeholder_name", {}, currentLang))}" maxlength="80" required />
           </div>
           <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
-            <button type="button" class="btn" data-close-modal="create-key-modal">Batal</button>
-            <button type="submit" class="btn btn-primary">Buat</button>
+            <button type="button" class="btn" data-close-modal="create-key-modal">${escapeHtml(t("common.cancel", {}, currentLang))}</button>
+            <button type="submit" class="btn btn-primary">${escapeHtml(t("common.add", {}, currentLang))}</button>
           </div>
         </form>
       </div>

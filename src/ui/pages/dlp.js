@@ -1,7 +1,8 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
+import { escapeHtml } from "../html.js";
 import { dlpModeFrom } from "../../services/dlp.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 export function renderDlpPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
   const currentLang = lang || DEFAULT_LANGUAGE;
@@ -16,24 +17,24 @@ export function renderDlpPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE)
         : ""
     }
     <div class="card">
-      <h3>Data Loss Prevention (DLP)</h3>
-      <p class="hint" style="margin-bottom: 1.25rem;">Pindai isi request keluar ke provider eksternal untuk mendeteksi rahasia seperti kunci API, token, private key, dan penugasan kredensial.</p>
+      <h3>${escapeHtml(t("dlp.title", {}, currentLang))}</h3>
+      <p class="hint" style="margin-bottom: 1.25rem;">${escapeHtml(t("dlp.subtitle", {}, currentLang))}</p>
 
       <div class="notice notice-warning" style="margin-bottom: 1.5rem;">
-        <span><strong>Perhatian:</strong> Pemindaian DLP menggunakan pencocokan pola regex dan heuristik kredensial. Teks biasa atau kode sumber yang menyerupai format kunci atau penugasan variabel dapat memicu deteksi (false positive).</span>
+        <span>${escapeHtml(t("dlp.warning", {}, currentLang))}</span>
       </div>
 
       <form action="/dashboard/dlp" method="POST">
         <div class="setting-row">
           <div class="setting-info">
-            <strong>Mode DLP</strong>
-            <p class="hint">Pilih bagaimana gateway menangani rahasia yang terdeteksi pada request keluar.</p>
+            <strong>${escapeHtml(t("dlp.mode_label", {}, currentLang))}</strong>
+            <p class="hint">${escapeHtml(t("dlp.mode_hint", {}, currentLang))}</p>
           </div>
           <div class="setting-action">
             <select name="dlp_mode" class="input-select" style="min-width: 200px;">
-              <option value="off" ${currentMode === "off" ? "selected" : ""}>Nonaktif (Off)</option>
-              <option value="redact" ${currentMode === "redact" ? "selected" : ""}>Redaksi (Redact)</option>
-              <option value="block" ${currentMode === "block" ? "selected" : ""}>Blokir (Block)</option>
+              <option value="off" ${currentMode === "off" ? "selected" : ""}>${escapeHtml(t("dlp.mode_off", {}, currentLang))}</option>
+              <option value="redact" ${currentMode === "redact" ? "selected" : ""}>${escapeHtml(t("dlp.mode_redact", {}, currentLang))}</option>
+              <option value="block" ${currentMode === "block" ? "selected" : ""}>${escapeHtml(t("dlp.mode_block", {}, currentLang))}</option>
             </select>
           </div>
         </div>

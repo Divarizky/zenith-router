@@ -11,7 +11,7 @@ import {
 import { getAllProviders } from "../../providers/index.js";
 import { escapeHtml } from "../html.js";
 import { renderLayout, icon } from "../layout.js";
-import { DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 function fmtTestTime(ms) {
   const d = new Date(ms);
@@ -108,7 +108,8 @@ function renderProxyRow(pool) {
     </div>`;
 }
 
-export function renderProxyContent(query = {}) {
+export function renderProxyContent(query = {}, lang = DEFAULT_LANGUAGE) {
+  const currentLang = lang || DEFAULT_LANGUAGE;
   const pools = listProxyPools();
   const activeCount = pools.filter((p) => Number(p.is_active) === 1).length;
 
@@ -205,15 +206,15 @@ export function renderProxyContent(query = {}) {
 
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
       <div>
-        <h1 style="font-size: 1.5rem; font-weight: 800; margin-bottom: 0.25rem;">Proxy Pools</h1>
-        <p class="hint" style="margin: 0;">Kelola daftar proxy pool terpusat untuk akun provider dan rotasi request.</p>
+        <h1 style="font-size: 1.5rem; font-weight: 800; margin-bottom: 0.25rem;">${escapeHtml(t("proxies.title", {}, currentLang))}</h1>
+        <p class="hint" style="margin: 0;">${escapeHtml(t("proxies.subtitle", {}, currentLang))}</p>
       </div>
       <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <button type="button" class="btn btn-secondary" onclick="openModal('batch-import-modal')">
-          ${icon("upload", 16)} <span>Batch Import</span>
+          ${icon("upload", 16)} <span>${escapeHtml(t("proxies.btn_import", {}, currentLang))}</span>
         </button>
         <button type="button" class="btn btn-primary" onclick="openModal('add-proxy-modal')">
-          ${icon("plus", 16)} <span>Add Proxy Pool</span>
+          ${icon("plus", 16)} <span>${escapeHtml(t("proxies.btn_add", {}, currentLang))}</span>
         </button>
       </div>
     </div>
@@ -363,7 +364,7 @@ export function renderProxyContent(query = {}) {
 
 export function renderProxiesPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
   const currentLang = lang || DEFAULT_LANGUAGE;
-  const content = renderProxyContent(query);
+  const content = renderProxyContent(query, currentLang);
   const extraScripts = `
 <script>
   function openEditModal(id, name, url, isActive) {

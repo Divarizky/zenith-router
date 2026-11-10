@@ -1,16 +1,23 @@
-## [Unreleased]
+## [2.2.0] - 11-11-2026
+
+Zenith Router v2.2.0 menghadirkan lokalisasi penuh antarmuka dashboard (Inggris & Indonesia) dengan toggle bahasa dinamis di sidebar, tata letak fluid responsive untuk berbagai ukuran layar, penyempurnaan OpenCode Bun bridge (resolusi path via fileURLToPath, propagasi session ID, dan normalisasi prompt cache hit tokens), batas concurrency lock per model, serta peningkatan ketahanan pengujian CI.
 
 ### Fitur
 
-- **Pemasangan extension Pi saat `npm install`**:
-  - `scripts/ensurePi.js` dijalankan dari `postinstall` setelah `ensureBun.js`.
-  - Memeriksa Pi lewat `pi --version`, lalu memasang extension `extensions/pi` bila belum terdaftar di `pi list`.
-  - Jika Pi belum terpasang, menawarkan pemasangan `@earendil-works/pi-coding-agent`. Di terminal non-interaktif hanya mencetak perintah manual.
+- **Dashboard Multi-Bahasa & Localized Content**:
+  - Dukungan dwibahasa (EN & ID) di seluruh panel dashboard, status router, notifikasi toast, dan panduan konfigurasi.
+  - Sidebar language switcher interaktif yang mengubah bahasa teks antarmuka secara instan tanpa perlu memuat ulang halaman.
+- **Fluid Responsive Layout**:
+  - Penyesuaian layout dinamis yang beradaptasi secara mulus terhadap berbagai resolusi layar, dari layar lebar desktop hingga tampilan viewport sempit.
+- **Penyempurnaan OpenCode Bridge**:
+  - Resolusi path script bridge menggunakan `fileURLToPath` untuk kompatibilitas lintas environment dan runtime Node/Bun.
+  - Normalisasi `prompt_cache_hit_tokens` dan propagasi session ID yang akurat.
+- **Manajemen Kuota & Concurrency**:
+  - Batas maksimal lock per model (*cap per-model locks*) dan pemulihan status routing otomatis untuk akun yang telah melewati masa kuota/cooldown.
 
-### Dokumentasi
+### Perbaikan & Pengujian
 
-- README.md disusun ulang mengikuti struktur repo open-source umum, dengan tabel provider dan referensi environment variable yang disinkronkan dengan kode.
-- `extensions/pi/README.md`: batasan metadata `/v1/models` diperbarui.
+- Pengujian deteksi Bun dibuat deterministik dan tahan terhadap kondisi CI luring (*offline CI*).
 
 ## [2.1.0] - 05-11-2026
 

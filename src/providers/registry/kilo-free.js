@@ -7,6 +7,10 @@ export default {
   category: "free",
   noAuth: true,
   supportsTools: true,
+  // The gateway's own free list is the whole catalog worth routing, and it turns
+  // over (a retired :free id answers 400 model_unavailable), so the live free
+  // list replaces the hardcoded one instead of only adding to it.
+  freeModelSync: "replace",
   format: "openai",
   transport: {
     baseUrl: "https://api.kilo.ai/api/gateway/chat/completions",

@@ -178,6 +178,11 @@ const IMPORTERS = {
       ];
       return [...builtins, ...turboModels];
     },
+    // The chat endpoint rejects retired ids with `model_unavailable`, and those
+    // ids are absent from this list, so the raw payload decides what is gone.
+    // The aliases above are callable without being listed (see registry
+    // builtinAliases), hence they never appear here.
+    liveIds: (json) => listOf(json).map((m) => m.id).filter((id) => typeof id === "string" && id),
   },
   ollama: {
     url: "https://ollama.com/v1/models",
@@ -301,8 +306,11 @@ export function getImportModes(provider) {
 /**
  * Fetch and parse a provider's live model list, using its first active account
  * (credentials and proxy) when there is one.
- * Returns `{ ok: true, models }` or `{ ok: false, code, status? }` with code
- * unsupported, no_account, or upstream_error.
+ * Returns `{ ok: true, models, liveIds }` or `{ ok: false, code, status? }` with code
+ * unsupported, no_account, or upstream_error. `liveIds` is every id the payload
+ * carried, used by the catalog refresh to spot retired built-ins. It defaults to
+ * the parsed list, so an importer that filters ids out (free-only, chat-only) must
+ * declare its own hook or its filtered ids would look retired.
  */
 export async function fetchProviderModels(provider) {
   const importer = provider && IMPORTERS[provider.id];
@@ -333,12 +341,16 @@ export async function fetchProviderModels(provider) {
       proxyUrl: requireResolvedProxy(connection),
     });
     if (!res.ok) return { ok: false, code: "upstream_error", status: res.status };
-    let models = importer.parse(await res.json()).filter((m) => typeof m.id === "string" && m.id);
+    const payload = await res.json();
+    let models = importer.parse(payload).filter((m) => typeof m.id === "string" && m.id);
     if (importer.checkAccess) {
       const executor = getExecutor(provider.id);
       models = await importer.checkAccess(models, { executor, headers, proxyUrl: requireResolvedProxy(connection) });
     }
-    return { ok: true, models };
+    const liveIds = importer.liveIds
+      ? importer.liveIds(payload).filter((id) => typeof id === "string" && id)
+      : models.map((m) => m.id);
+    return { ok: true, models, liveIds };
   } catch {
     return { ok: false, code: "upstream_error" };
   }

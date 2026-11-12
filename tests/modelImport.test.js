@@ -6,6 +6,7 @@ import { importProviderModels, getImportModes } from "../src/services/modelImpor
 import { listImportedModels } from "../src/services/modelOverrides.js";
 import { getAvailableModels, getProvider } from "../src/providers/index.js";
 import { app } from "../src/index.js";
+import { getComboByName } from "../src/services/combos.js";
 
 /** Mock upstream that records each call and answers with `payload` (or `status`). */
 function mockUpstream(payload, status = 200) {
@@ -170,6 +171,24 @@ test("dashboard import flow - modal, redirect notice, selection column, and clea
   });
   assert.strictEqual(cleared.headers.get("location"), "/dashboard/providers/kilocode?import=cleared");
   assert.strictEqual(listImportedModels("kilocode").length, 0);
+});
+
+test("dashboard import - rebuilds the managed combos without probing upstream", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  const calls = mockUpstream(KILO_LIST);
+  assert.strictEqual(getComboByName("zenith-free"), null);
+
+  const res = await app.request("/dashboard/providers/models/import", {
+    method: "POST",
+    body: form({ provider: "kilocode", mode: "all" }),
+  });
+  assert.strictEqual(res.status, 302);
+
+  const combo = getComboByName("zenith-free");
+  assert.ok(combo, "import stores the managed combos");
+  assert.ok(combo.models.includes("kc/vendor/a:free"), "imported free id is routable at once");
+  assert.strictEqual(calls.length, 1, "the rebuild issues no probe request");
 });
 
 test("POST /dashboard/providers/models/import/delete - removes only the selected imported models", async (t) => {

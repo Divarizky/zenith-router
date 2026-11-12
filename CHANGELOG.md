@@ -1,3 +1,23 @@
+## [Unreleased]
+
+Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model gratis. Model bawaan yang sudah tidak ada di katalog provider berhenti ditawarkan, dan model yang muncul kembali otomatis dirutekan lagi.
+
+### Fitur
+
+- **Pencocokan Katalog Provider**:
+  - Penanda `catalogRefresh` membuat sinkron menulis ulang tabel `retired_models` dari daftar live provider, tanpa mengubah daftar model gratis.
+  - `builtinAliases` melindungi id yang bisa dipanggil tetapi tidak pernah dipublikasikan, seperti alias `default` dan `fast` milik LLM7.
+  - Halaman provider menampilkan tombol "Sinkron Sekarang", jadwal, dan jumlah model bawaan yang disembunyikan untuk provider berkatalog.
+- **Cakupan Sinkronisasi per Provider**:
+  - LLM7 memakai `freeModelSync: "merge"`; Kilo Code Free Tier memakai `"replace"` karena daftar gratis gateway adalah katalognya.
+  - OVHcloud hanya menjalankan pencocokan katalog, karena akses gratisnya berupa kredit akun dan bukan tier per model.
+- **Combo Terkelola Ikut Diperbarui**:
+  - Aksi "Sinkron Sekarang" dan "Import Models" langsung menyusun ulang combo zenith tanpa menunggu siklus scheduler, dan tanpa menembak model ke upstream.
+
+### Perbaikan
+
+- Sinkron yang mengembalikan daftar kosong tidak lagi menyembunyikan seluruh model bawaan.
+
 ## [2.2.0] - 11-11-2026
 
 Zenith Router v2.2.0 menghadirkan lokalisasi penuh antarmuka dashboard (Inggris & Indonesia) dengan toggle bahasa dinamis di sidebar, tata letak fluid responsive untuk berbagai ukuran layar, penyempurnaan OpenCode Bun bridge (resolusi path via fileURLToPath, propagasi session ID, dan normalisasi prompt cache hit tokens), batas concurrency lock per model, serta peningkatan ketahanan pengujian CI.

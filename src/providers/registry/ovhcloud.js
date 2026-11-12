@@ -9,7 +9,9 @@ export default {
   // Anonymous tier answers /chat/completions without API key (2 req/min per IP).
   // An optional OVHcloud key raises the limit to 400 req/min.
   // Free access is account-level credit, not a per-model free tier, so there
-  // is no free-model sync; use Import for the live chat list.
+  // is no free-model sync; the catalog refresh only retires built-in ids the
+  // live list no longer carries, and Import adds the rest.
+  catalogRefresh: true,
   // Anonymous tier is capped at 2 req/min per IP, so a virtual (no-auth)
   // connection must keep a cool-off between dispatches instead of bursting
   // into consecutive 429s.

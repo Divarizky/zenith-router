@@ -178,6 +178,17 @@ CREATE TABLE IF NOT EXISTS disabled_models (
   PRIMARY KEY (provider, model_id)
 );
 
+-- Built-in catalog ids the provider no longer lists upstream. The set is
+-- rewritten on every successful catalog refresh, so a model that reappears is
+-- routed again; unlike disabled_models, this is a mirror of upstream, not a
+-- manual decision.
+CREATE TABLE IF NOT EXISTS retired_models (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  retired_at INTEGER NOT NULL,
+  PRIMARY KEY (provider, model_id)
+);
+
 -- Models imported from a provider's live model list; each import replaces the provider's rows.
 CREATE TABLE IF NOT EXISTS imported_models (
   provider TEXT NOT NULL,

@@ -5,6 +5,12 @@ export default {
   category: "free",
   noAuth: true,
   supportsTools: true,
+  // Merged, not replaced: `default` and `fast` are chat aliases the /v1/models
+  // list never carries, and a hardcoded id can be retired upstream without the
+  // alias disappearing. Retired ids are dropped by the catalog refresh instead.
+  freeModelSync: "merge",
+  catalogRefresh: true,
+  builtinAliases: ["default", "fast"],
   format: "openai",
   transport: {
     baseUrl: "https://api.llm7.io/v1/chat/completions",

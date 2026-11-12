@@ -18,7 +18,7 @@ import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
 import deepseekWeb from "./registry/deepseek-web.js";
-import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled } from "../services/modelOverrides.js";
+import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled, listRetiredModels } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
 
 /**
@@ -225,7 +225,10 @@ export function getProviderModels(p) {
     return capabilities ? { ...m, capabilities } : m;
   };
 
-  const staticModels = p.models.map((m) => withCaps({ id: m.id, name: m.name, source: "builtin" }));
+  const retired = p.catalogRefresh ? new Set(listRetiredModels(p.id).map((m) => m.model_id)) : new Set();
+  const staticModels = p.models
+    .filter((m) => !retired.has(m.id))
+    .map((m) => withCaps({ id: m.id, name: m.name, source: "builtin" }));
 
   // Antigravity publishes a per-subscription catalog, so accounts on a higher
   // plan carry families the builtin list never had (gemini-4-argon, Claude 5.5).

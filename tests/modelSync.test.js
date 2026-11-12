@@ -5,12 +5,20 @@ import { setCustomExecutor } from "../src/executors/base.js";
 import {
   syncFreeModels,
   syncAllFreeModels,
+  refreshProviderCatalog,
   getSyncIntervalMs,
   startModelSyncScheduler,
 } from "../src/services/modelSync.js";
-import { listSyncedModels, listImportedModels, getModelSyncState, disableModel } from "../src/services/modelOverrides.js";
+import {
+  listSyncedModels,
+  listImportedModels,
+  listRetiredModels,
+  getModelSyncState,
+  disableModel,
+} from "../src/services/modelOverrides.js";
 import { importProviderModels, getImportModes } from "../src/services/modelImport.js";
 import { getAvailableModels, getProvider, getProviderModels } from "../src/providers/index.js";
+import { getComboByName } from "../src/services/combos.js";
 import { app } from "../src/index.js";
 
 /** Mock upstream: answers per URL substring, records every call. */
@@ -97,6 +105,23 @@ const OVH = {
       { id: "Qwen3.5-397B-A17B", context_length: 262144, max_completion_tokens: 262144, pricing: { prompt: "0.00000071", completion: "0.00000425" } },
       // Not a chat endpoint: guard models carry a budget but are no chat models.
       { id: "Qwen3Guard-Gen-0.6B", context_length: 32768, max_completion_tokens: 16384, pricing: { prompt: "0", completion: "0" } },
+    ],
+  },
+};
+
+const LLM7 = {
+  payload: {
+    data: [
+      {
+        id: "codestral-latest",
+        tier: "turbo",
+        pricing: { input: 0.01, output: 0.02 },
+        capabilities: { tools: true },
+      },
+      { id: "mistral-Nemo-Instruct-2407", tier: "turbo" },
+      // Listed but paid: kept as a built-in only if the registry carries it.
+      { id: "gpt-oss:20b", tier: "pro", usage_based_only: true },
+      { id: "some-new-turbo", tier: "turbo" },
     ],
   },
 };
@@ -194,6 +219,120 @@ test("kilocode sync - keeps imported rows (merge providers still offer import)",
   mockUpstream({ "api.kilo.ai": KILO });
   await syncFreeModels("kilocode");
   assert.deepStrictEqual(listImportedModels("kilocode").map((m) => m.model_id), ["vendor/paid"]);
+});
+
+test("llm7 sync - live free list merges, and built-ins the catalog dropped stop routing", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  const llm7 = getProvider("llm7");
+
+  // `default` and `fast` are chat aliases: callable, never listed.
+  assert.deepStrictEqual(llm7.builtinAliases, ["default", "fast"]);
+  assert.ok(ids().includes("llm7/minimax-m2.7"), "hardcoded model listed before any sync");
+
+  mockUpstream({ "api.llm7.io": LLM7 });
+  const result = await syncFreeModels("llm7");
+  assert.strictEqual(result.code, "synced");
+  assert.strictEqual(result.count, 5, "three turbo ids plus the default/fast aliases");
+
+  const routed = ids();
+  assert.ok(routed.includes("llm7/codestral-latest"), "turbo id from the live list");
+  assert.ok(routed.includes("llm7/some-new-turbo"), "new turbo id merged in");
+  assert.ok(routed.includes("llm7/default"), "alias survives the refresh");
+  assert.ok(routed.includes("llm7/fast"), "alias survives the refresh");
+  assert.ok(routed.includes("llm7/gpt-oss:20b"), "still listed upstream, so kept");
+  assert.ok(!routed.includes("llm7/minimax-m2.7"), "not in the catalog: the chat endpoint answers model_unavailable");
+  assert.ok(!routed.includes("llm7/GLM-5.3-Flash"));
+  assert.ok(result.retired > 0);
+});
+
+test("llm7 sync - an empty payload never retires built-in models despite builtinAliases", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  assert.ok(ids().includes("llm7/minimax-m2.7"));
+
+  mockUpstream({ "api.llm7.io": { payload: { data: [] } } });
+  const result = await syncFreeModels("llm7");
+  assert.strictEqual(result.code, "empty");
+  assert.strictEqual(listRetiredModels("llm7").length, 0, "no built-in is retired when upstream returns empty payload");
+  assert.ok(ids().includes("llm7/minimax-m2.7"), "built-ins stay routable");
+});
+
+test("llm7 sync - a built-in that reappears upstream routes again", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "api.llm7.io": LLM7 });
+  await syncFreeModels("llm7");
+  assert.ok(!ids().includes("llm7/minimax-m2.7"));
+
+  mockUpstream({
+    "api.llm7.io": { payload: { data: [{ id: "minimax-m2.7", tier: "turbo" }] } },
+  });
+  await syncFreeModels("llm7");
+  const routed = ids();
+  assert.ok(routed.includes("llm7/minimax-m2.7"), "the retired set is rewritten, not accumulated");
+  assert.ok(!routed.includes("llm7/codestral-latest"), "built-in absent from this payload is held back");
+});
+
+test("kilo-free sync - the live free list replaces the hardcoded catalog", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  assert.ok(ids().includes("kcf/liquid/lfm-2.5-2.6b:free"), "hardcoded row before sync");
+
+  mockUpstream({ "api.kilo.ai": KILO });
+  assert.deepStrictEqual(await syncFreeModels("kilo-free"), { code: "synced", count: 3 });
+  assert.strictEqual(listRetiredModels("kilo-free").length, 0, "kilo-free relies on replace mode, not retired_models");
+  const routed = ids();
+  assert.ok(routed.includes("kcf/kilo-auto/free"));
+  assert.ok(routed.includes("kcf/vendor/b"));
+  assert.ok(!routed.includes("kcf/liquid/lfm-2.5-2.6b:free"), "retired id no longer offered");
+  assert.ok(!routed.includes("kcf/vendor/paid"));
+  assert.ok(getProviderModels(getProvider("kilo-free")).every((m) => m.source === "synced"));
+});
+
+test("catalog refresh - ovhcloud retires built-ins the live list dropped", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  assert.ok(ids().includes("ovh/Qwen2.5-VL-72B-Instruct"));
+
+  mockUpstream({
+    "kepler.ai.cloud.ovh.net": {
+      payload: {
+        data: [
+          { id: "gpt-oss-120b", context_length: 131072, max_completion_tokens: 32768 },
+          { id: "Mistral-Small-3.2-24B-Instruct-2506", context_length: 32768, max_completion_tokens: 8192 },
+          { id: "text-embedding-3-large", context_length: 8192, max_completion_tokens: 0 },
+        ],
+      },
+    },
+  });
+
+  const result = await refreshProviderCatalog("ovhcloud");
+  assert.strictEqual(result.code, "refreshed");
+  assert.strictEqual(result.retired, 3);
+  const routed = ids();
+  assert.ok(routed.includes("ovh/gpt-oss-120b"));
+  assert.ok(!routed.includes("ovh/Qwen3.6-27B"));
+  assert.ok(!routed.includes("ovh/Qwen2.5-VL-72B-Instruct"));
+  assert.ok(!routed.includes("ovh/gpt-oss-20b"));
+  assert.strictEqual(listSyncedModels("ovhcloud").length, 0, "no free list is invented");
+});
+
+test("catalog refresh - an empty payload never retires the whole catalog", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  mockUpstream({ "kepler.ai.cloud.ovh.net": { payload: { data: [] } } });
+
+  const result = await refreshProviderCatalog("ovhcloud");
+  assert.strictEqual(result.code, "empty");
+  assert.strictEqual(result.retired, 0);
+  assert.ok(ids().includes("ovh/Qwen3.6-27B"), "built-ins stay when upstream answers nothing");
+  assert.strictEqual(getModelSyncState("ovhcloud").ok, 0);
+});
+
+test("catalog refresh - providers without catalogRefresh are refused", async () => {
+  initDb(":memory:");
+  assert.strictEqual((await refreshProviderCatalog("together")).code, "unsupported");
 });
 
 test("sync - failures keep the previous list and record the error", async (t) => {
@@ -330,6 +469,7 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
   const calls = mockUpstream({
     "opencode.ai": OPENCODE,
     "api.kilo.ai": KILO,
+    "api.llm7.io": LLM7,
     "api.cline.bot": CLINE,
     "openrouter.ai": OPENROUTER,
     "ollama.com": { payload: { data: [{ id: "gpt-oss:120b" }] } },
@@ -360,14 +500,16 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "commandcode",
     "freebuff",
     "glm",
+    "kilo-free",
     "kilocode",
+    "llm7",
     "ollama",
     "opencode",
     "openrouter",
     "xkiro",
   ]);
-  // 7 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff dan glm return no_account tanpa calls
-  assert.strictEqual(calls.length, 8);
+  // 9 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff dan glm return no_account tanpa calls
+  assert.strictEqual(calls.length, 10);
 
   disableModel("opencode", "exo-free");
   assert.ok(!ids().includes("oc/exo-free"));
@@ -389,6 +531,51 @@ test("sync interval - env override, default 6h, 0 turns the scheduler off", () =
     if (original === undefined) delete process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS;
     else process.env.ZENITH_MODEL_SYNC_INTERVAL_HOURS = original;
   }
+});
+
+test("dashboard - catalog-only provider offers Sync Now and reports retired ids", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+
+  // OVHcloud has no per-model free tier, but its catalog can still drift.
+  const html = await (await app.request("/dashboard/providers/ovhcloud")).text();
+  assert.ok(html.includes("Katalog model disinkron otomatis"));
+  assert.ok(html.includes("Sinkron Sekarang"));
+  assert.ok(html.includes("menyembunyikan model bawaan yang sudah tidak ada"));
+
+  mockUpstream({
+    "kepler.ai.cloud.ovh.net": {
+      payload: { data: [{ id: "gpt-oss-120b", context_length: 131072, max_completion_tokens: 32768 }] },
+    },
+  });
+  const fd = new FormData();
+  fd.append("provider", "ovhcloud");
+  const res = await app.request("/dashboard/providers/models/sync", { method: "POST", body: fd });
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(res.headers.get("location"), "/dashboard/providers/ovhcloud?sync=refreshed&count=4&retired=4");
+
+  const page = await (await app.request(res.headers.get("location"))).text();
+  assert.ok(page.includes("4 model bawaan sudah tidak ada di provider"));
+  assert.ok(page.includes("Katalog diperbarui"));
+});
+
+test("dashboard - manual sync rebuilds the managed combos without probing upstream", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  const calls = mockUpstream({ "api.llm7.io": LLM7 });
+  assert.strictEqual(getComboByName("zenith-free"), null, "no combo before the first sync");
+
+  const fd = new FormData();
+  fd.append("provider", "llm7");
+  const res = await app.request("/dashboard/providers/models/sync", { method: "POST", body: fd });
+  assert.strictEqual(res.status, 302);
+
+  const combo = getComboByName("zenith-free");
+  assert.ok(combo, "manual sync stores the managed combos");
+  assert.strictEqual(combo.enabled, 1);
+  assert.ok(combo.models.includes("llm7/codestral-latest"), "newly synced id is routable at once");
+  assert.ok(!combo.models.includes("llm7/minimax-m2.7"), "retired id never enters the combo");
+  assert.strictEqual(calls.length, 1, "the rebuild issues no probe request");
 });
 
 test("dashboard - Sync Now redirects with a notice and the page shows synced rows and status", async (t) => {

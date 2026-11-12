@@ -44,6 +44,35 @@ export function deleteImportedModels(provider, modelIds) {
   return removed;
 }
 
+/**
+ * Built-in ids upstream stopped listing, as recorded by the last catalog refresh.
+ * This is a mirror of the provider, not a manual disable: a model that comes back
+ * disappears from here on the next refresh.
+ */
+export function listRetiredModels(provider = null) {
+  const db = getDb();
+  return provider
+    ? db.prepare(`SELECT * FROM retired_models WHERE provider = ? ORDER BY model_id`).all(provider)
+    : db.prepare(`SELECT * FROM retired_models ORDER BY provider, model_id`).all();
+}
+
+/** Rewrite one provider's retired set; returns how many ids were retired. */
+export function replaceRetiredModels(provider, modelIds) {
+  const db = getDb();
+  const now = Date.now();
+  const insert = db.prepare(`INSERT OR REPLACE INTO retired_models (provider, model_id, retired_at) VALUES (?, ?, ?)`);
+  db.exec("BEGIN");
+  try {
+    db.prepare(`DELETE FROM retired_models WHERE provider = ?`).run(provider);
+    for (const id of modelIds) insert.run(provider, String(id), now);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  return modelIds.length;
+}
+
 /** Free models synced from providers with freeModelSync (written by services/modelSync.js). */
 export function listSyncedModels(provider = null) {
   const db = getDb();

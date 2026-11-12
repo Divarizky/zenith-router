@@ -31,7 +31,8 @@ import {
 } from "../../services/modelOverrides.js";
 import { getImportModes, importProviderModels } from "../../services/modelImport.js";
 import { resolveCapabilities } from "../../providers/capabilities.js";
-import { syncFreeModels, getSyncIntervalMs } from "../../services/modelSync.js";
+import { syncFreeModels, refreshProviderCatalog, getSyncIntervalMs } from "../../services/modelSync.js";
+import { syncManagedCombos } from "../../services/managedCombos.js";
 import { getOAuthFlow } from "../../services/oauth/providers.js";
 import { hasLocalImport } from "../../services/oauth/flows.js";
 import { FREE_TIER_BUDGETS, FREE_TIER_TOS } from "../../config/freeTierCatalog.js";
@@ -84,7 +85,7 @@ const IMPORT_MODE_LABELS = {
 };
 
 /** Fixed notice texts keyed by the result code in the redirect query; never echo raw input. */
-function importNotice(query = {}) {
+function importNotice(query = {}, provider = null) {
   if (query.notice === "custom_provider_added") return { ok: true, text: "Custom provider berhasil ditambahkan." };
   if (query.notice === "custom_provider_deleted") return { ok: true, text: "Custom provider berhasil dihapus." };
   if (query.notice === "custom_provider_invalid") return { ok: false, text: "Gagal: Nama, Prefix unik, dan Base URL wajib diisi dengan benar." };
@@ -142,13 +143,22 @@ function importNotice(query = {}) {
   }
 
   const count = Number.parseInt(query.count, 10) || 0;
+  const retired = Number.parseInt(query.retired, 10) || 0;
   const status = Number.parseInt(query.status, 10);
   const httpSuffix = Number.isFinite(status) ? ` (HTTP ${status})` : "";
   switch (query.sync) {
     case "synced":
-      return { ok: true, text: `Sinkron selesai: ${count} model gratis.` };
+      return {
+        ok: true,
+        text: `Sinkron selesai: ${count} model gratis.${retired > 0 ? ` ${retired} model bawaan disembunyikan karena sudah tidak ada di provider.` : ""}`,
+      };
+    case "refreshed":
+      return {
+        ok: true,
+        text: count > 0 ? `Katalog diperbarui: ${count} model bawaan sudah tidak ada di provider.` : "Katalog sudah sesuai dengan provider.",
+      };
     case "empty":
-      return { ok: false, text: "Sinkron gagal: provider tidak mengembalikan model gratis. Daftar sebelumnya tetap dipakai." };
+      return { ok: false, text: `Sinkron gagal: provider tidak mengembalikan daftar model. ${provider?.freeModelSync ? "Daftar gratis" : "Katalog"} sebelumnya tetap dipakai.` };
     case "no_account":
       return { ok: false, text: "Sinkron gagal: butuh akun untuk mengambil daftar model." };
     case "upstream_error":
@@ -195,16 +205,32 @@ function formatWib(ms) {
   return `${parts.day}-${parts.month}-${parts.year} ${parts.hour}:${parts.minute} WIB`;
 }
 
-/** One-line sync status for providers with freeModelSync. */
+/**
+ * Rebuild the managed combos after a manual catalog change. Probes stay off: the
+ * user asked for the list to be re-read, not for every top model to be hit
+ * upstream. A combo failure never blocks the redirect the dashboard waits for.
+ */
+async function rebuildManagedCombos() {
+  try {
+    await syncManagedCombos({ probe: false });
+  } catch {}
+}
+
+/** One-line sync status for providers with freeModelSync or catalogRefresh. */
 function syncSummary(p) {
   const state = getModelSyncState(p.id);
   const hours = getSyncIntervalMs() / 3_600_000;
-  const schedule = hours > 0 ? `Model gratis disinkron otomatis tiap ${hours} jam.` : "Sinkron otomatis dimatikan (ZENITH_MODEL_SYNC_INTERVAL_HOURS=0).";
+  const subject = p.freeModelSync ? "Model gratis" : "Katalog model";
+  const schedule =
+    hours > 0
+      ? `${subject} disinkron otomatis tiap ${hours} jam.`
+      : "Sinkron otomatis dimatikan (ZENITH_MODEL_SYNC_INTERVAL_HOURS=0).";
   const fallback = p.freeModelSync === "replace" ? "memakai daftar bawaan" : "hanya daftar bawaan yang tampil";
 
   let status;
   if (!state?.last_success_at) status = `Belum pernah berhasil sinkron, ${fallback}.`;
-  else status = `Terakhir sinkron ${formatWib(state.last_success_at)} (${state.count} model).`;
+  else if (p.freeModelSync) status = `Terakhir sinkron ${formatWib(state.last_success_at)} (${state.count} model).`;
+  else status = `Terakhir sinkron ${formatWib(state.last_success_at)}.`;
 
   const error =
     state && state.ok === 0 && state.error
@@ -905,7 +931,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
   const p = getProvider(idOrAlias);
   if (!p) return null;
   const importModes = getImportModes(p);
-  const notice = importNotice(query);
+  const notice = importNotice(query, p);
 
   const alias = primaryAlias(p);
   const accounts = getConnections(p.id);
@@ -1223,7 +1249,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
               : ""
           }
           ${
-            p.freeModelSync
+            p.freeModelSync || p.catalogRefresh
               ? `<form action="/dashboard/providers/models/sync" method="POST" style="margin: 0;">
             <input type="hidden" name="provider" value="${id}" />
             <button type="submit" class="btn btn-sm">Sinkron Sekarang</button>
@@ -1234,10 +1260,14 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
           <button class="btn btn-primary btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
         </div>
       </div>
-      ${p.freeModelSync ? syncSummary(p) : ""}
+      ${p.freeModelSync || p.catalogRefresh ? syncSummary(p) : ""}
       ${
-        p.freeModelSync && importModes.length > 0
-          ? `<p class="hint" style="margin-top: -0.25rem; margin-bottom: 0.85rem; font-size: 0.8rem;">Sinkron mengambil daftar model gratis resmi dari provider. Import menambahkan model live dari akun Anda.</p>`
+        p.catalogRefresh || p.freeModelSync
+          ? `<p class="hint" style="margin-top: -0.25rem; margin-bottom: 0.85rem; font-size: 0.8rem;">${
+              p.catalogRefresh
+                ? "Sinkron mencocokkan daftar model dengan katalog provider dan menyembunyikan model bawaan yang sudah tidak ada di sana."
+                : "Sinkron mengambil daftar model gratis resmi dari provider."
+            }${importModes.length > 0 ? " Import menambahkan model live dari akun Anda." : ""}</p>`
           : ""
       }
       <div class="model-toolbar" style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.85rem;">
@@ -1528,6 +1558,8 @@ export async function handleImportModels(c) {
 
   const mode = body.mode === "free" ? "free" : "all";
   const result = await importProviderModels(provider.id, mode);
+  // Imported rows are candidates for the managed combos, so rebuild before redirect.
+  if (result.code === "imported") await rebuildManagedCombos();
   const params = new URLSearchParams({ import: result.code, count: String(result.count) });
   if (result.status) params.set("status", String(result.status));
   return c.redirect(`${providerUrl(provider.id)}?${params}`);
@@ -1548,8 +1580,14 @@ export async function handleSyncFreeModels(c) {
   const provider = getProvider(String(body.provider || ""));
   if (!provider) return c.redirect("/dashboard/providers");
 
-  const result = await syncFreeModels(provider.id);
-  const params = new URLSearchParams({ sync: result.code, count: String(result.count) });
+  const result = provider.freeModelSync ? await syncFreeModels(provider.id) : await refreshProviderCatalog(provider.id);
+  // The combo lists are built from the available models, so a fresh catalog has to
+  // be reflected before the redirect lands on the page that reads them.
+  if (result.code === "synced" || result.code === "refreshed") await rebuildManagedCombos();
+  // A catalog-only refresh reports what it retired; a free sync reports its list.
+  const count = provider.freeModelSync ? result.count || 0 : result.retired || 0;
+  const params = new URLSearchParams({ sync: result.code, count: String(count) });
+  if (result.retired > 0) params.set("retired", String(result.retired));
   if (result.status) params.set("status", String(result.status));
   return c.redirect(`${providerUrl(provider.id)}?${params}`);
 }

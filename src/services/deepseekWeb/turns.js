@@ -163,6 +163,7 @@ export async function runChainTurn({
         text: reply?.text ?? "",
         reasoning: reply?.reasoning ?? "",
         parentMessageId: reply?.parentMessageId ?? null,
+        accumulatedTokens: reply?.accumulatedTokens ?? null,
       };
     } catch (err) {
       // The upstream may have consumed a partial turn; the next request must

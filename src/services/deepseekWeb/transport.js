@@ -298,6 +298,7 @@ export function createStreamParser({ onReasoning = null } = {}) {
   let lastOp = null;
   let responseMessageId = null;
   let status = null;
+  let accumulatedTokens = null;
   let buffer = "";
   // Events that carry no text. A turn that ends with nothing else still has
   // these, and they are the only clue about why upstream stayed silent.
@@ -356,6 +357,8 @@ export function createStreamParser({ onReasoning = null } = {}) {
       return;
     }
     if ((path === "response/status" || path === "response/quasi_status") && typeof value === "string") status = value;
+    // Diagnostic only: unit and scope are unverified; the fixture also carries it on USER messages.
+    if (path === "response/accumulated_token_usage" && Number.isFinite(value) && value >= 0) accumulatedTokens = value;
   };
 
   const snapshot = (response) => {
@@ -447,7 +450,7 @@ export function createStreamParser({ onReasoning = null } = {}) {
       buffer = "";
     },
     result() {
-      return { fragments: collapseFragments(list), responseMessageId, status, notices };
+      return { fragments: collapseFragments(list), responseMessageId, status, notices, accumulatedTokens };
     },
   };
 }
@@ -685,12 +688,13 @@ export function createDeepSeekWebTransport(
         text: reply.text || streamText,
         reasoning: reply.reasoning || streamReasoning,
         parentMessageId: reply.parentMessageId,
+        accumulatedTokens: streamed.accumulatedTokens,
       };
     }
 
     const messageId = candidate?.parentMessageId ?? streamed.responseMessageId;
     if (messageId !== null && messageId !== undefined && (streamText || streamReasoning)) {
-      return { text: streamText, reasoning: streamReasoning, parentMessageId: messageId };
+      return { text: streamText, reasoning: streamReasoning, parentMessageId: messageId, accumulatedTokens: streamed.accumulatedTokens };
     }
     // Nothing to return, so say why: the stream's status and notices are the
     // only evidence left, and they pick the error code.

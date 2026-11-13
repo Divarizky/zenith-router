@@ -56,8 +56,9 @@ function assistantReply(result, tools = []) {
 function estimateUsage(messages, tools, result, reply) {
   const prompt = estimateTokens(messages) + (tools.length > 0 ? Math.ceil(JSON.stringify(tools).length / 4) : 0);
   const reasoning = estimateTokens(result?.reasoning || "");
-  const completion =
-    estimateTokens(reply.text) + reasoning + (reply.calls.length > 0 ? estimateTokens(JSON.stringify(reply.calls)) : 0);
+  // usage stays a local estimate. Upstream accumulated_token_usage is read by the transport as a
+  // diagnostic only: its unit is unverified (one fixture also carries it on USER messages).
+  const completion = estimateTokens(reply.text) + reasoning + (reply.calls.length > 0 ? estimateTokens(JSON.stringify(reply.calls)) : 0);
   const usage = { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion };
   // The usage tap records reasoning separately when it is reported here.
   if (reasoning > 0) usage.completion_tokens_details = { reasoning_tokens: reasoning };

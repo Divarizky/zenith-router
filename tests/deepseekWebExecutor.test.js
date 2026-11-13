@@ -5,6 +5,7 @@ import { buildChainKey, conversationId, createChainStore } from "../src/services
 import { initDb } from "../src/db/index.js";
 import { setSetting } from "../src/services/settings.js";
 import { resetDeepSeekTransportFactory } from "../src/services/deepseekWeb/transport.js";
+import { estimateTokens } from "../src/services/usage.js";
 
 const TOOLS = [
   { type: "function", function: { name: "bash", description: "run a command", parameters: { type: "object" } } },
@@ -529,4 +530,51 @@ test("executor - usage reports reasoning tokens for the usage tap", async () => 
   const json = await res.json();
   assert.ok(json.usage.completion_tokens_details.reasoning_tokens > 0);
   assert.ok(json.usage.completion_tokens >= json.usage.completion_tokens_details.reasoning_tokens);
+});
+
+// Estimasi lokal yang sama dengan executor; dipakai untuk memastikan prompt tidak berubah.
+const estimatedPrompt = (messages) => estimateTokens(messages);
+// fakeTransport selalu menyertakan reasoning "renungan", sehingga completion estimasi menjumlahkannya.
+const estimatedCompletion = (text) => estimateTokens(text) + estimateTokens("renungan");
+
+function withUpstreamTotal(total) {
+  const transport = fakeTransport();
+  const base = transport.complete;
+  transport.complete = async (args) => ({ ...(await base(args)), accumulatedTokens: total });
+  return transport;
+}
+
+test("executor - total upstream tidak mengubah usage: completion tetap estimasi lokal", async () => {
+  // Semantik accumulated_token_usage belum terbukti (fixture juga menaruhnya di pesan USER).
+  // Jika upstream dipakai sebagai completion, angka usage bisa membengkak tanpa terdeteksi.
+  const withTotal = setup(withUpstreamTotal(84));
+  const withTotalRes = await withTotal.executor.execute({ body: payload([user("x")]), connection: withTotal.connection, targetModel: "deepseek-chat" });
+  const withTotalJson = await withTotalRes.json();
+  const noTotal = setup(fakeTransport());
+  const noTotalRes = await noTotal.executor.execute({ body: payload([user("x")]), connection: noTotal.connection, targetModel: "deepseek-chat" });
+  const noTotalJson = await noTotalRes.json();
+  assert.deepStrictEqual(withTotalJson.usage, noTotalJson.usage);
+  assert.strictEqual(withTotalJson.usage.completion_tokens, estimatedCompletion("jawaban web"));
+  assert.strictEqual(withTotalJson.usage.prompt_tokens, estimatedPrompt([user("x")]));
+});
+
+test("executor - jalur stream reasoner: total upstream tetap tidak mengubah usage", async () => {
+  // Jalur streamThinking dipakai model thinking; tes ini mengunci estimateUsage di sana.
+  const streamed = (total) =>
+    (async () => {
+      const { executor, connection } = setup(withUpstreamTotal(total));
+      const res = await executor.execute({
+        body: payload([user("x")], { stream: true, stream_options: { include_usage: true } }),
+        connection,
+        targetModel: "deepseek-reasoner",
+        stream: true,
+      });
+      const frames = (await res.text()).split("\n\n").filter(Boolean).map((line) => line.replace(/^data: /, ""));
+      return frames.slice(0, -1).map((f) => JSON.parse(f)).find((c) => c.usage).usage;
+    })();
+  const withTotal = await streamed(84);
+  const withoutTotal = await streamed(null);
+  assert.deepStrictEqual(withTotal, withoutTotal);
+  assert.ok(withTotal.completion_tokens >= withTotal.completion_tokens_details.reasoning_tokens);
+  assert.strictEqual(withTotal.prompt_tokens, estimatedPrompt([user("x")]));
 });

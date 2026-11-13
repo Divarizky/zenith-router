@@ -233,3 +233,18 @@ test("turns - a withheld reply is reported without retrying", async () => {
   await assert.rejects(turn(store, transport, [user("satu"), assistant("ok"), user("dua")]), (err) => err.code === "content_filtered");
   assert.strictEqual(transport.calls.complete.length, 2, "a filter is not a chat-state problem");
 });
+
+test("turns - runChainTurn meneruskan accumulatedTokens dari transport sebagai diagnostik", async () => {
+  // Hop ini dikunci agar diagnostik tidak putus diam-diam; usage tidak membacanya.
+  const transport = fakeTransport([() => ({ text: "ok", reasoning: "", parentMessageId: "m", accumulatedTokens: 84 })]);
+  const store = setup();
+  const result = await turn(store, transport, [{ role: "user", content: "halo" }]);
+  assert.strictEqual(result.accumulatedTokens, 84);
+});
+
+test("turns - runChainTurn tanpa total upstream membawa null, bukan nol", async () => {
+  const transport = fakeTransport([() => ({ text: "ok", reasoning: "", parentMessageId: "m" })]);
+  const store = setup();
+  const result = await turn(store, transport, [{ role: "user", content: "halo" }]);
+  assert.strictEqual(result.accumulatedTokens, null);
+});

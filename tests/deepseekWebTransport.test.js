@@ -108,7 +108,7 @@ test("transport - a full turn sends the preamble, solves the PoW, and reads hist
     tools: TOOLS,
   });
 
-  assert.deepStrictEqual(reply, { text: "jawaban web", reasoning: "renung", parentMessageId: "msg-1" });
+  assert.deepStrictEqual(reply, { text: "jawaban web", reasoning: "renung", parentMessageId: "msg-1", accumulatedTokens: null });
   assert.deepStrictEqual(
     fake.calls.map((call) => new URL(call.url).pathname),
     ["/api/v0/chat/create_pow_challenge", "/api/v0/chat/completion", "/api/v0/chat/history_messages"]
@@ -431,7 +431,7 @@ test("transport - history is matched by the id the stream announced", async () =
     mode: "delta",
     messages: [{ role: "user", content: "x" }],
   });
-  assert.deepStrictEqual(reply, { text: "baru", reasoning: "", parentMessageId: 4 });
+  assert.deepStrictEqual(reply, { text: "baru", reasoning: "", parentMessageId: 4, accumulatedTokens: null });
 });
 
 test("transport - deleteSession posts the chat id", async () => {
@@ -581,4 +581,58 @@ test("transport - a repeated bookkeeping event never crowds out the hint", async
   const err = emptyReplyError({ status: null, notices, history: "empty" });
   assert.strictEqual(err.code, "conversation_limit", "a Chinese length hint is recognised");
   assert.strictEqual(err.status, 413);
+});
+
+test("stream parser membaca accumulated_token_usage dari batch fixture asli", () => {
+  // Upstream melaporkan accumulated_token_usage di event BATCH; unit belum terbukti, hanya diagnostik.
+  // Nilai 84 berasal dari fixture tangkapan asli.
+  const sse = readFileSync(new URL("./fixtures/deepseekWeb/completion-thinking.sse.txt", import.meta.url), "utf8");
+  const parser = createStreamParser();
+  parser.push(sse);
+  parser.end();
+  assert.strictEqual(parser.result().accumulatedTokens, 84);
+});
+
+test("stream parser tanpa accumulated_token_usage melaporkan null, bukan nol", () => {
+  // Nol akan terbaca sebagai "tidak ada token"; null berarti upstream tidak melaporkan.
+  const parser = createStreamParser();
+  parser.push('event: ready\ndata: {"request_message_id":1,"response_message_id":2}\n\n');
+  parser.end();
+  assert.strictEqual(parser.result().accumulatedTokens, null);
+});
+
+test("transport - complete meneruskan accumulatedTokens dari stream lewat jalur history", async () => {
+  // History sudah memuat balasan dengan id yang diumumkan stream: jalur ini yang dipakai pada kasus normal.
+  const sse = 'event: ready\ndata: {"request_message_id":1,"response_message_id":2}\n\ndata: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":84}]}\n\n';
+  const fake = fakeUpstream({
+    sse,
+    history: () =>
+      jsonResponse({
+        data: { biz_data: { chat_messages: [{ role: "ASSISTANT", message_id: 2, fragments: [{ type: "RESPONSE", content: "jawaban" }] }] } },
+      }),
+  });
+  const reply = await makeTransport(fake).complete({
+    chatSessionId: "sess-1",
+    parentMessageId: null,
+    mode: "full",
+    messages: [{ role: "user", content: "halo" }],
+  });
+  assert.strictEqual(reply.accumulatedTokens, 84);
+});
+
+test("transport - complete meneruskan accumulatedTokens lewat jalur stream saat history belum ada", async () => {
+  // History kosong: complete() harus jatuh ke teks stream dan tetap membawa total.
+  const sse = 'event: ready\ndata: {"request_message_id":1,"response_message_id":2}\n\ndata: {"v":{"response":{"message_id":2,"fragments":[{"type":"RESPONSE","content":"baru"}]}}}\n\ndata: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":42}]}\n\n';
+  const fake = fakeUpstream({
+    sse,
+    history: () => jsonResponse({ data: { biz_data: { chat_messages: [] } } }),
+  });
+  const reply = await makeTransport(fake).complete({
+    chatSessionId: "sess-1",
+    parentMessageId: null,
+    mode: "full",
+    messages: [{ role: "user", content: "x" }],
+  });
+  assert.strictEqual(reply.text, "baru");
+  assert.strictEqual(reply.accumulatedTokens, 42);
 });

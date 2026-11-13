@@ -100,7 +100,7 @@ test("Antigravity - tanpa project_id request ditolak, tidak memakai project acak
 
 test("Antigravity stream - thought part keluar sebagai reasoning_content, bukan content", async () => {
   const out = await runStream([
-    { response: { candidates: [{ content: { parts: [{ text: "pikir", thought: true }, { text: "jawab" }] } }] } },
+    { response: { candidates: [{ content: { parts: [{ text: "pikir", thought: true }, { text: "jawab" }] }, finishReason: "STOP" }] } },
   ]);
   const deltas = chunksOf(out).map((c) => c.choices[0].delta);
   assert.deepStrictEqual(deltas[0], { reasoning_content: "pikir" });

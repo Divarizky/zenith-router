@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { captureLine, logQuiet } from "../services/logger.js";
+import { streamErrorFrame } from "../services/streamGuard.js";
 
 // Artefak delimiter yatim (`!]`, `$]`, `*]`) yang dikeluarkan model upstream tepat
 // setelah tanda baca penutup kalimat. Hanya dihapus bila tidak ada `[` yang belum
@@ -543,6 +544,10 @@ export function createGeminiToOpenAITransformStream(model = "gemini", opts = {})
 
   let currentToolCallIndex = 0;
 
+  // Diagnostik opt-in (ZENITH_STREAM_TRACE=1): hitung event yang tidak menghasilkan
+  // chunk dan catat bila stream berakhir tanpa finishReason.
+  const trace = { events: 0, dropped: 0, errorEvents: 0, finish: false, upstreamError: null };
+
   return new TransformStream({
     transform(chunk, controller) {
       buffer += textDecoder.decode(chunk, { stream: true });
@@ -556,6 +561,34 @@ export function createGeminiToOpenAITransformStream(model = "gemini", opts = {})
       const rest = buffer;
       buffer = "";
       if (rest) consumeLines([rest], controller);
+      if (process.env.ZENITH_STREAM_TRACE === "1") {
+        logQuiet(
+          `[GEMINI][stream-trace] model=${model} events=${trace.events} dropped=${trace.dropped} error_event=${trace.errorEvents} finish=${trace.finish ? "seen" : "none"}`
+        );
+      }
+      if (!trace.finish) {
+        // Upstream menutup stream tanpa finishReason (silent EOF). Klien OpenAI
+        // seperti pi menolak stream tanpa finish_reason, jadi tutup dengan salah satu
+        // dari dua cara: functionCall Gemini datang utuh per part, sehingga bila tool
+        // call sudah terkirim, jawaban lengkap dan aman disintesis sebagai tool_calls.
+        // Selain itu teks bisa terpotong; jangan dilaporkan sukses, kirim error eksplisit.
+        if (currentToolCallIndex > 0) {
+          const openAIChunk = {
+            id: responseId,
+            object: "chat.completion.chunk",
+            created,
+            model,
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          };
+          controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+        } else {
+          const reason = trace.upstreamError
+            ? `upstream error: ${trace.upstreamError}`
+            : "stream ended without finishReason";
+          controller.enqueue(textEncoder.encode(streamErrorFrame("openai", reason)));
+          return;
+        }
+      }
       controller.enqueue(textEncoder.encode("data: [DONE]\n\n"));
     },
   });
@@ -568,10 +601,18 @@ export function createGeminiToOpenAITransformStream(model = "gemini", opts = {})
         const dataStr = trimmed.slice(5).trim();
         if (!dataStr || dataStr === "[DONE]") continue;
 
+        trace.events++;
         try {
           const raw = JSON.parse(dataStr);
           const payload = raw.response || raw;
           const candidate = payload.candidates?.[0];
+          if (raw.error || payload.error) {
+            trace.errorEvents++;
+            const upstream = raw.error || payload.error;
+            trace.upstreamError = String(upstream?.message || upstream?.status || "unknown").slice(0, 200);
+          }
+          if (!candidate) trace.dropped++;
+          if (candidate?.finishReason) trace.finish = true;
 
           if (candidate?.content?.parts) {
             for (const part of candidate.content.parts) {
@@ -653,7 +694,9 @@ export function createGeminiToOpenAITransformStream(model = "gemini", opts = {})
             };
             controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
           }
-        } catch {}
+        } catch {
+          trace.dropped++;
+        }
       }
   }
 }

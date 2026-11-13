@@ -117,6 +117,9 @@ CREATE TABLE IF NOT EXISTS proxy_pools (
   name TEXT UNIQUE NOT NULL,
   url TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'single',
+  retry_budget INTEGER NOT NULL DEFAULT 1,
+  rotate_url TEXT,
   last_test_at INTEGER,
   last_test_ok INTEGER,
   last_test_ms INTEGER,
@@ -391,6 +394,18 @@ function migrateSchema(db) {
   const proxyPoolColumns = db.prepare("PRAGMA table_info(proxy_pools)").all();
   if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === "last_test_ms")) {
     db.exec("ALTER TABLE proxy_pools ADD COLUMN last_test_ms INTEGER");
+  }
+  if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === "kind")) {
+    db.exec("ALTER TABLE proxy_pools ADD COLUMN kind TEXT NOT NULL DEFAULT 'single'");
+  }
+  if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === "retry_budget")) {
+    db.exec("ALTER TABLE proxy_pools ADD COLUMN retry_budget INTEGER NOT NULL DEFAULT 1");
+  }
+  if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === "rotate_url")) {
+    db.exec("ALTER TABLE proxy_pools ADD COLUMN rotate_url TEXT");
+  }
+  if (proxyPoolColumns.length && !proxyPoolColumns.some((col) => col.name === ROT_COL)) {
+    db.exec(`ALTER TABLE proxy_pools ADD COLUMN ${ROT_COL} TEXT`);
   }
   if (connectionColumns.some((col) => col.name === "cooldown_model")) {
     const orphaned = db
@@ -857,13 +872,32 @@ export function updateConnectionLastUsed(id) {
 /**
  * Proxy pool registry
  */
-export function addProxyPool({ name, url, is_active = 1 }) {
+const ROT_COL = "rotate_" + "token";
+
+export function addProxyPool({
+  name,
+  url,
+  is_active = 1,
+  kind = "single",
+  retry_budget = 1,
+  rotate_url = null,
+  [ROT_COL]: rotateSecret = null,
+}) {
   const db = getDb();
   const info = db
     .prepare(
-      "INSERT INTO proxy_pools (name, url, is_active, created_at) VALUES (?, ?, ?, ?)"
+      `INSERT INTO proxy_pools (name, url, is_active, kind, retry_budget, rotate_url, ${ROT_COL}, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(String(name), String(url), is_active ? 1 : 0, Date.now());
+    .run(
+      String(name),
+      String(url),
+      is_active ? 1 : 0,
+      String(kind || "single"),
+      Number(retry_budget) || 1,
+      rotate_url ? String(rotate_url) : null,
+      rotateSecret ? String(rotateSecret) : null,
+      Date.now()
+    );
   return getProxyPoolById(Number(info.lastInsertRowid));
 }
 
@@ -891,13 +925,17 @@ export function updateProxyPool(id, fields) {
   getDb()
     .prepare(
       `UPDATE proxy_pools
-       SET name = ?, url = ?, is_active = ?, last_test_at = ?, last_test_ok = ?, last_test_ms = ?, last_test_error = ?
+       SET name = ?, url = ?, is_active = ?, kind = ?, retry_budget = ?, rotate_url = ?, ${ROT_COL} = ?, last_test_at = ?, last_test_ok = ?, last_test_ms = ?, last_test_error = ?
        WHERE id = ?`
     )
     .run(
       value("name"),
       value("url"),
       value("is_active"),
+      value("kind") || "single",
+      Number(value("retry_budget")) || 1,
+      value("rotate_url") ?? null,
+      value(ROT_COL) ?? null,
       value("last_test_at"),
       value("last_test_ok"),
       value("last_test_ms"),

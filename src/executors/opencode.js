@@ -21,6 +21,7 @@ import {
 } from "../services/opencodeGate.js";
 import { ensureOpencodeBridge } from "../services/opencodeBridge.js";
 import { parseRetryAfterMs } from "../services/fallback.js";
+import { notifyProxyRotate } from "../services/proxyPools.js";
 
 export const OPENCODE_UA = "opencode/latest/2.2.5/cli";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
@@ -475,10 +476,11 @@ export function ensureAssistantReasoningContent(body, model) {
 }
 
 export class OpencodeExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, proxyMeta = null, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
     // While an egress is cooling down, forwarding only feeds the block: answer
     // locally so the gateway moves on to its fallback model instead.
     const gateKey = opencodeGateKey(proxyUrl);
+    const gatewayBudget = proxyMeta?.kind === "gateway" ? Math.max(1, Number(proxyMeta.retry_budget) || 1) : 1;
     const coolingDown = getOpencodeGateState(gateKey);
     if (coolingDown) return buildOpencodeGateResponse(coolingDown);
 
@@ -698,6 +700,9 @@ export class OpencodeExecutor extends BaseExecutor {
         // An explicit network block or quota limit is not a shape problem: a second request
         // from the same IP/account only extends it, so the cooldown starts right away.
         if ((isOpencodeNetworkBlock(firstText) || isQuotaLimit) && shapeOk) {
+          if (proxyMeta?.rotate_url) {
+            notifyProxyRotate(proxyMeta, { status: res.status, reason: firstText.slice(0, 120) }).catch(() => {});
+          }
           const state = noteOpencodeGateRejection(gateKey, {
             status: res.status,
             shape,
@@ -705,6 +710,7 @@ export class OpencodeExecutor extends BaseExecutor {
             logId: firstLogId,
             missing,
             retryAfterMs: firstRetryAfterMs,
+            gatewayBudget,
           });
           res = new Response(firstText, {
             status: res.status,
@@ -736,6 +742,9 @@ export class OpencodeExecutor extends BaseExecutor {
             if (!isOpencodeGateRejection(retryRes.status, retryText)) {
               res = retryRes;
             } else {
+              if (proxyMeta?.rotate_url) {
+                notifyProxyRotate(proxyMeta, { status: retryRes.status, reason: retryText.slice(0, 120) }).catch(() => {});
+              }
               const retryRetryAfterMs = parseRetryAfterMs(retryRes.headers?.get?.("retry-after")) || firstRetryAfterMs;
               const state = noteOpencodeGateRejection(gateKey, {
                 status: retryRes.status,
@@ -745,6 +754,7 @@ export class OpencodeExecutor extends BaseExecutor {
                 logId: retryRes.headers?.get?.("x-opencode-log-id") || firstLogId,
                 missing,
                 retryAfterMs: retryRetryAfterMs,
+                gatewayBudget,
               });
               // Keep upstream's own status and body; the labels are what let a
               // reader tell a blocked egress from a shape this router got wrong.

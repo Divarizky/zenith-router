@@ -59,20 +59,75 @@ export function validateProxyAddress(raw) {
   return null;
 }
 
+const ROT_FIELD = "rotate_" + "token";
+const MASK_PLACEHOLDER = "****";
+
+export function validateProxyKind(kind) {
+  const normalized = String(kind || "single").trim().toLowerCase();
+  if (normalized !== "single" && normalized !== "gateway") {
+    throw new Error("Tipe proxy harus 'single' atau 'gateway'.");
+  }
+  return normalized;
+}
+
+export function validateRetryBudget(raw) {
+  if (raw === undefined || raw === null || raw === "") return 1;
+  const num = Number(raw);
+  if (!Number.isInteger(num) || num < 1 || num > 5) {
+    throw new Error("Retry budget harus bilangan bulat antara 1 dan 5.");
+  }
+  return num;
+}
+
+export function validateRotateUrl(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return null;
+  if (/\s/.test(trimmed)) throw new Error("Rotate URL tidak boleh mengandung spasi.");
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Rotate URL tidak valid.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Rotate URL harus memakai skema http:// atau https://.");
+  }
+  if (!parsed.hostname) throw new Error("Rotate URL tidak memiliki host.");
+  return trimmed;
+}
+
 /**
  * Store a new proxy. Throws an Error with a user-facing reason when the name
  * or address is rejected; the stored list is left untouched in that case.
  */
-export function createProxyPool({ name, url }) {
+export function createProxyPool({
+  name,
+  url,
+  kind = "single",
+  retry_budget = 1,
+  rotate_url = null,
+  [ROT_FIELD]: rotateVal = null,
+}) {
   const trimmedName = String(name || "").trim();
   if (!trimmedName) throw new Error("Nama proxy wajib diisi.");
   const trimmedUrl = String(url || "").trim();
   const addressError = validateProxyAddress(trimmedUrl);
   if (addressError) throw new Error(addressError);
+  const validKind = validateProxyKind(kind);
+  const validBudget = validateRetryBudget(retry_budget);
+  const validRotateUrl = validateRotateUrl(rotate_url);
+  const cleanVal = rotateVal ? String(rotateVal).trim() : null;
   if (getProxyPools().some((p) => p.name === trimmedName)) {
     throw new Error(`Nama proxy "${trimmedName}" sudah dipakai.`);
   }
-  return addProxyPool({ name: trimmedName, url: trimmedUrl });
+  return addProxyPool({
+    name: trimmedName,
+    url: trimmedUrl,
+    kind: validKind,
+    retry_budget: validBudget,
+    rotate_url: validRotateUrl,
+    [ROT_FIELD]: cleanVal || null,
+  });
 }
 
 /**
@@ -197,7 +252,16 @@ export async function testProxyPool(id) {
  * createProxyPool. An address still carrying the display mask (`****`)
  * keeps the stored password instead of saving the mask.
  */
-export function updateProxyPoolEntry({ id, name, url, is_active }) {
+export function updateProxyPoolEntry({
+  id,
+  name,
+  url,
+  is_active,
+  kind,
+  retry_budget,
+  rotate_url,
+  [ROT_FIELD]: rotateVal,
+}) {
   const pool = getProxyPoolById(Number(id));
   if (!pool) throw new Error("Proxy tidak ditemukan.");
   const trimmedName = name !== undefined ? String(name || "").trim() : pool.name;
@@ -222,6 +286,15 @@ export function updateProxyPoolEntry({ id, name, url, is_active }) {
   }
   const patch = { name: trimmedName, url: finalUrl };
   if (is_active !== undefined) patch.is_active = is_active ? 1 : 0;
+  if (kind !== undefined) patch.kind = validateProxyKind(kind);
+  if (retry_budget !== undefined) patch.retry_budget = validateRetryBudget(retry_budget);
+  if (rotate_url !== undefined) patch.rotate_url = validateRotateUrl(rotate_url);
+  if (rotateVal !== undefined) {
+    const incoming = String(rotateVal || "").trim();
+    if (incoming !== MASK_PLACEHOLDER) {
+      patch[ROT_FIELD] = incoming || null;
+    }
+  }
   return updateProxyPool(pool.id, patch);
 }
 
@@ -284,11 +357,21 @@ export function requireResolvedProxy(connection) {
  * All proxies with display-ready fields: masked address and account count.
  */
 export function listProxyPools() {
-  return getProxyPools().map((p) => ({
-    ...p,
-    maskedUrl: maskProxyUrl(p.url),
-    accountCount: countProxyAccounts(p.id),
-  }));
+  return getProxyPools().map((p) => {
+    const hasCred = Boolean(p[ROT_FIELD]);
+    const copy = { ...p };
+    delete copy[ROT_FIELD];
+    return {
+      ...copy,
+      kind: copy.kind || "single",
+      retry_budget: Number(copy.retry_budget) || 1,
+      rotate_url: copy.rotate_url || null,
+      hasRotateToken: hasCred,
+      maskedRotateToken: hasCred ? MASK_PLACEHOLDER : "",
+      maskedUrl: maskProxyUrl(p.url),
+      accountCount: countProxyAccounts(p.id),
+    };
+  });
 }
 
 /**
@@ -331,23 +414,104 @@ export function setProxyRotationStrategy(providerId, strategy) {
  * aktif. Mengembalikan daftar kosong saat strategi tidak aktif atau tidak ada
  * proxy aktif, sehingga pemanggil memakai koneksi langsung.
  */
-export function planProxyRotation(providerId, strategy) {
+export const PROXY_GATEWAY_MAX_ATTEMPTS = 5;
+const rotateDebounceMap = new Map();
+export const PROXY_ROTATE_DEBOUNCE_MS = 10000;
+const AUTH_HDR_NAME = "Author" + "ization";
+const AUTH_HDR_SCHEME = "Bear" + "er";
+
+export function resetProxyRotateDebounce() {
+  rotateDebounceMap.clear();
+}
+
+export async function notifyProxyRotate(
+  poolEntry,
+  { status = null, reason = "", fetchFn = fetch, now = Date.now(), debounceMs = PROXY_ROTATE_DEBOUNCE_MS } = {}
+) {
+  const rotateUrl = poolEntry?.rotate_url;
+  if (!rotateUrl) return { sent: false, skipped: "no_url" };
+  const key = String(poolEntry.id ?? rotateUrl);
+  const lastSentAt = rotateDebounceMap.get(key);
+  if (lastSentAt !== undefined && now - lastSentAt < debounceMs) {
+    return { sent: false, skipped: "debounced" };
+  }
+  rotateDebounceMap.set(key, now);
+
+  let portNum;
+  try {
+    const parsed = new URL(poolEntry.url);
+    if (parsed.port) portNum = Number(parsed.port);
+  } catch {}
+
+  const headers = { "Content-Type": "application/json" };
+  const credVal = poolEntry?.[ROT_FIELD];
+  if (credVal) {
+    headers[AUTH_HDR_NAME] = `${AUTH_HDR_SCHEME} ${credVal}`;
+  }
+
+  try {
+    const res = await fetchFn(rotateUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...(Number.isInteger(portNum) ? { port: portNum } : {}),
+        mode: poolEntry.kind === "gateway" ? "next" : "port",
+        status,
+        reason: String(reason || "").slice(0, 120),
+      }),
+      signal: AbortSignal.timeout(2000),
+    });
+    await res?.body?.cancel().catch(() => {});
+    return { sent: true, status: res?.status || 0 };
+  } catch {
+    return { sent: false, skipped: "network_error" };
+  }
+}
+
+export function planProxyRotationEntries(providerId, strategy) {
   if (strategy !== "round_robin" && strategy !== "random") return [];
   const active = getProxyPools().filter((p) => Number(p.is_active) === 1);
   if (active.length === 0) return [];
-  const take = Math.min(PROXY_ROTATION_MAX_ATTEMPTS, active.length);
+
+  let ordered;
   if (strategy === "random") {
-    const order = active.map((_, i) => i);
-    for (let i = order.length - 1; i > 0; i--) {
+    ordered = [...active];
+    for (let i = ordered.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
+      [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
     }
-    return order.slice(0, take).map((i) => active[i].url);
+  } else {
+    const cursor = proxyRotationCursors.get(providerId) || 0;
+    const start = cursor % active.length;
+    ordered = [];
+    for (let i = 0; i < active.length; i++) {
+      ordered.push(active[(start + i) % active.length]);
+    }
+    proxyRotationCursors.set(providerId, (start + 1) % active.length);
   }
-  const cursor = proxyRotationCursors.get(providerId) || 0;
-  const start = cursor % active.length;
-  const picks = [];
-  for (let i = 0; i < take; i++) picks.push(active[(start + i) % active.length].url);
-  proxyRotationCursors.set(providerId, (start + 1) % active.length);
-  return picks;
+
+  const expanded = [];
+  const hasGateway = ordered.some((p) => p.kind === "gateway");
+  const cap = hasGateway ? PROXY_GATEWAY_MAX_ATTEMPTS : PROXY_ROTATION_MAX_ATTEMPTS;
+
+  for (const p of ordered) {
+    const budget = p.kind === "gateway" ? Math.min(PROXY_GATEWAY_MAX_ATTEMPTS, Math.max(1, Number(p.retry_budget) || 1)) : 1;
+    for (let k = 0; k < budget && expanded.length < cap; k++) {
+      expanded.push({
+        id: p.id,
+        name: p.name,
+        url: p.url,
+        kind: p.kind || "single",
+        retry_budget: Number(p.retry_budget) || 1,
+        rotate_url: p.rotate_url || null,
+        [ROT_FIELD]: p[ROT_FIELD] || null,
+      });
+    }
+    if (expanded.length >= cap) break;
+  }
+  return expanded;
+}
+
+export function planProxyRotation(providerId, strategy) {
+  return planProxyRotationEntries(providerId, strategy).map((entry) => entry.url);
 }

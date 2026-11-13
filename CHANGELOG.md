@@ -13,10 +13,17 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
   - OVHcloud hanya menjalankan pencocokan katalog, karena akses gratisnya berupa kredit akun dan bukan tier per model.
 - **Combo Terkelola Ikut Diperbarui**:
   - Aksi "Sinkron Sekarang" dan "Import Models" langsung menyusun ulang combo zenith tanpa menunggu siklus scheduler, dan tanpa menembak model ke upstream.
+- **Proxy Gateway Tunggal untuk Provider Publik**:
+  - Entri proxy punya tipe `gateway` dengan `retry_budget` (1-5): satu alamat load balancer dicoba ulang beberapa kali dalam satu request, sehingga tiap percobaan bisa jatuh ke node egress berbeda.
+  - Penolakan gerbang OpenCode (403 FreeTierError, 429 FreeUsageLimitError) pada proxy gateway baru mengunci rute setelah `retry_budget` penolakan beruntun.
+  - Webhook rotasi opsional per proxy (`rotate_url` + token bearer) dipanggil tanpa memblokir request saat terjadi 403/429 atau error di tengah stream, dengan debounce 10 detik.
+  - Dashboard Proxy Pools menampilkan tipe, retry budget, dan webhook; token disamarkan.
 
 ### Perbaikan
 
 - Sinkron yang mengembalikan daftar kosong tidak lagi menyembunyikan seluruh model bawaan.
+- Cooldown virtual provider publik tidak lagi dipasang selama masih ada percobaan proxy tersisa dalam request yang sama.
+- Stream Gemini yang berakhir tanpa `finishReason` kini ditutup eksplisit (tool_calls bila tool call sudah terkirim, error frame bila tidak) dan punya trace diagnostik opsional `ZENITH_STREAM_TRACE=1`.
 
 ## [2.2.0] - 11-11-2026
 

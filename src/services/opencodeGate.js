@@ -140,12 +140,35 @@ export function getOpencodeGateDiagnostic(key) {
  * Record a rejection that survived the identity retry: requests to this egress
  * are held back until the cooldown expires instead of being forwarded.
  */
-export function noteOpencodeGateRejection(key, { status, shape, shapeOk, logId = null, missing = [], retryAfterMs = null } = {}, now = Date.now()) {
+export function noteOpencodeGateRejection(
+  key,
+  { status, shape, shapeOk, logId = null, missing = [], retryAfterMs = null, gatewayBudget = 1 } = {},
+  now = Date.now()
+) {
   const baseMs = opencodeGateCooldownMs();
   const previous = strikeState.get(key);
   // A strike older than two max cooldowns means the block had lifted.
   const strikes = previous && now - previous.at <= OPENCODE_GATE_MAX_COOLDOWN_MS * 2 ? previous.count + 1 : 1;
   strikeState.set(key, { count: strikes, at: now });
+  const requiredStrikes = Math.max(1, Number(gatewayBudget) || 1);
+  if (requiredStrikes > 1 && strikes < requiredStrikes) {
+    captureLine(
+      `[OPENCODE] Gateway attempt ${strikes}/${requiredStrikes} refused on ${key} (HTTP ${status}); deferring gate lock`
+    );
+    return {
+      until: 0,
+      at: now,
+      status,
+      strikes,
+      shapeOk: Boolean(shapeOk),
+      gate: status === 426 ? "version-rejected" : status === 429 ? "quota-exhausted" : shapeOk ? "ip-throttled" : "shape-rejected",
+      reason: "gateway strike deferred",
+      missing,
+      shape: shape || null,
+      logId,
+      retryAfterMs: 0,
+    };
+  }
   const cooldownMs = retryAfterMs && retryAfterMs > 0
     ? Math.min(retryAfterMs, OPENCODE_GATE_MAX_COOLDOWN_MS)
     : escalateOpencodeCooldown(baseMs, strikes);

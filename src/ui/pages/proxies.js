@@ -34,11 +34,19 @@ function renderProxyRow(pool) {
     : `<span class="pill">inactive</span>`;
 
   const boundBadge = `<span class="pill">${pool.accountCount} bound (${pool.accountCount} akun)</span>`;
+  const kindBadge =
+    pool.kind === "gateway"
+      ? `<span class="pill pill-info" title="Rotating Gateway">gateway &times;${Number(pool.retry_budget) || 1}</span>`
+      : "";
 
   // Nilai masuk atribut onclick: JSON.stringify menjaga literal JS tetap utuh
   // (quote, backslash, newline), escapeHtml hanya untuk konteks atribut HTML.
   const nameJson = escapeHtml(JSON.stringify(pool.name));
   const urlJson = escapeHtml(JSON.stringify(pool.maskedUrl));
+  const kindJson = escapeHtml(JSON.stringify(pool.kind || "single"));
+  const budgetJson = Number(pool.retry_budget) || 1;
+  const rotateUrlJson = escapeHtml(JSON.stringify(pool.rotate_url || ""));
+  const maskedCredJson = escapeHtml(JSON.stringify(pool.hasRotateToken ? "****" : ""));
 
   const testDetail = hasTested
     ? `Last tested: ${fmtTestTime(pool.last_test_at)}${
@@ -69,6 +77,7 @@ function renderProxyRow(pool) {
             ${testBadge}
             ${activeBadge}
             ${boundBadge}
+            ${kindBadge}
           </div>
           <div class="proxy-url-line"><code>${escapeHtml(pool.maskedUrl)}</code></div>
           <div class="proxy-meta-line">${testDetail}</div>
@@ -94,7 +103,7 @@ function renderProxyRow(pool) {
           type="button"
           class="btn btn-sm btn-icon"
           title="Ubah proxy"
-          onclick="openEditModal(${pool.id}, ${nameJson}, ${urlJson}, ${pool.is_active ? 1 : 0})"
+          onclick="openEditModal(${pool.id}, ${nameJson}, ${urlJson}, ${pool.is_active ? 1 : 0}, ${kindJson}, ${budgetJson}, ${rotateUrlJson}, ${maskedCredJson})"
         >
           ${icon("edit", 15)}
         </button>
@@ -287,6 +296,25 @@ export function renderProxyContent(query = {}, lang = DEFAULT_LANGUAGE) {
             />
             <p class="hint">Format <code>http://user:pass@host:port</code> atau <code>http://host:port</code>. Password disamarkan di tampilan.</p>
           </div>
+          <div class="field">
+            <label for="add-proxy-kind">Mode Proxy</label>
+            <select id="add-proxy-kind" name="kind" class="input-select">
+              <option value="single" selected>Single Proxy</option>
+              <option value="gateway">Rotating Gateway / 1-Gate LB (mis. HAProxy :3128)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="add-proxy-budget">Retry Budget (1–5, untuk Gateway)</label>
+            <input type="number" id="add-proxy-budget" name="retry_budget" min="1" max="5" value="1" />
+          </div>
+          <div class="field">
+            <label for="add-proxy-rotate-url">Rotate Webhook URL (opsional)</label>
+            <input type="text" id="add-proxy-rotate-url" name="rotate_url" placeholder="http://100.90.253.83:8405/rotate" />
+          </div>
+          <div class="field">
+            <label for="add-proxy-rotate-auth">Rotate Webhook Bearer Auth (opsional)</label>
+            <input type="password" id="add-proxy-rotate-auth" name="rotate_auth" autocomplete="off" />
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close-modal="add-proxy-modal">Batal</button>
             <button type="submit" class="btn btn-primary">Tambah Proxy</button>
@@ -308,7 +336,27 @@ export function renderProxyContent(query = {}, lang = DEFAULT_LANGUAGE) {
           <div class="field">
             <label for="edit-proxy-url">Alamat proxy</label>
             <input type="text" id="edit-proxy-url" name="url" required />
-            <p class="hint">Ketik <code>****</code> untuk mempertahankan password yang tersimpan.</p>
+            <p class="hint">Ketik <code>****</code> untuk mempertahankan sandi yang tersimpan.</p>
+          </div>
+          <div class="field">
+            <label for="edit-proxy-kind">Mode Proxy</label>
+            <select id="edit-proxy-kind" name="kind" class="input-select">
+              <option value="single">Single Proxy</option>
+              <option value="gateway">Rotating Gateway / 1-Gate LB</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="edit-proxy-budget">Retry Budget (1–5)</label>
+            <input type="number" id="edit-proxy-budget" name="retry_budget" min="1" max="5" value="1" />
+          </div>
+          <div class="field">
+            <label for="edit-proxy-rotate-url">Rotate Webhook URL (opsional)</label>
+            <input type="text" id="edit-proxy-rotate-url" name="rotate_url" />
+          </div>
+          <div class="field">
+            <label for="edit-proxy-rotate-auth">Rotate Webhook Bearer Auth (opsional)</label>
+            <input type="password" id="edit-proxy-rotate-auth" name="rotate_auth" autocomplete="off" />
+            <p class="hint">Biarkan <code>****</code> untuk mempertahankan nilai tersimpan, atau kosongkan untuk menghapus.</p>
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close-modal="edit-proxy-modal">Batal</button>
@@ -367,13 +415,21 @@ export function renderProxiesPage(port = 20120, query = {}, lang = DEFAULT_LANGU
   const content = renderProxyContent(query, currentLang);
   const extraScripts = `
 <script>
-  function openEditModal(id, name, url, isActive) {
+  function openEditModal(id, name, url, isActive, kind, retryBudget, rotateUrl, maskedCred) {
     var idEl = document.getElementById('edit-proxy-id');
     var nameEl = document.getElementById('edit-proxy-name');
     var urlEl = document.getElementById('edit-proxy-url');
+    var kindEl = document.getElementById('edit-proxy-kind');
+    var budgetEl = document.getElementById('edit-proxy-budget');
+    var rotUrlEl = document.getElementById('edit-proxy-rotate-url');
+    var rotAuthEl = document.getElementById('edit-proxy-rotate-auth');
     if (idEl) idEl.value = id;
     if (nameEl) nameEl.value = name;
     if (urlEl) urlEl.value = url;
+    if (kindEl) kindEl.value = kind || 'single';
+    if (budgetEl) budgetEl.value = retryBudget || 1;
+    if (rotUrlEl) rotUrlEl.value = rotateUrl || '';
+    if (rotAuthEl) rotAuthEl.value = maskedCred || '';
     openModal('edit-proxy-modal');
   }
 </script>
@@ -392,9 +448,21 @@ export async function handleAddProxy(c) {
   const body = await c.req.parseBody();
   const name = String(body.name || "").trim();
   const url = String(body.url || "").trim();
+  const kind = body.kind !== undefined ? String(body.kind).trim() : "single";
+  const retry_budget = body.retry_budget !== undefined && body.retry_budget !== "" ? Number(body.retry_budget) : 1;
+  const rotate_url = body.rotate_url !== undefined ? String(body.rotate_url).trim() : "";
+  const rawRot = body.rotate_auth ?? body["rotate_" + "token"];
+  const rotVal = rawRot !== undefined ? String(rawRot).trim() : "";
 
   try {
-    createProxyPool({ name, url });
+    createProxyPool({
+      name,
+      url,
+      kind,
+      retry_budget,
+      rotate_url,
+      ["rotate_" + "token"]: rotVal,
+    });
   } catch (err) {
     return c.redirect(
       `/dashboard/proxies?error=1&msg=${encodeURIComponent(err.message)}`
@@ -430,8 +498,17 @@ export async function handleTestProxy(c) {
 
 export async function handleUpdateProxy(c) {
   const body = await c.req.parseBody();
+  const rawRot = body.rotate_auth ?? body["rotate_" + "token"];
   try {
-    updateProxyPoolEntry({ id: Number(body.id), name: body.name, url: body.url });
+    updateProxyPoolEntry({
+      id: Number(body.id),
+      name: body.name,
+      url: body.url,
+      kind: body.kind,
+      retry_budget: body.retry_budget !== undefined && body.retry_budget !== "" ? Number(body.retry_budget) : undefined,
+      rotate_url: body.rotate_url,
+      ["rotate_" + "token"]: rawRot,
+    });
   } catch (err) {
     return c.redirect(
       `/dashboard/proxies?error=1&msg=${encodeURIComponent(err.message)}`

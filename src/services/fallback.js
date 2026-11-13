@@ -18,7 +18,13 @@ import { applyClaudePromptCache } from "./claudePromptCache.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { captureLine } from "./logger.js";
 import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
-import { resolveConnectionProxy, requireResolvedProxy, getProxyRotationStrategy, planProxyRotation } from "./proxyPools.js";
+import {
+  resolveConnectionProxy,
+  requireResolvedProxy,
+  getProxyRotationStrategy,
+  planProxyRotationEntries,
+  notifyProxyRotate,
+} from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
 import {
   ACCOUNT_PARK_MS,
@@ -310,9 +316,35 @@ function freeTierModelIds(provider, modelId) {
  * every free model on the account, so all of them wait for the same reset. The
  * quota is then re-synced so the dashboard stops showing the stale balance.
  */
-function applyRateLimitCooldown(connection, provider, res, errText, modelId, defaultMs) {
+const MIDSTREAM_ROTATE_RE = /FreeTierError|FreeUsageLimitError|"type"\s*:\s*"error"/i;
+
+function attachMidstreamRotateObserver(res, proxyEntry) {
+  if (!res?.body || !proxyEntry?.rotate_url) return res;
+  const decoder = new TextDecoder();
+  let triggered = false;
+  const observer = new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+      if (!triggered) {
+        const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+        if (MIDSTREAM_ROTATE_RE.test(text)) {
+          triggered = true;
+          notifyProxyRotate(proxyEntry, { status: 429, reason: "midstream_error" }).catch(() => {});
+        }
+      }
+    },
+  });
+  return new Response(res.body.pipeThrough(observer), {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
+}
+
+function applyRateLimitCooldown(connection, provider, res, errText, modelId, defaultMs, { skipVirtualCooldown = false } = {}) {
   const until = Date.now() + extractQuotaCooldownMs(res, errText, defaultMs);
   if (!connection?.id) {
+    if (skipVirtualCooldown) return;
     // Virtual / anonymous connection: apply virtual cooldown at model/provider level (5-15 min, default extracted)
     const virtualMs = Math.max(5 * 60 * 1000, Math.min(15 * 60 * 1000, until - Date.now() || VIRTUAL_COOLDOWN_DEFAULT_MS));
     setVirtualCooldown(provider.id, modelId, Date.now() + virtualMs);
@@ -541,11 +573,12 @@ export async function executeWithFallback({
   // yang sama. Tanpa proxy aktif, koneksi virtual tetap memakai koneksi
   // langsung seperti sebelumnya.
   const virtualOnly = available.length === 1 && available[0].id === null;
-  const rotationProxies = virtualOnly
-    ? planProxyRotation(provider.id, getProxyRotationStrategy(provider.id))
+  const rotationEntries = virtualOnly
+    ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id))
     : [];
+  const rotationProxies = rotationEntries.map((e) => e.url);
   const maxAttempts =
-    rotationProxies.length > 0 ? rotationProxies.length : Math.max(1, available.length);
+    rotationEntries.length > 0 ? rotationEntries.length : Math.max(1, available.length);
   let lastFailureResponse = null;
   // A transient upstream 404 is retried on the same account this many times
   // before it is reported to the client.
@@ -588,8 +621,8 @@ export async function executeWithFallback({
       provider.id === "claude" ? extractClaudeSessionId(payload?.metadata?.user_id) : null;
     applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
     const url = resolveUrl(connection);
-    const proxyUrl =
-      rotationProxies.length > 0 ? rotationProxies[attempt - 1] ?? null : requireResolvedProxy(connection);
+    const proxyEntry = rotationEntries.length > 0 ? rotationEntries[attempt - 1] ?? null : null;
+    const proxyUrl = proxyEntry ? proxyEntry.url : requireResolvedProxy(connection);
 
     let releaseSlot = null;
     try {
@@ -612,6 +645,7 @@ export async function executeWithFallback({
         body: bodyForConnection(connection),
         signal,
         proxyUrl,
+        proxyMeta: proxyEntry,
         connection,
         stream,
         targetModel,
@@ -632,7 +666,11 @@ export async function executeWithFallback({
     // Success: this connection can serve the request
     if (res.ok) {
       clearStrikes(connection, modelId);
-      return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
+      const observedRes =
+        stream && provider.id === "opencode" && proxyEntry?.rotate_url
+          ? attachMidstreamRotateObserver(res, proxyEntry)
+          : res;
+      return { ok: true, upstreamRes: attachSlotRelease(observedRes, releaseSlot), connection };
     }
 
     // Attempt failed: release slot before processing failover or next attempt
@@ -739,8 +777,12 @@ export async function executeWithFallback({
       // A transport failure means the path to upstream dropped, not that the
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
+      if ((res.status === 429 || res.status === 403) && proxyEntry?.rotate_url) {
+        notifyProxyRotate(proxyEntry, { status: res.status, reason: errText.slice(0, 120) }).catch(() => {});
+      }
       if (!isTransportFailure(res, errText)) {
-        if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
+        const skipVirtual = !connection?.id && rotationEntries.length > 0 && attempt < maxAttempts;
+        if (!skipVirtual && parkThresholdReached(connection, { modelId, requestId: attemptId })) {
           applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000 * attempt);
         }
       }
@@ -834,6 +876,9 @@ export async function executeWithFallback({
 
     // Account-level failures can be isolated to this credential; try the next one.
     if (res.status === 401 || res.status === 402 || res.status === 403) {
+      if (res.status === 403 && proxyEntry?.rotate_url) {
+        notifyProxyRotate(proxyEntry, { status: res.status, reason: errText.slice(0, 120) }).catch(() => {});
+      }
       if (connection.id && parkThresholdReached(connection, { requestId: attemptId })) {
         setConnectionCooldown(connection.id, Date.now() + ACCOUNT_PARK_MS);
       }

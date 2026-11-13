@@ -94,6 +94,7 @@ export class BaseExecutor {
     this.headersTimeoutMs = options.headersTimeoutMs || options.timeoutMs || DEFAULT_HEADERS_TIMEOUT_MS;
     this.idleTimeoutMs = options.idleTimeoutMs || DEFAULT_IDLE_TIMEOUT_MS;
     this.fetchFn = options.fetchFn || globalThis.fetch;
+    this.proxyFetchFn = options.proxyFetchFn || proxyFetch;
   }
 
   /**
@@ -132,7 +133,7 @@ export class BaseExecutor {
       }, headersTimeout);
 
       try {
-        response = proxyUrl ? await proxyFetch(url, init, proxyUrl) : await this.fetchFn(url, init);
+        response = proxyUrl ? await this.proxyFetchFn(url, init, proxyUrl) : await this.fetchFn(url, init);
         break;
       } catch (err) {
         // The client hung up, so no account should be penalised for a request nobody awaits.

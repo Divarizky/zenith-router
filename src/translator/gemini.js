@@ -1,5 +1,43 @@
 import { randomUUID } from "node:crypto";
-import { captureLine } from "../services/logger.js";
+import { captureLine, logQuiet } from "../services/logger.js";
+
+// Artefak delimiter yatim (`!]`, `$]`, `*]`) yang dikeluarkan model upstream tepat
+// setelah tanda baca penutup kalimat. Hanya dihapus bila tidak ada `[` yang belum
+// tertutup di baris yang sama, agar ekspresi seperti `[!]` atau `arr[i!]` aman.
+const ORPHAN_ARTIFACT_RE = /([.?!✨)])([!$*]\])(?=\s|$)/g;
+const TRACE_SNIPPET_MAX = 80;
+
+function redactTraceSnippet(snippet) {
+  return snippet
+    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/\b(sk|ya29|AIza)[-_A-Za-z0-9]{8,}/g, "[REDACTED]");
+}
+
+function traceOrphanArtifact(text, index, artifact, model) {
+  const from = Math.max(0, index - 30);
+  const to = Math.min(text.length, index + artifact.length + 30);
+  const snippet = redactTraceSnippet(text.slice(from, to).replace(/\s+/g, " ")).slice(0, TRACE_SNIPPET_MAX);
+  logQuiet(`[GEMINI][artifact-trace] model=${model} stripped=${JSON.stringify(artifact)} snippet=${JSON.stringify(snippet)}`);
+}
+
+/**
+ * Hapus artefak delimiter yatim setelah tanda baca penutup kalimat.
+ * Fungsi murni kecuali bila ZENITH_ARTIFACT_TRACE=1, maka penghapusan dicatat
+ * ke log dashboard.
+ */
+export function stripOrphanBracketArtifacts(text, model = "gemini") {
+  if (typeof text !== "string" || !text) return text;
+  const trace = process.env.ZENITH_ARTIFACT_TRACE === "1";
+  return text.replace(ORPHAN_ARTIFACT_RE, (match, punct, artifact, offset) => {
+    const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+    const before = text.slice(lineStart, offset);
+    const opens = before.split("[").length - 1;
+    const closes = before.split("]").length - 1;
+    if (opens > closes) return match;
+    if (trace) traceOrphanArtifact(text, offset, artifact, model);
+    return punct;
+  });
+}
 
 // Original (client) tool names keyed by the sanitized wire name. This map is
 // per request: it is built by openaiToGeminiRequest and handed to the response
@@ -540,20 +578,23 @@ export function createGeminiToOpenAITransformStream(model = "gemini", opts = {})
               if (part.text) {
                 // Thought parts (thought: true) are reasoning, not answer text.
                 const field = part.thought ? "reasoning_content" : "content";
-                const openAIChunk = {
-                  id: responseId,
-                  object: "chat.completion.chunk",
-                  created,
-                  model,
-                  choices: [
-                    {
-                      index: 0,
-                      delta: { [field]: part.text },
-                      finish_reason: null,
-                    },
-                  ],
-                };
-                controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+                const text = part.thought ? part.text : stripOrphanBracketArtifacts(part.text, model);
+                if (text) {
+                  const openAIChunk = {
+                    id: responseId,
+                    object: "chat.completion.chunk",
+                    created,
+                    model,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: { [field]: text },
+                        finish_reason: null,
+                      },
+                    ],
+                  };
+                  controller.enqueue(textEncoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+                }
               }
 
               if (part.functionCall) {
@@ -632,7 +673,7 @@ export async function geminiToOpenAIResponse(data, model = "gemini", opts = {}) 
   for (const p of parts) {
     if (p.text) {
       if (p.thought) reasoning += p.text;
-      else text += p.text;
+      else text += stripOrphanBracketArtifacts(p.text, model);
     }
     if (p.functionCall) {
       const callId = p.functionCall.id || `call_${randomUUID().slice(0, 8)}`;

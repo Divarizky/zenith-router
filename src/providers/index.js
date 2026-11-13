@@ -57,11 +57,27 @@ function modelCapabilityFields(modelId, storedCaps = null, providerTools = undef
  */
 export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
-function thinkingLevelFields(providerId) {
-  return providerId === "claude" ? { thinking_levels: [...CLAUDE_OAUTH_THINKING_LEVELS] } : {};
+/**
+ * Antigravity families publish the levels their own variants cover, so a family
+ * without an `xhigh` variant never offers xhigh (it would fall back to high).
+ * Pi adds `off` itself, so only the named levels are listed here.
+ */
+export function antigravityThinkingLevels(family) {
+  const levels = Object.keys(family?.discoveredVariants || family?.variants || {});
+  if (levels.length === 0) return null;
+  return LEVEL_DISPLAY_ORDER.filter((level) => levels.includes(level));
+}
+
+function thinkingLevelFields(providerId, model = null) {
+  if (providerId === "claude") return { thinking_levels: [...CLAUDE_OAUTH_THINKING_LEVELS] };
+  if (providerId === "antigravity") {
+    const levels = antigravityThinkingLevels(model);
+    return levels ? { thinking_levels: levels } : {};
+  }
+  return {};
 }
 import { getConnections, getAntigravityInventoryRows, listCustomProviders } from "../db/index.js";
-import { buildAntigravityFamilies, resolveFamilyRuntime } from "../services/antigravityCatalog.js";
+import { buildAntigravityFamilies, resolveFamilyRuntime, LEVEL_DISPLAY_ORDER } from "../services/antigravityCatalog.js";
 
 /**
  * Every synced runtime id across active accounts, keyed by runtime id. Families
@@ -241,6 +257,8 @@ export function getProviderModels(p) {
       // A discovered family wins its variants: it is what this account can call.
       if (existing) {
         existing.variants = { ...existing.variants, ...discovered.variants };
+        // Levels this account reports, kept apart from builtin variants that it may not carry.
+        existing.discoveredVariants = discovered.variants;
         existing.unsuffixed = discovered.unsuffixed || existing.unsuffixed;
         existing.tiered = discovered.tiered || existing.tiered;
         existing.supportsImages = discovered.supportsImages ?? existing.supportsImages;
@@ -404,7 +422,7 @@ export function getAvailableModels({ all = false } = {}) {
         root: m.id,
         parent: null,
       };
-      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities, p.supportsTools === true ? true : undefined), thinkingLevelFields(p.id));
+      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities, p.supportsTools === true ? true : undefined), thinkingLevelFields(p.id, m));
       result.push(entry);
     }
   }

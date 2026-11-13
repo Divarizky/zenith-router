@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import { AntigravityExecutor } from "../src/executors/antigravity.js";
 import antigravity from "../src/providers/registry/antigravity.js";
+import { buildAntigravityFamilies, resolveFamilyRuntime } from "../src/services/antigravityCatalog.js";
 
 function capture() {
   const seen = {};
@@ -86,4 +87,29 @@ test("antigravity executor - keluarga gemini-3.5-flash dan keluarga satu runtime
   // Id runtime mentah tetap diterima apa adanya.
   await call(executor, "gpt-oss-120b-medium");
   assert.strictEqual(seen.body.model, "gpt-oss-120b-medium");
+});
+
+test("antigravity catalog - varian xhigh bergabung ke keluarga induknya", () => {
+  const families = buildAntigravityFamilies({
+    "gemini-4-hydrogen-low": { displayName: "Gemini 4 Hydrogen (Low)" },
+    "gemini-4-hydrogen-high": { displayName: "Gemini 4 Hydrogen (High)" },
+    "gemini-4-hydrogen-xhigh": { displayName: "Gemini 4 Hydrogen (XHigh)" },
+  });
+  assert.deepStrictEqual([...families.keys()], ["gemini-4-hydrogen"]);
+  const family = families.get("gemini-4-hydrogen");
+  assert.strictEqual(family.variants.xhigh, "gemini-4-hydrogen-xhigh");
+  assert.strictEqual(family.displayName, "Gemini 4 Hydrogen");
+  assert.deepStrictEqual(resolveFamilyRuntime(family, "xhigh"), { id: "gemini-4-hydrogen-xhigh", thinkingLevel: undefined });
+});
+
+test("antigravity catalog - id xhigh tanpa display name juga memilih varian xhigh", () => {
+  const families = buildAntigravityFamilies({
+    "gemini-4-hydrogen-medium": { displayName: "Gemini 4 Hydrogen" },
+    "gemini-4-hydrogen-xhigh": {},
+  });
+  assert.strictEqual(families.get("gemini-4-hydrogen").variants.xhigh, "gemini-4-hydrogen-xhigh");
+  assert.deepStrictEqual(resolveFamilyRuntime(families.get("gemini-4-hydrogen"), "max"), {
+    id: "gemini-4-hydrogen-xhigh",
+    thinkingLevel: undefined,
+  });
 });

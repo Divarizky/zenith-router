@@ -18,6 +18,7 @@
 const SUFFIXES = [
   { suffix: "extra-low", level: "low" },
   { suffix: "extra-high", level: "xhigh" },
+  { suffix: "xhigh", level: "xhigh" },
   { suffix: "thinking", level: "high" },
   { suffix: "minimal", level: "minimal" },
   { suffix: "medium", level: "medium" },
@@ -28,7 +29,7 @@ const SUFFIXES = [
 /** Display name wins over the id suffix: `gemini-3.5-flash-low` is "Flash (Medium)". */
 const DISPLAY_LEVELS = [
   { pattern: /\(\s*extra\s*low\s*\)/i, level: "low" },
-  { pattern: /\(\s*extra\s*high\s*\)/i, level: "xhigh" },
+  { pattern: /\(\s*(?:extra\s*high|x-?high)\s*\)/i, level: "xhigh" },
   { pattern: /\(\s*thinking\s*\)/i, level: "high" },
   { pattern: /\(\s*minimal\s*\)/i, level: "minimal" },
   { pattern: /\(\s*medium\s*\)/i, level: "medium" },
@@ -93,7 +94,7 @@ function levelFromDisplayName(displayName) {
 
 export function familyFromDisplayName(displayName) {
   if (typeof displayName !== "string") return undefined;
-  return displayName.replace(/\s*\((?:extra\s*low|extra\s*high|low|medium|high|minimal|thinking)\)\s*$/i, "").trim();
+  return displayName.replace(/\s*\((?:extra\s*low|extra\s*high|x-?high|low|medium|high|minimal|thinking)\)\s*$/i, "").trim();
 }
 
 /**

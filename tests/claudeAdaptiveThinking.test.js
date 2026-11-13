@@ -75,9 +75,10 @@ test("/v1/models mengumumkan thinking_levels untuk cc/ dan tidak untuk model lai
   for (const m of cc) {
     assert.deepEqual(m.thinking_levels, ["low", "medium", "high", "xhigh", "max"], m.id);
   }
-  const others = models.filter((m) => !m.id.startsWith("cc/"));
+  // Antigravity announces its own per-family levels; every other non-cc/ provider stays unannounced.
+  const others = models.filter((m) => !m.id.startsWith("cc/") && !m.id.startsWith("ag/"));
   assert.ok(others.length > 0);
-  assert.ok(others.every((m) => m.thinking_levels === undefined), "model non-cc/ tidak berubah");
+  assert.ok(others.every((m) => m.thinking_levels === undefined), "model non-cc/ dan non-ag/ tidak berubah");
 });
 
 test("passthrough Claude native tidak memakai jalur adaptif dan header-nya tetap", async () => {

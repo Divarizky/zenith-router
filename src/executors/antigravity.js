@@ -2,6 +2,14 @@ import { randomUUID } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { antigravityUserAgent } from "../services/antigravityIdentity.js";
 import { flattenToolUnionsForClaude, stripToolCallIds } from "../translator/gemini.js";
+import { createPrefixTracer } from "../services/prefixTrace.js";
+import { captureLine } from "../services/logger.js";
+
+// Opt-in diagnostics: ZENITH_CACHE_TRACE=1 logs how each session's upstream prefix changes between turns.
+const prefixTracer = createPrefixTracer({
+  enabled: process.env.ZENITH_CACHE_TRACE === "1",
+  log: captureLine,
+});
 
 const ANTIGRAVITY_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
 
@@ -59,7 +67,7 @@ function missingProjectResponse() {
 }
 
 export class AntigravityExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, effort }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, effort, sessionKey = null, sessionSource = null }) {
     let parsed = null;
     try {
       parsed = body ? JSON.parse(body) : null;
@@ -75,16 +83,22 @@ export class AntigravityExecutor extends BaseExecutor {
     if (!projectId) return missingProjectResponse();
 
     const finalUrl = `${ANTIGRAVITY_BASE_URL}/v1internal:${actionFor(Boolean(stream))}`;
+    const upstreamRequest = applyThinkingLevel(
+      isClaudeModel(model) ? flattenToolUnionsForClaude(sourceRequest) : stripToolCallIds(sourceRequest),
+      thinkingLevel
+    );
+    // An apikey-derived key is shared by every conversation on that key, so comparing
+    // turns under it would report false divergence. Trace only client-declared sessions.
+    if (sessionSource === "header" || sessionSource === "body") {
+      prefixTracer.observe({ provider: "antigravity", sessionKey, model, request: upstreamRequest });
+    }
     const wrapped = {
       project: projectId,
       model,
       userAgent: "antigravity",
       requestId: `agent-${randomUUID()}`,
       requestType: "agent",
-      request: applyThinkingLevel(
-        isClaudeModel(model) ? flattenToolUnionsForClaude(sourceRequest) : stripToolCallIds(sourceRequest),
-        thinkingLevel
-      ),
+      request: upstreamRequest,
     };
 
     const antigravityHeaders = {

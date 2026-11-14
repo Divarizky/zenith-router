@@ -34,6 +34,10 @@ function renderProxyRow(pool) {
     : `<span class="pill">inactive</span>`;
 
   const boundBadge = `<span class="pill">${pool.accountCount} bound (${pool.accountCount} akun)</span>`;
+  const exhaustedBadge =
+    pool.exhaustedUntil && pool.exhaustedUntil > Date.now()
+      ? `<span class="pill pill-warning" title="Egress pool quota exhausted">exhausted (sampai ${fmtTestTime(pool.exhaustedUntil)})</span>`
+      : "";
   const kindBadge =
     pool.kind === "gateway"
       ? `<span class="pill pill-info" title="Rotating Gateway">gateway &times;${Number(pool.retry_budget) || 1}</span>`
@@ -78,6 +82,7 @@ function renderProxyRow(pool) {
             ${activeBadge}
             ${boundBadge}
             ${kindBadge}
+            ${exhaustedBadge}
           </div>
           <div class="proxy-url-line"><code>${escapeHtml(pool.maskedUrl)}</code></div>
           <div class="proxy-meta-line">${testDetail}</div>

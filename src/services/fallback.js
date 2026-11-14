@@ -24,6 +24,7 @@ import {
   getProxyRotationStrategy,
   planProxyRotationEntries,
   notifyProxyRotate,
+  beginProxyStream,
 } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
 import {
@@ -142,6 +143,28 @@ export function getNextConnection(providerId, triedIds = [], model = null, effor
   return null;
 }
 
+
+/**
+ * Menandai aliran sukses sebagai aktif pada proxy-nya selama body belum habis
+ * atau dibatalkan, supaya rotasi node tidak memutusnya.
+ */
+function attachProxyStreamTracker(res, proxyEntry) {
+  if (!res?.body) return res;
+  const release = beginProxyStream(proxyEntry);
+  const tracker = new TransformStream({
+    flush() {
+      release();
+    },
+    cancel() {
+      release();
+    },
+  });
+  return new Response(res.body.pipeThrough(tracker), {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
+}
 
 function attachSlotRelease(res, releaseSlot) {
   if (!res || !releaseSlot) return res;
@@ -670,7 +693,9 @@ export async function executeWithFallback({
         stream && provider.id === "opencode" && proxyEntry?.rotate_url
           ? attachMidstreamRotateObserver(res, proxyEntry)
           : res;
-      return { ok: true, upstreamRes: attachSlotRelease(observedRes, releaseSlot), connection };
+      const trackedRes =
+        stream && proxyEntry?.rotate_url ? attachProxyStreamTracker(observedRes, proxyEntry) : observedRes;
+      return { ok: true, upstreamRes: attachSlotRelease(trackedRes, releaseSlot), connection };
     }
 
     // Attempt failed: release slot before processing failover or next attempt

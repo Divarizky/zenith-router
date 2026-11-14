@@ -296,13 +296,10 @@ export async function handleBridgeRequest(req) {
       body: JSON.stringify(payload),
     };
     if (bridgeProxy) {
-      // In Bun runtime, undici is a built-in module; under Node test runners, fall back to native proxy if missing
-      try {
-        const { ProxyAgent } = await import("undici");
-        fetchOptions.dispatcher = new ProxyAgent(bridgeProxy);
-      } catch {
-        fetchOptions.proxy = bridgeProxy;
-      }
+      // Bun's own `proxy` option is the one that tunnels. A `dispatcher` built
+      // from undici's ProxyAgent is accepted but silently ignored by Bun's
+      // fetch, which would send the request from the host's own IP.
+      fetchOptions.proxy = bridgeProxy;
     }
 
     try {

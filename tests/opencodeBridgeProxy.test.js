@@ -74,7 +74,8 @@ test("handleBridgeRequest extracts x-zenith-proxy into upstream fetch options", 
     const res = await handleBridgeRequest(req);
     assert.equal(res.status, 200);
     assert.ok(capturedFetch);
-    assert.ok(capturedFetch.opts.proxy || capturedFetch.opts.dispatcher, "Must attach proxy or dispatcher");
+    assert.equal(capturedFetch.opts.proxy, DUMMY_PROXY, "the tunnel is Bun's `proxy` option");
+    assert.equal(capturedFetch.opts.dispatcher, undefined, "a dispatcher is ignored by Bun and would leak the host IP");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -168,6 +168,12 @@ export async function startOpencodeBridgeService({
 
     child.unref();
     managedProcess = child;
+    // A worker that dies must not leave `bridgeActive` behind: the flag would
+    // keep sending OpenCode requests to a closed port (ECONNREFUSED → 502).
+    child.once("exit", () => {
+      if (managedProcess === child) managedProcess = null;
+      bridgeActive = false;
+    });
 
     // Poll until ready (up to 3.5s)
     const startTime = Date.now();
@@ -191,10 +197,22 @@ export async function startOpencodeBridgeService({
 
 /**
  * Ensures the bridge is active before dispatching an OpenCode request.
+ *
+ * A recorded `bridgeActive` is not proof of life. A worker started outside this
+ * process has no exit handler here, so it can disappear while the flag stays
+ * set and every OpenCode call then fails with ECONNREFUSED on the bridge port.
+ * When no managed child is held, verify with a health ping and respawn.
  */
-export async function ensureOpencodeBridge() {
-  if (bridgeActive) return true;
-  const result = await startOpencodeBridgeService({ silent: false });
+export async function ensureOpencodeBridge({
+  isRunning = isOpencodeBridgeRunning,
+  start = startOpencodeBridgeService,
+} = {}) {
+  if (bridgeActive) {
+    if (managedProcess) return true;
+    if (await isRunning()) return true;
+    bridgeActive = false;
+  }
+  const result = await start({ silent: false });
   return result.ok;
 }
 

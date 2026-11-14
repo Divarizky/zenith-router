@@ -26,12 +26,19 @@ const {
   planProxyRotationEntries,
   notifyProxyRotate,
   resetProxyRotateDebounce,
+  beginProxyStream,
+  resetProxyStreamState,
+  markProxyPoolExhausted,
+  isProxyPoolExhausted,
+  resetProxyPoolExhausted,
 } = await import("../src/services/proxyPools.js");
 
 const {
   resetOpencodeGate,
   getOpencodeGateState,
   opencodeGateKey,
+  msUntilNextMidnightUtc,
+  noteOpencodeGateRejection,
 } = await import("../src/services/opencodeGate.js");
 
 const {
@@ -58,6 +65,8 @@ function clearPoolsAndSettings() {
   const db = getDb();
   db.exec("DELETE FROM connections; DELETE FROM proxy_pools; DELETE FROM settings;");
   resetProxyRotateDebounce();
+  resetProxyStreamState();
+  resetProxyPoolExhausted();
   resetOpencodeGate();
   resetVirtualCooldowns();
 }
@@ -165,8 +174,8 @@ test("notifyProxyRotate sends auth header, debounces repeated calls, and swallow
     [ROT_KEY]: tok,
   };
 
-  await notifyProxyRotate(pool, { status: 429, reason: "FreeUsageLimitError", fetchFn: fakeFetch, now: 1000 });
-  await notifyProxyRotate(pool, { status: 429, reason: "FreeUsageLimitError", fetchFn: fakeFetch, now: 2000 });
+  await notifyProxyRotate(pool, { status: 429, reason: "throttled", fetchFn: fakeFetch, now: 1000 });
+  await notifyProxyRotate(pool, { status: 429, reason: "throttled", fetchFn: fakeFetch, now: 2000 });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "http://100.90.253.83:8405/rotate");
   assert.equal(calls[0].init.headers.Authorization, `${AUTH_SCHEME} ${tok}`);
@@ -368,3 +377,124 @@ test("1-gate gateway engages opencodeGate and virtualCooldown only when all retr
   assert.equal(upstreamCall, 2);
   assert.notEqual(getOpencodeGateState(opencodeGateKey(gateUrl)), null);
 });
+
+test("notifyProxyRotate waits for the last active stream so a rotation does not cut it off", async () => {
+  clearPoolsAndSettings();
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    return new Response("{}", { status: 200 });
+  };
+  const pool = { id: 77, url: "http://100.90.253.83:3128", kind: "gateway", rotate_url: "http://100.90.253.83:8405/rotate" };
+
+  const endA = beginProxyStream(pool);
+  const endB = beginProxyStream(pool);
+  const r = await notifyProxyRotate(pool, { status: 429, reason: "x", fetchFn: fakeFetch, now: 1000 });
+  assert.equal(r.skipped, "deferred_active_stream");
+  assert.equal(calls.length, 0);
+
+  endA();
+  endA();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls.length, 0, "one stream is still running");
+
+  endB();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls.length, 1, "rotation fires once the last stream ends");
+});
+
+test("notifyProxyRotate skips rotation and marks pool exhausted when reason is FreeUsageLimitError", async () => {
+  clearPoolsAndSettings();
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    return new Response("{}", { status: 200 });
+  };
+  const pool = { id: 88, url: "http://100.90.253.83:3128", kind: "gateway", rotate_url: "http://100.90.253.83:8405/rotate" };
+
+  // First call with FreeUsageLimitError: sends rotation, but marks pool exhausted
+  const r1 = await notifyProxyRotate(pool, {
+    status: 429,
+    reason: "FreeUsageLimitError: daily quota exceeded",
+    fetchFn: fakeFetch,
+    now: 1000,
+  });
+  assert.equal(r1.sent, true);
+  assert.equal(calls.length, 1);
+  assert.equal(isProxyPoolExhausted(88, 1000), true);
+
+  // Subsequent call: skipped because pool is marked exhausted
+  const r2 = await notifyProxyRotate(pool, {
+    status: 429,
+    reason: "FreeUsageLimitError: daily quota exceeded",
+    fetchFn: fakeFetch,
+    now: 50000,
+  });
+  assert.equal(r2.skipped, "pool_exhausted");
+  assert.equal(calls.length, 1, "no more rotate calls sent while pool is exhausted");
+});
+
+test("a deferred rotation still fires after the max wait if a stream never ends", async () => {
+  clearPoolsAndSettings();
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    return new Response("{}", { status: 200 });
+  };
+  const pool = { id: 78, url: "http://100.90.253.83:3128", kind: "gateway", rotate_url: "http://100.90.253.83:8405/rotate" };
+  beginProxyStream(pool);
+  await notifyProxyRotate(pool, { status: 429, fetchFn: fakeFetch, now: 1000, maxDeferMs: 30 });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(calls.length, 1);
+});
+
+test("a quota 429 from an earlier day does not mark the pool exhausted today", async () => {
+  clearPoolsAndSettings();
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    return new Response("{}", { status: 200 });
+  };
+  const pool = { id: 91, url: "http://100.90.253.83:3128", kind: "gateway", retry_budget: 2, rotate_url: "http://100.90.253.83:8405/rotate" };
+  const day1 = Date.UTC(2026, 10, 14, 1, 0, 0);
+  await notifyProxyRotate(pool, { status: 429, reason: "FreeUsageLimitError", fetchFn: fakeFetch, now: day1 });
+  assert.equal(isProxyPoolExhausted(91, day1 + 1000), false, "one strike is below retry_budget 2");
+
+  const day3 = day1 + 2 * 86400000;
+  const r = await notifyProxyRotate(pool, { status: 429, reason: "FreeUsageLimitError", fetchFn: fakeFetch, now: day3 });
+  assert.equal(r.sent, true);
+  assert.equal(isProxyPoolExhausted(91, day3 + 1000), false, "the old strike must not carry over");
+});
+
+test("a non-quota 429 never marks the pool exhausted", async () => {
+  clearPoolsAndSettings();
+  const fakeFetch = async () => new Response("{}", { status: 200 });
+  const pool = { id: 92, url: "http://100.90.253.83:3128", kind: "gateway", retry_budget: 1, rotate_url: "http://100.90.253.83:8405/rotate" };
+  await notifyProxyRotate(pool, { status: 429, reason: "slow down", fetchFn: fakeFetch, now: 1000 });
+  assert.equal(isProxyPoolExhausted(92, 1500), false);
+});
+
+test("msUntilNextMidnightUtc and noteOpencodeGateRejection cooldown on 429 FreeUsageLimit", () => {
+  const fixedNow = Date.UTC(2026, 10, 14, 12, 0, 0); // 12:00 UTC
+  const ms = msUntilNextMidnightUtc(fixedNow);
+  // 12 hours = 43200000 ms
+  assert.equal(ms, 12 * 3600 * 1000);
+
+  resetOpencodeGate();
+  // With Retry-After of 50000s (~13.8h)
+  const state = noteOpencodeGateRejection(
+    "test-gate-key",
+    {
+      status: 429,
+      shape: { hasReadTool: true, userAgentOk: true, sessionHeaders: ["h"], streaming: true },
+      shapeOk: true,
+      retryAfterMs: 43200000,
+    },
+    fixedNow
+  );
+
+  assert.equal(state.gate, "quota-exhausted");
+  // cooldown should be 43200000 ms, NOT capped at 600000 (10m)
+  assert.equal(state.retryAfterMs, 43200000);
+});
+

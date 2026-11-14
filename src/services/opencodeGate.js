@@ -43,6 +43,12 @@ function errorTypeOf(text) {
   return typeof type === "string" ? type : "";
 }
 
+export function msUntilNextMidnightUtc(now = Date.now()) {
+  const d = new Date(now);
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0, 0);
+  return Math.max(0, next - now);
+}
+
 /** 401/403 are the gate's statuses; 426 is its version-floor handshake; 429 is free-usage limit. */
 export function isOpencodeGateStatus(status) {
   return status === 401 || status === 403 || status === 426 || status === 429;
@@ -169,11 +175,14 @@ export function noteOpencodeGateRejection(
       retryAfterMs: 0,
     };
   }
-  const cooldownMs = retryAfterMs && retryAfterMs > 0
-    ? Math.min(retryAfterMs, OPENCODE_GATE_MAX_COOLDOWN_MS)
-    : escalateOpencodeCooldown(baseMs, strikes);
   const isVersionFloor = status === 426;
   const isFreeUsageLimit = status === 429;
+  const untilMidnight = msUntilNextMidnightUtc(now) + 30000;
+  const cooldownMs = isFreeUsageLimit
+    ? (retryAfterMs && retryAfterMs > 0 ? Math.min(retryAfterMs, untilMidnight) : untilMidnight)
+    : (retryAfterMs && retryAfterMs > 0
+        ? Math.min(retryAfterMs, OPENCODE_GATE_MAX_COOLDOWN_MS)
+        : escalateOpencodeCooldown(baseMs, strikes));
   const state = {
     until: now + cooldownMs,
     at: now,

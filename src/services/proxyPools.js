@@ -8,6 +8,7 @@ import {
 } from "../db/index.js";
 import { proxyFetch } from "../executors/proxy.js";
 import { getSetting, setSetting } from "./settings.js";
+import { msUntilNextMidnightUtc } from "./opencodeGate.js";
 
 /**
  * Mask the password inside a proxy address for display.
@@ -369,6 +370,7 @@ export function listProxyPools() {
       hasRotateToken: hasCred,
       maskedRotateToken: hasCred ? MASK_PLACEHOLDER : "",
       maskedUrl: maskProxyUrl(p.url),
+      exhaustedUntil: getProxyPoolExhaustedUntil(p.id) || null,
       accountCount: countProxyAccounts(p.id),
     };
   });
@@ -420,21 +422,137 @@ export const PROXY_ROTATE_DEBOUNCE_MS = 10000;
 const AUTH_HDR_NAME = "Author" + "ization";
 const AUTH_HDR_SCHEME = "Bear" + "er";
 
+const poolExhaustedMap = new Map();
+const rotateStrikeMap = new Map();
+// Strike di luar jendela ini dianggap sudah lewat, supaya 429 hari lalu tidak
+// ikut menandai pool habis hari ini.
+export const PROXY_STRIKE_WINDOW_MS = 300000;
+
+export function markProxyPoolExhausted(poolIdOrUrl, untilMs) {
+  if (!poolIdOrUrl) return;
+  poolExhaustedMap.set(String(poolIdOrUrl), Number(untilMs) || 0);
+}
+
+export function isProxyPoolExhausted(poolIdOrUrl, now = Date.now()) {
+  if (!poolIdOrUrl) return false;
+  const until = poolExhaustedMap.get(String(poolIdOrUrl));
+  if (!until) return false;
+  if (until <= now) {
+    poolExhaustedMap.delete(String(poolIdOrUrl));
+    return false;
+  }
+  return true;
+}
+
+export function getProxyPoolExhaustedUntil(poolIdOrUrl, now = Date.now()) {
+  if (!poolIdOrUrl) return null;
+  const until = poolExhaustedMap.get(String(poolIdOrUrl));
+  if (!until || until <= now) return null;
+  return until;
+}
+
+export function resetProxyPoolExhausted() {
+  poolExhaustedMap.clear();
+}
+
 export function resetProxyRotateDebounce() {
   rotateDebounceMap.clear();
+  rotateStrikeMap.clear();
+}
+
+/**
+ * Aliran SSE yang sedang berjalan lewat sebuah proxy gateway. Rotasi node
+ * memutus koneksi yang sedang berjalan, jadi permintaan rotasi ditahan selama
+ * masih ada aliran aktif dan dikirim saat yang terakhir selesai.
+ */
+export const PROXY_ROTATE_MAX_DEFER_MS = 120000;
+const activeStreams = new Map();
+const pendingRotates = new Map();
+
+function streamKey(poolEntry) {
+  return String(poolEntry?.id ?? poolEntry?.rotate_url ?? "");
+}
+
+export function resetProxyStreamState() {
+  for (const p of pendingRotates.values()) clearTimeout(p.timer);
+  pendingRotates.clear();
+  activeStreams.clear();
+}
+
+/**
+ * Tandai satu aliran aktif pada proxy ini. Mengembalikan fungsi pelepas yang
+ * aman dipanggil berulang; saat aliran terakhir lepas, rotasi tertunda (jika
+ * ada) dikirim.
+ */
+export function beginProxyStream(poolEntry) {
+  const key = streamKey(poolEntry);
+  if (!key) return () => {};
+  activeStreams.set(key, (activeStreams.get(key) || 0) + 1);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const left = (activeStreams.get(key) || 1) - 1;
+    if (left > 0) {
+      activeStreams.set(key, left);
+      return;
+    }
+    activeStreams.delete(key);
+    const pending = pendingRotates.get(key);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingRotates.delete(key);
+      sendProxyRotate(pending.poolEntry, pending.opts).catch(() => {});
+    }
+  };
 }
 
 export async function notifyProxyRotate(
   poolEntry,
-  { status = null, reason = "", fetchFn = fetch, now = Date.now(), debounceMs = PROXY_ROTATE_DEBOUNCE_MS } = {}
+  { status = null, reason = "", fetchFn = fetch, now = Date.now(), debounceMs = PROXY_ROTATE_DEBOUNCE_MS, maxDeferMs = PROXY_ROTATE_MAX_DEFER_MS } = {}
 ) {
   const rotateUrl = poolEntry?.rotate_url;
   if (!rotateUrl) return { sent: false, skipped: "no_url" };
+  const poolKey = String(poolEntry.id ?? poolEntry.url ?? rotateUrl);
+  if (isProxyPoolExhausted(poolKey, now) || (poolEntry.id && isProxyPoolExhausted(poolEntry.id, now))) {
+    return { sent: false, skipped: "pool_exhausted" };
+  }
+  if (status === 429 && /FreeUsageLimit/i.test(String(reason || ""))) {
+    const budget = poolEntry.kind === "gateway" ? Math.max(1, Number(poolEntry.retry_budget) || 1) : 1;
+    const prevStrike = rotateStrikeMap.get(poolKey);
+    const strikes = prevStrike && now - prevStrike.at <= PROXY_STRIKE_WINDOW_MS ? prevStrike.count + 1 : 1;
+    rotateStrikeMap.set(poolKey, { count: strikes, at: now });
+    if (strikes >= budget) {
+      const until = now + msUntilNextMidnightUtc(now) + 30000;
+      markProxyPoolExhausted(poolKey, until);
+      if (poolEntry.id) markProxyPoolExhausted(poolEntry.id, until);
+    }
+  }
   const key = String(poolEntry.id ?? rotateUrl);
   const lastSentAt = rotateDebounceMap.get(key);
   if (lastSentAt !== undefined && now - lastSentAt < debounceMs) {
     return { sent: false, skipped: "debounced" };
   }
+  const opts = { status, reason, fetchFn, now, debounceMs };
+  if ((activeStreams.get(streamKey(poolEntry)) || 0) > 0) {
+    const sk = streamKey(poolEntry);
+    const prev = pendingRotates.get(sk);
+    if (prev) clearTimeout(prev.timer);
+    const timer = setTimeout(() => {
+      if (pendingRotates.get(sk)?.timer !== timer) return;
+      pendingRotates.delete(sk);
+      sendProxyRotate(poolEntry, { ...opts, now: Date.now() }).catch(() => {});
+    }, maxDeferMs);
+    timer.unref?.();
+    pendingRotates.set(sk, { poolEntry, opts, timer });
+    return { sent: false, skipped: "deferred_active_stream" };
+  }
+  return sendProxyRotate(poolEntry, opts);
+}
+
+async function sendProxyRotate(poolEntry, { status, reason, fetchFn, now }) {
+  const rotateUrl = poolEntry.rotate_url;
+  const key = String(poolEntry.id ?? rotateUrl);
   rotateDebounceMap.set(key, now);
 
   let portNum;

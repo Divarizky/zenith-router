@@ -507,3 +507,18 @@ test("connectSocks5 - abort signal cancels handshake promptly", async () => {
     server.close();
   }
 });
+
+test("proxyFetch - respons 204 lewat proxy HTTP tidak melempar dan tanpa body", async () => {
+  const proxy = http.createServer((req, res) => {
+    res.writeHead(204);
+    res.end();
+  });
+  await new Promise((r) => proxy.listen(0, "127.0.0.1", r));
+  try {
+    const res = await proxyFetch("http://example.invalid/generate_204", { method: "GET" }, `http://127.0.0.1:${proxy.address().port}`);
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(await res.text(), "");
+  } finally {
+    await new Promise((r) => proxy.close(r));
+  }
+});

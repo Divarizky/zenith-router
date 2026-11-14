@@ -276,7 +276,10 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
       };
 
       const req = http.request(reqOptions, (res) => {
-        const webStream = Readable.toWeb(res);
+        // Status tanpa body (204/205/304) tidak boleh membawa stream ke Response.
+        const bodyless = [204, 205, 304].includes(res.statusCode);
+        if (bodyless) res.resume();
+        const webStream = bodyless ? null : Readable.toWeb(res);
         resolve(
           new Response(webStream, {
             status: res.statusCode || 200,
@@ -339,7 +342,9 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
       };
 
       const req = https.request(reqOptions, (upstreamRes) => {
-        const webStream = Readable.toWeb(upstreamRes);
+        const bodyless = [204, 205, 304].includes(upstreamRes.statusCode);
+        if (bodyless) upstreamRes.resume();
+        const webStream = bodyless ? null : Readable.toWeb(upstreamRes);
         resolve(
           new Response(webStream, {
             status: upstreamRes.statusCode || 200,

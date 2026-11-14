@@ -489,6 +489,7 @@ test("msUntilNextMidnightUtc and noteOpencodeGateRejection cooldown on 429 FreeU
       shape: { hasReadTool: true, userAgentOk: true, sessionHeaders: ["h"], streaming: true },
       shapeOk: true,
       retryAfterMs: 43200000,
+      error: "FreeUsageLimitError: daily quota exceeded",
     },
     fixedNow
   );
@@ -497,4 +498,63 @@ test("msUntilNextMidnightUtc and noteOpencodeGateRejection cooldown on 429 FreeU
   // cooldown should be 43200000 ms, NOT capped at 600000 (10m)
   assert.equal(state.retryAfterMs, 43200000);
 });
+
+test("deferred rotation records fresh timestamp so immediate next rotation is debounced", async () => {
+  clearPoolsAndSettings();
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    return new Response("{}", { status: 200 });
+  };
+  const pool = { id: 79, url: "http://100.90.253.83:3128", kind: "gateway", rotate_url: "http://100.90.253.83:8405/rotate" };
+
+  const endStream = beginProxyStream(pool);
+  const r1 = await notifyProxyRotate(pool, { status: 429, reason: "x", fetchFn: fakeFetch, now: 1000 });
+  assert.equal(r1.skipped, "deferred_active_stream");
+  assert.equal(calls.length, 0);
+
+  endStream();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls.length, 1, "deferred rotation was sent once stream ended");
+
+  // A second rotation requested immediately after the deferred rotation was sent
+  const r2 = await notifyProxyRotate(pool, { status: 429, reason: "y", fetchFn: fakeFetch, now: Date.now() });
+  assert.equal(r2.skipped, "debounced", "second rotation immediately after deferred rotation must be debounced");
+  assert.equal(calls.length, 1, "no second rotation sent within debounce window");
+});
+
+test("429 cooldown routes: FreeUsageLimit uses midnight while non-quota 429 escalates normally", () => {
+  const fixedNow = Date.UTC(2026, 10, 14, 12, 0, 0); // 12:00 UTC
+  const expectedMidnightMs = 12 * 3600 * 1000 + 30000;
+
+  // Path 1: FreeUsageLimit without Retry-After cools down until midnight
+  resetOpencodeGate();
+  const stateQuota = noteOpencodeGateRejection(
+    "direct-quota",
+    {
+      status: 429,
+      shapeOk: true,
+      error: "FreeUsageLimitError: daily quota exceeded",
+    },
+    fixedNow
+  );
+  assert.equal(stateQuota.gate, "quota-exhausted");
+  assert.equal(stateQuota.retryAfterMs, expectedMidnightMs);
+
+  // Path 2: Non-quota 429 without Retry-After uses regular escalation backoff
+  resetOpencodeGate();
+  const stateRateLimit = noteOpencodeGateRejection(
+    "direct-throttle",
+    {
+      status: 429,
+      shapeOk: true,
+      error: "Too Many Requests: rate limit exceeded",
+    },
+    fixedNow
+  );
+  assert.equal(stateRateLimit.gate, "ip-throttled");
+  assert.equal(stateRateLimit.retryAfterMs, 30000);
+});
+
+
 

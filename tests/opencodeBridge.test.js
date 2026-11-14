@@ -221,6 +221,7 @@ test("opencode bridge - FreeUsageLimitError detection and cooldown handling", as
       status: 429,
       shapeOk: true,
       retryAfterMs: 45000,
+      error: errBody,
     },
     now
   );

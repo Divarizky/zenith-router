@@ -148,7 +148,19 @@ export function getOpencodeGateDiagnostic(key) {
  */
 export function noteOpencodeGateRejection(
   key,
-  { status, shape, shapeOk, logId = null, missing = [], retryAfterMs = null, gatewayBudget = 1 } = {},
+  {
+    status,
+    shape,
+    shapeOk,
+    logId = null,
+    missing = [],
+    retryAfterMs = null,
+    gatewayBudget = 1,
+    error = null,
+    text = "",
+    reason = "",
+    isFreeUsageLimit: isFreeUsageLimitOpt,
+  } = {},
   now = Date.now()
 ) {
   const baseMs = opencodeGateCooldownMs();
@@ -156,6 +168,13 @@ export function noteOpencodeGateRejection(
   // A strike older than two max cooldowns means the block had lifted.
   const strikes = previous && now - previous.at <= OPENCODE_GATE_MAX_COOLDOWN_MS * 2 ? previous.count + 1 : 1;
   strikeState.set(key, { count: strikes, at: now });
+
+  const errorText = typeof error === "string" ? error : (error?.message || error?.type || (error && typeof error === "object" ? JSON.stringify(error) : ""));
+  const candidateText = errorText || String(text || reason || "");
+  const isFreeUsageLimit = isFreeUsageLimitOpt !== undefined
+    ? Boolean(isFreeUsageLimitOpt)
+    : (status === 429 && isOpencodeFreeUsageLimit(candidateText));
+
   const requiredStrikes = Math.max(1, Number(gatewayBudget) || 1);
   if (requiredStrikes > 1 && strikes < requiredStrikes) {
     captureLine(
@@ -167,7 +186,7 @@ export function noteOpencodeGateRejection(
       status,
       strikes,
       shapeOk: Boolean(shapeOk),
-      gate: status === 426 ? "version-rejected" : status === 429 ? "quota-exhausted" : shapeOk ? "ip-throttled" : "shape-rejected",
+      gate: status === 426 ? "version-rejected" : isFreeUsageLimit ? "quota-exhausted" : shapeOk ? "ip-throttled" : "shape-rejected",
       reason: "gateway strike deferred",
       missing,
       shape: shape || null,
@@ -176,7 +195,6 @@ export function noteOpencodeGateRejection(
     };
   }
   const isVersionFloor = status === 426;
-  const isFreeUsageLimit = status === 429;
   const untilMidnight = msUntilNextMidnightUtc(now) + 30000;
   const cooldownMs = isFreeUsageLimit
     ? (retryAfterMs && retryAfterMs > 0 ? Math.min(retryAfterMs, untilMidnight) : untilMidnight)

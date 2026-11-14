@@ -502,7 +502,7 @@ export function beginProxyStream(poolEntry) {
     if (pending) {
       clearTimeout(pending.timer);
       pendingRotates.delete(key);
-      sendProxyRotate(pending.poolEntry, pending.opts).catch(() => {});
+      sendProxyRotate(pending.poolEntry, { ...pending.opts, now: Date.now() }).catch(() => {});
     }
   };
 }

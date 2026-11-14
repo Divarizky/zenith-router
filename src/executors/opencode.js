@@ -728,6 +728,7 @@ export class OpencodeExecutor extends BaseExecutor {
             missing,
             retryAfterMs: firstRetryAfterMs,
             gatewayBudget,
+            error: firstText,
           });
           res = new Response(firstText, {
             status: res.status,
@@ -772,6 +773,7 @@ export class OpencodeExecutor extends BaseExecutor {
                 missing,
                 retryAfterMs: retryRetryAfterMs,
                 gatewayBudget,
+                error: retryText,
               });
               // Keep upstream's own status and body; the labels are what let a
               // reader tell a blocked egress from a shape this router got wrong.

@@ -288,12 +288,25 @@ export async function handleBridgeRequest(req) {
     const headers = buildOpenCodeHeaders(req.headers, incomingSessionId);
     const upstreamUrl = process.env.OPENCODE_UPSTREAM_URL || OPENCODE_UPSTREAM_URL;
 
+    // Optional proxy forwarded from internal caller (e.g. Zenith Node gateway)
+    const bridgeProxy = readHeader(req.headers, "x-zenith-proxy");
+    const fetchOptions = {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    };
+    if (bridgeProxy) {
+      // In Bun runtime, undici is a built-in module; under Node test runners, fall back to native proxy if missing
+      try {
+        const { ProxyAgent } = await import("undici");
+        fetchOptions.dispatcher = new ProxyAgent(bridgeProxy);
+      } catch {
+        fetchOptions.proxy = bridgeProxy;
+      }
+    }
+
     try {
-      const upstreamRes = await fetch(upstreamUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
+      const upstreamRes = await fetch(upstreamUrl, fetchOptions);
 
       // Pass error status from upstream (e.g. 429, 401, 500) as-is
       if (!upstreamRes.ok) {

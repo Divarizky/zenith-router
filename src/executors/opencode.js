@@ -566,15 +566,32 @@ export class OpencodeExecutor extends BaseExecutor {
       opencodeHeaders["x-opencode-request"] = headers["x-opencode-request"];
     }
 
-    let res = await super.execute({
-      url: finalUrl,
-      method,
-      headers: opencodeHeaders,
-      body,
-      signal,
-      timeoutMs,
-      proxyUrl,
-    });
+    let res;
+    // When traffic goes through the Bun bridge on loopback, Node talks to Bun directly
+    // and passes the outbound proxy inside x-zenith-proxy so Bun executes the tunnel.
+    const isBridgeTarget = finalUrl.startsWith("http://127.0.0.1:20129") || finalUrl.startsWith("http://localhost:20129");
+    if (proxyUrl && isBridgeTarget) {
+      const bridgeHeaders = { ...opencodeHeaders, "x-zenith-proxy": proxyUrl };
+      res = await super.execute({
+        url: finalUrl,
+        method,
+        headers: bridgeHeaders,
+        body,
+        signal,
+        timeoutMs,
+        proxyUrl: null,
+      });
+    } else {
+      res = await super.execute({
+        url: finalUrl,
+        method,
+        headers: opencodeHeaders,
+        body,
+        signal,
+        timeoutMs,
+        proxyUrl,
+      });
+    }
 
     // A bridge override has no second lane to fall back to.
     if (res.status === 400 && model && !getOpencodeBaseUrlOverride()) {

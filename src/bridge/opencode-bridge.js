@@ -1,4 +1,5 @@
 import { OPENCODE_BASELINE_SYSTEM_PROMPT, DEFAULT_TOOLS, DEFAULT_TOOL_READ } from "./prompt.js";
+import { proxyFetch } from "../executors/proxy.js";
 
 export const DEFAULT_BRIDGE_PORT = 20129;
 export const DEFAULT_BRIDGE_HOST = "127.0.0.1";
@@ -255,7 +256,14 @@ export function buildOpenCodeHeaders(incomingHeaders = {}, sessionId = null) {
 /**
  * Request handler for the bridge server.
  */
-export async function handleBridgeRequest(req) {
+export async function handleBridgeRequest(
+  req,
+  {
+    fetchImpl = globalThis.fetch,
+    proxyFetchImpl = proxyFetch,
+    useBunProxy = typeof Bun !== "undefined",
+  } = {},
+) {
   const url = new URL(req.url, "http://127.0.0.1");
   const path = url.pathname;
 
@@ -295,15 +303,28 @@ export async function handleBridgeRequest(req) {
       headers,
       body: JSON.stringify(payload),
     };
-    if (bridgeProxy) {
-      // Bun's own `proxy` option is the one that tunnels. A `dispatcher` built
-      // from undici's ProxyAgent is accepted but silently ignored by Bun's
-      // fetch, which would send the request from the host's own IP.
+    const timeoutMs = Number(process.env.ZENITH_UPSTREAM_HEADERS_TIMEOUT_MS) || 300000;
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(
+      () => timeoutController.abort(new DOMException(`Upstream headers timed out after ${timeoutMs}ms`, "TimeoutError")),
+      timeoutMs,
+    );
+    fetchOptions.signal = req.signal
+      ? AbortSignal.any([req.signal, timeoutController.signal])
+      : timeoutController.signal;
+
+    if (bridgeProxy && useBunProxy) {
+      // Bun's own `proxy` option performs the tunnel. Node's fetch ignores it,
+      // so the Node server uses the router's explicit proxy transport below.
       fetchOptions.proxy = bridgeProxy;
     }
 
     try {
-      const upstreamRes = await fetch(upstreamUrl, fetchOptions);
+      // Never fall back to direct fetch when the caller explicitly selected a proxy.
+      const upstreamRes = bridgeProxy && !useBunProxy
+        ? await proxyFetchImpl(upstreamUrl, fetchOptions, bridgeProxy)
+        : await fetchImpl(upstreamUrl, fetchOptions);
+      clearTimeout(timeout);
 
       // Pass error status from upstream (e.g. 429, 401, 500) as-is
       if (!upstreamRes.ok) {
@@ -348,6 +369,7 @@ export async function handleBridgeRequest(req) {
         headers: responseHeaders,
       });
     } catch (err) {
+      clearTimeout(timeout);
       return new Response(JSON.stringify({ error: { message: `Upstream fetch failed: ${err.message}`, type: "upstream_error" } }), {
         status: 502,
         headers: { "Content-Type": "application/json" },
@@ -392,6 +414,11 @@ if (isDirectEntry) {
         }
 
         const bodyChunks = [];
+        const requestController = new AbortController();
+        nodeReq.on("aborted", () => requestController.abort());
+        nodeRes.on("close", () => {
+          if (!nodeRes.writableEnded) requestController.abort();
+        });
         nodeReq.on("data", (chunk) => bodyChunks.push(chunk));
         nodeReq.on("end", async () => {
           const body = ["GET", "HEAD"].includes(nodeReq.method) ? undefined : Buffer.concat(bodyChunks);
@@ -399,6 +426,7 @@ if (isDirectEntry) {
             method: nodeReq.method,
             headers,
             body,
+            signal: requestController.signal,
           });
 
           const res = await handleBridgeRequest(req);

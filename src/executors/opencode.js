@@ -20,6 +20,7 @@ import {
   withOpencodeGateHeaders,
 } from "../services/opencodeGate.js";
 import { ensureOpencodeBridge } from "../services/opencodeBridge.js";
+import { DEFAULT_BRIDGE_URL } from "../bridge/opencode-bridge.js";
 import { parseRetryAfterMs } from "../services/fallback.js";
 import { notifyProxyRotate } from "../services/proxyPools.js";
 
@@ -30,6 +31,31 @@ export const OPENCODE_REQUEST_RE = /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const SESSION_PREFIX_MASK = (1n << 48n) - 1n;
 const MAX_COUNTER_PER_MS = 16;
+
+function isLoopbackHostname(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+function getBridgeDispatch(url, headers, proxyUrl) {
+  let target;
+  let configuredBridge;
+  try {
+    target = new URL(url);
+    configuredBridge = new URL(getOpencodeBaseUrlOverride() || DEFAULT_BRIDGE_URL);
+  } catch {
+    return { headers, proxyUrl };
+  }
+
+  const isBridgeTarget =
+    target.origin === configuredBridge.origin && isLoopbackHostname(target.hostname);
+  if (!proxyUrl || !isBridgeTarget) return { headers, proxyUrl };
+
+  return {
+    headers: { ...headers, "x-zenith-proxy": proxyUrl },
+    proxyUrl: null,
+  };
+}
 
 function randBase62(n) {
   const bytes = randomBytes(n);
@@ -566,32 +592,20 @@ export class OpencodeExecutor extends BaseExecutor {
       opencodeHeaders["x-opencode-request"] = headers["x-opencode-request"];
     }
 
-    let res;
-    // When traffic goes through the Bun bridge on loopback, Node talks to Bun directly
-    // and passes the outbound proxy inside x-zenith-proxy so Bun executes the tunnel.
-    const isBridgeTarget = finalUrl.startsWith("http://127.0.0.1:20129") || finalUrl.startsWith("http://localhost:20129");
-    if (proxyUrl && isBridgeTarget) {
-      const bridgeHeaders = { ...opencodeHeaders, "x-zenith-proxy": proxyUrl };
-      res = await super.execute({
-        url: finalUrl,
+    const executeRoutedRequest = (url, requestHeaders) => {
+      const dispatch = getBridgeDispatch(url, requestHeaders, proxyUrl);
+      return super.execute({
+        url,
         method,
-        headers: bridgeHeaders,
+        headers: dispatch.headers,
         body,
         signal,
         timeoutMs,
-        proxyUrl: null,
+        proxyUrl: dispatch.proxyUrl,
       });
-    } else {
-      res = await super.execute({
-        url: finalUrl,
-        method,
-        headers: opencodeHeaders,
-        body,
-        signal,
-        timeoutMs,
-        proxyUrl,
-      });
-    }
+    };
+
+    let res = await executeRoutedRequest(finalUrl, opencodeHeaders);
 
     // A bridge override has no second lane to fall back to.
     if (res.status === 400 && model && !getOpencodeBaseUrlOverride()) {
@@ -674,15 +688,7 @@ export class OpencodeExecutor extends BaseExecutor {
           }
 
           try {
-            const retryRes = await super.execute({
-              url: retryUrl,
-              method,
-              headers: opencodeHeaders,
-              body,
-              signal,
-              timeoutMs,
-              proxyUrl,
-            });
+            const retryRes = await executeRoutedRequest(retryUrl, opencodeHeaders);
             if (retryRes && retryRes.ok) {
               setOpencodeProtocolLane(model, alternateLane);
             }
@@ -737,17 +743,9 @@ export class OpencodeExecutor extends BaseExecutor {
           });
         } else {
           try {
-            retryRes = await super.execute({
-              url: finalUrl,
-              method,
-              headers: {
-                ...opencodeHeaders,
-                ...opencodeSessionHeaders(rotateOpencodeSession(sessionKey || "default", "desktop")),
-              },
-              body,
-              signal,
-              timeoutMs,
-              proxyUrl,
+            retryRes = await executeRoutedRequest(finalUrl, {
+              ...opencodeHeaders,
+              ...opencodeSessionHeaders(rotateOpencodeSession(sessionKey || "default", "desktop")),
             });
           } catch (retryErr) {
             console.warn(`[opencode] gate retry failed for ${model}:`, retryErr?.message || retryErr);

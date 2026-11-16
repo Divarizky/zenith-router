@@ -63,7 +63,7 @@ export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "
  * models omit the field rather than claim a level nobody verified.
  */
 export const CODEX_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
-const CODEX_FULL_LADDER = /^gpt-(?:6(?:\.\d+)?|5\.6)-/;
+const CODEX_FULL_LADDER = /^gpt-(?:6(?:\.\d+)?|5\.6)(?:-|$)/;
 
 /**
  * Antigravity families publish the levels their own variants cover, so a family

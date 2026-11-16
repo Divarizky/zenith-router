@@ -69,7 +69,7 @@ export function translateRequest(sourceFormat, targetFormat, body, targetModel, 
   }
 
   if (tgt === FORMATS.OPENAI_RESPONSES) {
-    return openaiToResponsesRequest(openAIBody, targetModel);
+    return openaiToResponsesRequest(openAIBody, targetModel, { codex: options.codex === true });
   }
 
   if (tgt === FORMATS.GEMINI) {

@@ -43,7 +43,10 @@ export function prepareUpstreamRequest({
     targetFormat,
     { ...body, stream: upstreamStream },
     targetModel,
-    { adaptiveThinking: provider.id === "claude" && sourceFormat !== FORMATS.CLAUDE }
+    {
+      adaptiveThinking: provider.id === "claude" && sourceFormat !== FORMATS.CLAUDE,
+      codex: provider.id === "codex",
+    }
   );
 
   // Anthropic rejects a history whose tool_use/tool_result pairs do not line up

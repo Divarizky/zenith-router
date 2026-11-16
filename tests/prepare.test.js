@@ -239,3 +239,37 @@ test("POST /v1/messages - never asks the upstream for a usage chunk", async () =
   assert.strictEqual("stream_options" in capturedBody, false);
   setCustomExecutor(null);
 });
+
+test("prepare - hanya provider codex menerima reasoning dan prompt_cache_* pada jalur Responses", async () => {
+  const { getProvider } = await import("../src/providers/index.js");
+  const body = {
+    messages: [{ role: "user", content: "hi" }],
+    reasoning_effort: "xhigh",
+    prompt_cache_key: "thread-fixture",
+  };
+  const codex = prepareUpstreamRequest({
+    provider: getProvider("codex"),
+    targetModel: "gpt-6-luna",
+    body,
+    sourceFormat: FORMATS.OPENAI,
+    defaultFormat: FORMATS.OPENAI,
+    baseUrlFor: CHAT_URL,
+  });
+  assert.strictEqual(codex.targetFormat, FORMATS.OPENAI_RESPONSES);
+  const codexPayload = codex.upstreamPayload;
+  assert.deepStrictEqual(codexPayload.reasoning, { effort: "xhigh", summary: "auto" });
+  assert.strictEqual(codexPayload.prompt_cache_key, "thread-fixture");
+
+  const opencode = prepareUpstreamRequest({
+    provider: getProvider("opencode"),
+    targetModel: "muse-spark-1.3-contributor-free",
+    body,
+    sourceFormat: FORMATS.OPENAI,
+    defaultFormat: FORMATS.OPENAI,
+    baseUrlFor: CHAT_URL,
+  });
+  assert.strictEqual(opencode.targetFormat, FORMATS.OPENAI_RESPONSES);
+  const opencodePayload = opencode.upstreamPayload;
+  assert.strictEqual(opencodePayload.reasoning, undefined);
+  assert.strictEqual(opencodePayload.prompt_cache_key, undefined);
+});

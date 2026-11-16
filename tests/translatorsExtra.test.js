@@ -39,7 +39,7 @@ test("Responses Translator - maps OpenAI request to Responses API format", () =>
     prompt_cache_retention: "24h",
   };
 
-  const translated = translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, req, "gpt-5.2-codex");
+  const translated = translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, req, "gpt-5.2-codex", { codex: true });
   assert.strictEqual(translated.model, "gpt-5.2-codex");
   assert.strictEqual(translated.instructions, "You are a coding assistant.");
   assert.strictEqual(translated.input.length, 1);
@@ -209,11 +209,25 @@ test("Responses Translator - argument deltas never leak into message content", a
 
 test("Responses Translator - reasoning_effort Chat menjadi reasoning.effort, termasuk xhigh dan max", () => {
   const build = (effort) =>
-    translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, { model: "x", messages: [{ role: "user", content: "hi" }], reasoning_effort: effort }, "gpt-6-luna");
+    translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, { model: "x", messages: [{ role: "user", content: "hi" }], reasoning_effort: effort }, "gpt-6-luna", { codex: true });
 
   assert.deepStrictEqual(build("xhigh").reasoning, { effort: "xhigh", summary: "auto" });
   assert.deepStrictEqual(build("max").reasoning, { effort: "max", summary: "auto" });
   assert.strictEqual(build("minimal").reasoning.effort, "low", "minimal dipetakan ke low seperti katalog Codex Pi");
   assert.strictEqual(build("turbo").reasoning, undefined, "level asing tidak dikirim ke upstream");
   assert.strictEqual(build(undefined).reasoning, undefined, "tanpa reasoning_effort tidak ada field reasoning");
+});
+
+test("Responses Translator - reasoning dan prompt_cache_* tidak dikirim ke upstream Responses non-Codex", () => {
+  const body = {
+    model: "x",
+    messages: [{ role: "user", content: "hi" }],
+    reasoning_effort: "max",
+    prompt_cache_key: "thread-fixture",
+    prompt_cache_retention: "24h",
+  };
+  const other = translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, body, "gpt-5.2");
+  assert.strictEqual(other.reasoning, undefined, "github/opencode tidak diverifikasi menerima reasoning");
+  assert.strictEqual(other.prompt_cache_key, undefined);
+  assert.strictEqual(other.prompt_cache_retention, undefined);
 });

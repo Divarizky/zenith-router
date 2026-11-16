@@ -48,9 +48,6 @@ function shouldEmitCustom(name, explicitSet) {
   return explicitSet instanceof Set && explicitSet.has(name);
 }
 
-/**
- * Translate OpenAI Chat Completions request to OpenAI Responses API format (Codex)
- */
 // Chat `reasoning_effort` -> Responses `reasoning.effort`. Pi's own Codex catalog
 // maps minimal to low; every other level is accepted by the backend as-is.
 const RESPONSES_EFFORT = { none: "none", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
@@ -64,7 +61,12 @@ function responsesReasoning(body) {
   return { effort, summary: typeof summary === "string" ? summary : "auto" };
 }
 
-export function openaiToResponsesRequest(body, targetModel) {
+/**
+ * Translate OpenAI Chat Completions request to OpenAI Responses API format (Codex).
+ * `reasoning` and `prompt_cache_*` are emitted only when `opts.codex` is true: other
+ * Responses upstreams (github, opencode) have not been verified to accept them.
+ */
+export function openaiToResponsesRequest(body, targetModel, opts = {}) {
   if (!body) return {};
   // The client's own declarations are authoritative: a chat/Claude client can
   // never receive custom_tool_call items, so its set is empty even when the
@@ -197,9 +199,9 @@ export function openaiToResponsesRequest(body, targetModel) {
     store: false,
     parallel_tool_calls: body.parallel_tool_calls,
     ...(max_output_tokens !== undefined ? { max_output_tokens } : {}),
-    ...(responsesReasoning(body) ? { reasoning: responsesReasoning(body) } : {}),
-    ...(body.prompt_cache_key !== undefined ? { prompt_cache_key: body.prompt_cache_key } : {}),
-    ...(body.prompt_cache_retention !== undefined ? { prompt_cache_retention: body.prompt_cache_retention } : {}),
+    ...(opts.codex && responsesReasoning(body) ? { reasoning: responsesReasoning(body) } : {}),
+    ...(opts.codex && body.prompt_cache_key !== undefined ? { prompt_cache_key: body.prompt_cache_key } : {}),
+    ...(opts.codex && body.prompt_cache_retention !== undefined ? { prompt_cache_retention: body.prompt_cache_retention } : {}),
   };
 }
 

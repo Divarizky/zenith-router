@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 
 function extractAccountId(credentials) {
@@ -32,8 +33,12 @@ export function stripUnsupportedFields(body) {
   try {
     const parsed = JSON.parse(body);
     if (!parsed || typeof parsed !== "object") return body;
-    for (const key of ["max_output_tokens", "temperature", "top_p", "top_k"]) {
+    for (const key of ["max_output_tokens", "temperature", "top_p", "top_k", "user"]) {
       if (key in parsed) delete parsed[key];
+    }
+    if (parsed.metadata && typeof parsed.metadata === "object") {
+      delete parsed.metadata.user_id;
+      if (Object.keys(parsed.metadata).length === 0) delete parsed.metadata;
     }
     if (parsed.store === undefined && Array.isArray(parsed.input)) {
       parsed.store = false;
@@ -61,16 +66,50 @@ export function codexSessionId(sessionKey, { source = null, promptCacheKey = fal
   return null;
 }
 
+// Derives a deterministic prompt_cache_key from available client identity,
+// instructions, tools definition, and the first input item.
+// Format: "zr-" + first 32 hex chars of SHA-256 (matches ^[A-Za-z0-9._-]{1,128}$).
+export function derivePromptCacheKey({ clientIdentity = "", instructions = "", tools = null, firstInput = null } = {}) {
+  const hash = createHash("sha256");
+  if (clientIdentity) {
+    hash.update(String(clientIdentity));
+  }
+  hash.update(":");
+  if (typeof instructions === "string") {
+    hash.update(instructions);
+  }
+  hash.update(":");
+  if (tools) {
+    hash.update(typeof tools === "string" ? tools : JSON.stringify(tools));
+  }
+  hash.update(":");
+  if (firstInput !== null && firstInput !== undefined) {
+    hash.update(typeof firstInput === "string" ? firstInput : JSON.stringify(firstInput));
+  }
+  const hex = hash.digest("hex").slice(0, 32);
+  return `zr-${hex}`;
+}
+
 // Gives the request a stable prompt_cache_key when the client sent none, so the
 // backend can key its prompt cache by conversation. A client-supplied key is
-// left untouched.
-export function withPromptCacheKey(body, sessionId) {
-  if (typeof body !== "string" || !sessionId) return body;
+// left untouched. If no client key or session exists, derives a deterministic key.
+export function withPromptCacheKey(body, sessionId, { clientIdentity = null } = {}) {
+  if (typeof body !== "string") return body;
   try {
     const parsed = JSON.parse(body);
     if (!parsed || typeof parsed !== "object") return body;
     if (parsed.prompt_cache_key !== undefined) return body;
-    parsed.prompt_cache_key = sessionId;
+    if (sessionId) {
+      parsed.prompt_cache_key = sessionId;
+      return JSON.stringify(parsed);
+    }
+    const firstInput = Array.isArray(parsed.input) ? parsed.input[0] : (parsed.input ?? null);
+    parsed.prompt_cache_key = derivePromptCacheKey({
+      clientIdentity,
+      instructions: parsed.instructions,
+      tools: parsed.tools,
+      firstInput,
+    });
     return JSON.stringify(parsed);
   } catch {
     return body;
@@ -79,10 +118,26 @@ export function withPromptCacheKey(body, sessionId) {
 
 export class CodexExecutor extends BaseExecutor {
   async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, sessionKey = null, sessionSource = null, sessionPromptCacheKey = false }) {
+    let clientIdentity = sessionKey;
+    if (!clientIdentity && typeof body === "string") {
+      try {
+        const p = JSON.parse(body);
+        clientIdentity = p.metadata?.user_id || p.user || null;
+      } catch {}
+    }
     body = stripUnsupportedFields(body);
     const accountId = extractAccountId(connection?.credentials);
     const sessionId = codexSessionId(sessionKey, { source: sessionSource, promptCacheKey: sessionPromptCacheKey });
-    body = withPromptCacheKey(body, sessionId);
+    body = withPromptCacheKey(body, sessionId, { clientIdentity });
+
+    let effectivePromptCacheKey = sessionId;
+    if (!effectivePromptCacheKey && typeof body === "string") {
+      try {
+        const p = JSON.parse(body);
+        effectivePromptCacheKey = p.prompt_cache_key || null;
+      } catch {}
+    }
+
     const codexHeaders = {
       ...headers,
       originator: "codex_cli_rs",
@@ -102,6 +157,13 @@ export class CodexExecutor extends BaseExecutor {
       timeoutMs,
       proxyUrl,
     });
+
+    if (effectivePromptCacheKey && res) {
+      try {
+        res.headers?.set?.("x-zenith-prompt-cache-key", effectivePromptCacheKey);
+        res._promptCacheKey = effectivePromptCacheKey;
+      } catch {}
+    }
 
     return res;
   }

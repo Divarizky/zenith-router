@@ -219,6 +219,12 @@ export async function relayClientRequest(c, spec) {
           model: targetModel,
           startTime,
           estimatedInputTokens: spec.estimateInputTokens(body),
+          promptCacheKey:
+            upstreamRes?.headers?.get?.("x-zenith-prompt-cache-key") ||
+            upstreamRes?._promptCacheKey ||
+            body?.prompt_cache_key ||
+            (session.source === "header" ? session.key : null) ||
+            null,
         })
       );
 

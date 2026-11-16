@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getDb } from "../db/index.js";
 import { captureLine } from "./logger.js";
 
@@ -58,6 +59,8 @@ export function recordUsage({
   reasoningTokens = 0,
   durationMs = 0,
   timestamp = Date.now(),
+  estimated = false,
+  promptCacheKey = null,
 }) {
   try {
     const db = getDb();
@@ -111,10 +114,18 @@ export function recordUsage({
       } catch {}
     }
 
+    let estMarker = "";
+    if (estimated) {
+      const keyHash = promptCacheKey
+        ? createHash("sha256").update(String(promptCacheKey)).digest("hex").slice(0, 8)
+        : "none";
+      estMarker = ` | usage=estimated cached_tokens=${cacheRead} cache_key=${keyHash}`;
+    }
+
     captureLine(
       `[USAGE] model=${model || "unknown"} | in=${inTok} out=${outTok} total=${totalTok}${
         cacheRead || cacheWrite ? ` cache_read=${cacheRead} cache_write=${cacheWrite}` : ""
-      } | ${dur}ms${
+      } | ${dur}ms${estMarker}${
         connName ? ` | account="${connName}"` : connId ? ` | conn#${connId}` : providerId ? ` | provider=${providerId}` : ""
       }`
     );
@@ -188,7 +199,17 @@ export function estimateResponsesInputTokens(body) {
 /**
  * TransformStream tap that extracts token counts from SSE stream and records usage upon completion
  */
-export function createUsageTapStream({ connectionId, apiKeyId = null, provider = null, comboName = null, fallbackFrom = null, model, startTime = Date.now(), estimatedInputTokens = 0 }) {
+export function createUsageTapStream({
+  connectionId,
+  apiKeyId = null,
+  provider = null,
+  comboName = null,
+  fallbackFrom = null,
+  model,
+  startTime = Date.now(),
+  estimatedInputTokens = 0,
+  promptCacheKey = null,
+}) {
   // Last usage object seen in the client protocol. Claude splits usage over
   // message_start and message_delta, so its fields are merged.
   let lastUsage = null;
@@ -285,6 +306,7 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
 
   function finishUsage() {
       const durationMs = Date.now() - startTime;
+      const isEstimated = lastUsage === null;
       const { cacheReadTokens, cacheWriteTokens, reasoningTokens, ...counts } = normalizeUsage(lastUsage);
       let { inputTokens, outputTokens } = counts;
       if (inputTokens === 0 && estimatedInputTokens > 0) {
@@ -309,6 +331,8 @@ export function createUsageTapStream({ connectionId, apiKeyId = null, provider =
           cacheWriteTokens,
           reasoningTokens,
           durationMs,
+          estimated: isEstimated,
+          promptCacheKey,
         });
       });
   }

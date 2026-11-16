@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert";
+import { createHash } from "node:crypto";
 import { initDb } from "../src/db/index.js";
 import { normalizeUsage, createUsageTapStream, getUsageStats, getRecentUsage, recordUsage } from "../src/services/usage.js";
 import { createResponseTransformStream, openAIToClaudeResponse } from "../src/translator/response.js";
+import { getConsoleLogs, clearConsoleLogs } from "../src/services/logger.js";
 
 async function drain(chunks, tap) {
   const stream = new ReadableStream({
@@ -119,4 +121,46 @@ test("F-05 usage tap - usage pada chunk terakhir tanpa newline tetap tercatat", 
   );
   const s = getUsageStats().summary;
   assert.strictEqual(s.total_output_tokens, 77, "output token di baris terakhir tanpa newline harus tercatat");
+});
+
+test("AC4: usage tap - stream without usage event produces usage=estimated with key hash and cached_tokens in log", async () => {
+  // Failure mode dicegah: tidak bisa membedakan stream tanpa event usage dari cache miss sungguhan, atau kebocoran raw cache key di log.
+  initDb(":memory:");
+  clearConsoleLogs();
+
+  const testKey = "zr-11223344556677889900aabbccddeeff";
+  const expectedShortHash = createHash("sha256").update(testKey).digest("hex").slice(0, 8);
+  await drain(
+    ['data: {"choices":[{"delta":{"content":"Hello world without usage"}}]}\n\n', "data: [DONE]\n\n"],
+    createUsageTapStream({ model: "gpt-5-codex", estimatedInputTokens: 350, promptCacheKey: testKey })
+  );
+
+  const logs = getConsoleLogs();
+  const usageLine = logs.find((l) => l.includes("[USAGE]") && l.includes("gpt-5-codex"));
+  assert.ok(usageLine, "baris [USAGE] harus tercatat");
+  assert.ok(usageLine.includes("usage=estimated"), "harus memuat penanda usage=estimated");
+  assert.ok(usageLine.includes("cached_tokens=0"), "harus memuat cached_tokens yang terbaca");
+  assert.ok(usageLine.includes(`cache_key=${expectedShortHash}`), "harus memuat short hash 8-karakter dari prompt_cache_key");
+  assert.strictEqual(usageLine.includes(testKey), false, "prompt_cache_key asli tidak boleh tercatat di log");
+});
+
+test("AC4: usage tap - stream with usage event does not include estimated marker in log", async () => {
+  // Failure mode dicegah: false positive penanda estimated pada stream yang sukses melaporkan usage asli dari upstream.
+  initDb(":memory:");
+  clearConsoleLogs();
+
+  const testKey = "zr-99887766554433221100ffeeddccbbaa";
+  await drain(
+    [
+      'data: {"choices":[{"delta":{"content":"Hello world with usage"}}],"usage":{"prompt_tokens":120,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":40}}}\n\n',
+      "data: [DONE]\n\n",
+    ],
+    createUsageTapStream({ model: "gpt-5-codex", estimatedInputTokens: 350, promptCacheKey: testKey })
+  );
+
+  const logs = getConsoleLogs();
+  const usageLine = logs.find((l) => l.includes("[USAGE]") && l.includes("gpt-5-codex"));
+  assert.ok(usageLine, "baris [USAGE] harus tercatat");
+  assert.strictEqual(usageLine.includes("usage=estimated"), false, "stream dengan usage asli tidak boleh ditandai estimated");
+  assert.strictEqual(usageLine.includes("estimated"), false);
 });

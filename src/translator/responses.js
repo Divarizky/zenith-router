@@ -51,6 +51,19 @@ function shouldEmitCustom(name, explicitSet) {
 /**
  * Translate OpenAI Chat Completions request to OpenAI Responses API format (Codex)
  */
+// Chat `reasoning_effort` -> Responses `reasoning.effort`. Pi's own Codex catalog
+// maps minimal to low; every other level is accepted by the backend as-is.
+const RESPONSES_EFFORT = { none: "none", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
+
+function responsesReasoning(body) {
+  const raw = body.reasoning_effort ?? body.reasoning?.effort;
+  const effort = typeof raw === "string" ? RESPONSES_EFFORT[raw.toLowerCase()] : undefined;
+  if (!effort) return undefined;
+  if (effort === "none") return { effort };
+  const summary = body.reasoning?.summary;
+  return { effort, summary: typeof summary === "string" ? summary : "auto" };
+}
+
 export function openaiToResponsesRequest(body, targetModel) {
   if (!body) return {};
   // The client's own declarations are authoritative: a chat/Claude client can
@@ -184,6 +197,9 @@ export function openaiToResponsesRequest(body, targetModel) {
     store: false,
     parallel_tool_calls: body.parallel_tool_calls,
     ...(max_output_tokens !== undefined ? { max_output_tokens } : {}),
+    ...(responsesReasoning(body) ? { reasoning: responsesReasoning(body) } : {}),
+    ...(body.prompt_cache_key !== undefined ? { prompt_cache_key: body.prompt_cache_key } : {}),
+    ...(body.prompt_cache_retention !== undefined ? { prompt_cache_retention: body.prompt_cache_retention } : {}),
   };
 }
 
@@ -384,6 +400,8 @@ export function responsesToOpenAIRequest(body) {
     temperature: body.temperature,
     top_p: body.top_p,
     max_tokens: body.max_tokens ?? body.max_output_tokens,
+    ...(body.prompt_cache_key !== undefined ? { prompt_cache_key: body.prompt_cache_key } : {}),
+    ...(body.prompt_cache_retention !== undefined ? { prompt_cache_retention: body.prompt_cache_retention } : {}),
   };
 }
 

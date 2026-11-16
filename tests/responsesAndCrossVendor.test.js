@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { app } from "../src/index.js";
 import { initDb, addConnection } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
+import { getUsageStats } from "../src/services/usage.js";
 
 test("POST /v1/messages - translates Anthropic request to GLM/OpenAI upstream and formats response as Anthropic", async () => {
   initDb(":memory:");
@@ -120,6 +121,44 @@ test("POST /v1/responses - handles OpenAI Responses API format", async () => {
   assert.strictEqual(data.usage.output_tokens, 15);
 
   setCustomExecutor(null);
+});
+
+test("POST /v1/responses - records cached tokens from upstream usage", async () => {
+  initDb(":memory:");
+  addConnection({ provider: "github", name: "GitHub Acc", credentials: {} });
+
+  setCustomExecutor({
+    async execute() {
+      return new Response(
+        JSON.stringify({
+          id: "resp_cached_1",
+          object: "response",
+          status: "completed",
+          output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "cached" }] }],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 5,
+            input_tokens_details: { cached_tokens: 80 },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    },
+  });
+
+  try {
+    const res = await app.request("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "github/gpt-5.2", input: "hello" }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    await res.json();
+    assert.strictEqual(getUsageStats({ days: 1 }).summary.total_cache_read_tokens, 80);
+  } finally {
+    setCustomExecutor(null);
+  }
 });
 
 test("POST /v1/responses - a tool cycle and images reach a chat upstream intact", async () => {

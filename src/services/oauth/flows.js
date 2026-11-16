@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { addConnection } from "../../db/index.js";
 import { getProvider } from "../../providers/index.js";
 import { getOAuthFlow } from "./providers.js";
+import { syncCodexModels } from "../codexModelSync.js";
 
 // Pending logins live in memory only: a restart simply means "log in again".
 // The browser never sees PKCE verifiers or device secrets, only an opaque flowId.
@@ -56,13 +57,16 @@ export function saveOAuthConnection(providerId, tokens, { name, proxyUrl } = {})
   Object.assign(credentials, tokens.extra || {});
 
   const accountName = name || tokens.email || tokens.name || `${provider.name} OAuth`;
-  return addConnection({
+  const connection = addConnection({
     provider: provider.id,
     name: accountName,
     auth_type: "oauth",
     credentials,
     proxy_url: proxyUrl || null,
   });
+  // Discovery must never prevent a successful login, including when offline.
+  if (provider.id === "codex") void syncCodexModels(connection).catch(() => {});
+  return connection;
 }
 
 /**

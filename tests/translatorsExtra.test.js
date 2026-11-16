@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import {
   openaiToResponsesRequest,
+  responsesToOpenAIRequest,
   responsesToOpenAIResponse,
   createResponsesToOpenAITransformStream,
 } from "../src/translator/responses.js";
@@ -34,6 +35,8 @@ test("Responses Translator - maps OpenAI request to Responses API format", () =>
         },
       },
     ],
+    prompt_cache_key: "thread-fixture",
+    prompt_cache_retention: "24h",
   };
 
   const translated = translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, req, "gpt-5.2-codex");
@@ -43,7 +46,21 @@ test("Responses Translator - maps OpenAI request to Responses API format", () =>
   assert.strictEqual(translated.input[0].role, "user");
   assert.strictEqual(translated.tools.length, 1);
   assert.strictEqual(translated.tools[0].name, "run_test");
+  assert.strictEqual(translated.prompt_cache_key, "thread-fixture");
+  assert.strictEqual(translated.prompt_cache_retention, "24h");
   assert.strictEqual(translated.stream, true);
+});
+
+test("Responses Translator - preserves cache parameters when converting to Chat format", () => {
+  const translated = responsesToOpenAIRequest({
+    model: "gpt-5.2",
+    input: "hello",
+    prompt_cache_key: "thread-fixture",
+    prompt_cache_retention: "24h",
+  });
+
+  assert.strictEqual(translated.prompt_cache_key, "thread-fixture");
+  assert.strictEqual(translated.prompt_cache_retention, "24h");
 });
 
 test("Responses Translator - converts Responses stream chunks to OpenAI SSE format", async () => {
@@ -188,4 +205,15 @@ test("Responses Translator - argument deltas never leak into message content", a
     .map((t) => t.function?.arguments)
     .join("");
   assert.ok(argText.includes("CustomerRepository"), "arguments must reach tool_calls, not content");
+});
+
+test("Responses Translator - reasoning_effort Chat menjadi reasoning.effort, termasuk xhigh dan max", () => {
+  const build = (effort) =>
+    translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, { model: "x", messages: [{ role: "user", content: "hi" }], reasoning_effort: effort }, "gpt-6-luna");
+
+  assert.deepStrictEqual(build("xhigh").reasoning, { effort: "xhigh", summary: "auto" });
+  assert.deepStrictEqual(build("max").reasoning, { effort: "max", summary: "auto" });
+  assert.strictEqual(build("minimal").reasoning.effort, "low", "minimal dipetakan ke low seperti katalog Codex Pi");
+  assert.strictEqual(build("turbo").reasoning, undefined, "level asing tidak dikirim ke upstream");
+  assert.strictEqual(build(undefined).reasoning, undefined, "tanpa reasoning_effort tidak ada field reasoning");
 });

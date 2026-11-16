@@ -1,6 +1,6 @@
 import { openAIEnvelope, relayClientRequest } from "./relay.js";
 import { FORMATS } from "../translator/index.js";
-import { estimateResponsesInputTokens } from "../services/usage.js";
+import { estimateResponsesInputTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
 import {
   aggregateResponsesStream,
@@ -40,16 +40,14 @@ export async function handleResponses(c) {
           : JSON.parse(rawText);
         return {
           data,
-          usage: {
-            inputTokens: data.usage?.input_tokens || 0,
-            outputTokens: data.usage?.output_tokens || 0,
-          },
+          usage: normalizeUsage(data.usage),
         };
       }
 
       const openAIData = await upstreamResponseToOpenAI(upstreamRes, targetFormat, targetModel);
-      const inputTokens = openAIData.usage?.prompt_tokens || openAIData.usage?.input_tokens || 0;
-      const outputTokens = openAIData.usage?.completion_tokens || openAIData.usage?.output_tokens || 0;
+      const normalizedUsage = normalizeUsage(openAIData.usage);
+      const inputTokens = normalizedUsage.inputTokens;
+      const outputTokens = normalizedUsage.outputTokens;
       const data = {
         id: openAIData.id || `resp_${Date.now()}`,
         object: "response",
@@ -64,7 +62,7 @@ export async function handleResponses(c) {
           total_tokens: inputTokens + outputTokens,
         },
       };
-      return { data, usage: { inputTokens, outputTokens } };
+      return { data, usage: normalizedUsage };
     },
   });
 }

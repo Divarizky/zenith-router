@@ -58,6 +58,14 @@ function modelCapabilityFields(modelId, storedCaps = null, providerTools = undef
 export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 /**
+ * Codex models whose backend accepts the full ladder up to `max`. The list follows
+ * the levels Pi's own openai-codex catalog declares for these families; other Codex
+ * models omit the field rather than claim a level nobody verified.
+ */
+export const CODEX_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+const CODEX_FULL_LADDER = /^gpt-(?:6(?:\.\d+)?|5\.6)-/;
+
+/**
  * Antigravity families publish the levels their own variants cover, so a family
  * without an `xhigh` variant never offers xhigh (it would fall back to high).
  * Pi adds `off` itself, so only the named levels are listed here.
@@ -70,6 +78,9 @@ export function antigravityThinkingLevels(family) {
 
 function thinkingLevelFields(providerId, model = null) {
   if (providerId === "claude") return { thinking_levels: [...CLAUDE_OAUTH_THINKING_LEVELS] };
+  if (providerId === "codex") {
+    return CODEX_FULL_LADDER.test(String(model?.id || "")) ? { thinking_levels: [...CODEX_THINKING_LEVELS] } : {};
+  }
   if (providerId === "antigravity") {
     const levels = antigravityThinkingLevels(model);
     return levels ? { thinking_levels: levels } : {};
@@ -270,7 +281,7 @@ export function getProviderModels(p) {
     return [...builtinFamilies.values()].map((f) => withCaps(f));
   }
 
-  if (!p.freeModelSync) return staticModels;
+  if (!p.freeModelSync && p.id !== "codex") return staticModels;
 
   const synced = listSyncedModels(p.id).map((m) =>
     withCaps({ id: m.model_id, name: m.name || m.model_id, source: "synced" }, m.capabilities)
@@ -442,7 +453,7 @@ export function getAvailableModels({ all = false } = {}) {
       parent: null,
       imported: true,
     };
-    Object.assign(entry, modelCapabilityFields(im.model_id, null, provider.supportsTools === true ? true : undefined), thinkingLevelFields(provider.id));
+    Object.assign(entry, modelCapabilityFields(im.model_id, null, provider.supportsTools === true ? true : undefined), thinkingLevelFields(provider.id, { id: im.model_id }));
     result.push(entry);
   }
 

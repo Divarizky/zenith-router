@@ -6,10 +6,13 @@ import {
   updateProxyPool,
   removeProxyPool,
   getDb,
+  getConnections,
+  updateConnection,
 } from "../db/index.js";
 import { proxyFetch } from "../executors/proxy.js";
 import { getSetting, setSetting } from "./settings.js";
-import { msUntilNextMidnightUtc } from "./opencodeGate.js";
+import { msUntilNextMidnightUtc, getOpencodeGateState, clearOpencodeGateCooldown } from "./opencodeGate.js";
+import { getProvider } from "../providers/index.js";
 
 /**
  * Mask the password inside a proxy address for display.
@@ -356,13 +359,15 @@ export function requireResolvedProxy(connection) {
 }
 
 /**
- * All proxies with display-ready fields: masked address and account count.
+ * All proxies with display-ready fields: masked address, account count, and bound accounts.
  */
 export function listProxyPools() {
+  const allConnections = getConnections();
   return getProxyPools().map((p) => {
     const hasCred = Boolean(p[ROT_FIELD]);
     const copy = { ...p };
     delete copy[ROT_FIELD];
+    const bound = allConnections.filter((c) => c.proxy_pool_id === p.id);
     return {
       ...copy,
       kind: copy.kind || "single",
@@ -372,9 +377,39 @@ export function listProxyPools() {
       maskedRotateToken: hasCred ? MASK_PLACEHOLDER : "",
       maskedUrl: maskProxyUrl(p.url),
       exhaustedUntil: getProxyPoolExhaustedUntil(p.id) || null,
-      accountCount: countProxyAccounts(p.id),
+      accountCount: bound.length,
+      boundAccounts: bound.map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider,
+        isNoAuth: Boolean(getProvider(c.provider)?.noAuth),
+      })),
+      boundAccountIds: bound.map((c) => c.id),
     };
   });
+}
+
+/**
+ * Update provider account bindings for a proxy pool.
+ * - Newly checked accounts are bound to this pool (proxy_pool_id = poolId, proxy_url = null).
+ * - Previously bound accounts to this pool that are unchecked are unbound (proxy_pool_id = null).
+ * - Accounts bound to other pools that were NOT checked are left untouched.
+ */
+export function updateProxyPoolBindings(poolId, targetConnectionIds) {
+  const poolNum = Number(poolId);
+  const targetSet = new Set((targetConnectionIds || []).map(Number));
+  const allConnections = getConnections();
+
+  for (const conn of allConnections) {
+    const isCurrentlyBoundToThisPool = conn.proxy_pool_id === poolNum;
+    const shouldBeBoundToThisPool = targetSet.has(conn.id);
+
+    if (shouldBeBoundToThisPool && !isCurrentlyBoundToThisPool) {
+      updateConnection(conn.id, { proxy_pool_id: poolNum, proxy_url: null });
+    } else if (!shouldBeBoundToThisPool && isCurrentlyBoundToThisPool) {
+      updateConnection(conn.id, { proxy_pool_id: null });
+    }
+  }
 }
 
 /**
@@ -680,6 +715,11 @@ export async function signalProxy429(
       signal: AbortSignal.timeout(timeoutMs),
     });
     await res?.body?.cancel().catch(() => {});
+    if (res?.ok || res?.status === 200) {
+      if (poolEntry?.url) {
+        clearOpencodeGateCooldown(poolEntry.url);
+      }
+    }
     return { sent: true, status: res?.status || 0, node };
   } catch (err) {
     return { sent: false, skipped: "network_error", error: err?.message };
@@ -693,22 +733,32 @@ export function planProxyRotationEntries(providerId, strategy) {
   const active = getProxyPools().filter((p) => Number(p.is_active) === 1);
   if (active.length === 0) return [];
 
-  let ordered;
+  let rawOrdered;
   if (strategy === "random") {
-    ordered = [...active];
-    for (let i = ordered.length - 1; i > 0; i--) {
+    rawOrdered = [...active];
+    for (let i = rawOrdered.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+      [rawOrdered[i], rawOrdered[j]] = [rawOrdered[j], rawOrdered[i]];
     }
   } else {
     const cursor = proxyRotationCursors.get(providerId) || 0;
     const start = cursor % active.length;
-    ordered = [];
+    rawOrdered = [];
     for (let i = 0; i < active.length; i++) {
-      ordered.push(active[(start + i) % active.length]);
+      rawOrdered.push(active[(start + i) % active.length]);
     }
     proxyRotationCursors.set(providerId, (start + 1) % active.length);
   }
+
+  // Prioritize active proxies that are NOT currently exhausted or in gate cooldown
+  const isAvailable = (p) => {
+    if (isProxyPoolExhausted(p.id) || isProxyPoolExhausted(p.url)) return false;
+    if (providerId === "opencode" && getOpencodeGateState(p.url)) return false;
+    return true;
+  };
+  const healthy = rawOrdered.filter(isAvailable);
+  const coolingDown = rawOrdered.filter((p) => !isAvailable(p));
+  const ordered = healthy.length > 0 ? [...healthy, ...coolingDown] : rawOrdered;
 
   const expanded = [];
   const hasGateway = ordered.some((p) => p.kind === "gateway");

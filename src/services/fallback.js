@@ -595,13 +595,15 @@ export async function executeWithFallback({
 
   const triedIds = [];
   const available = listAvailableConnections(provider.id, { model: modelId, effort });
-  // provider tanpa akun dilayani koneksi virtual. Saat
-  // strategi rotasi aktif dan ada proxy aktif, satu request mencoba sampai
+  // provider tanpa akun atau provider noAuth dilayani koneksi virtual / rotasi pool.
+  // Saat strategi rotasi aktif dan ada proxy aktif, satu request mencoba sampai
   // tiga proxy berbeda; proxy yang gagal dilewati ke berikutnya dalam request
   // yang sama. Tanpa proxy aktif, koneksi virtual tetap memakai koneksi
   // langsung seperti sebelumnya.
+  const hasRotation = getProxyRotationStrategy(provider.id) !== "off";
   const virtualOnly = available.length === 1 && available[0].id === null;
-  const rotationEntries = virtualOnly
+  const shouldUseRotation = (virtualOnly || Boolean(provider.noAuth)) && hasRotation;
+  const rotationEntries = shouldUseRotation
     ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id))
     : [];
   const rotationProxies = rotationEntries.map((e) => e.url);
@@ -625,7 +627,7 @@ export async function executeWithFallback({
       retryConnection = null;
     } else if (rotationProxies.length > 0) {
       // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
-      connection = available[0];
+      connection = available[0] || { id: null, provider: provider.id, auth_type: "none", is_active: 1 };
     } else {
       connection = getNextConnection(provider.id, triedIds, modelId, effort);
       if (!connection) break;

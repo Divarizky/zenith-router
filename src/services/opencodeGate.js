@@ -233,6 +233,14 @@ export function noteOpencodeGateSuccess(key) {
   if (gateState.delete(key)) captureLine(`[OPENCODE] Gate cooldown cleared on ${key}`);
 }
 
+/** Clear cooldown on a key explicitly (e.g. after dynamic proxy rotation). */
+export function clearOpencodeGateCooldown(key) {
+  strikeState.delete(key);
+  const cleared = gateState.delete(key);
+  if (cleared) captureLine(`[OPENCODE] Gate cooldown cleared on ${key}`);
+  return cleared;
+}
+
 export function resetOpencodeGate() {
   gateState.clear();
   strikeState.clear();

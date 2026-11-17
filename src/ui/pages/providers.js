@@ -304,7 +304,18 @@ function statusPill(p, stats, accounts = []) {
       return `<span class="pill pill-danger">Sesi kedaluwarsa</span>`;
     }
   }
-  if (p.noAuth) return `<span class="pill pill-success">Siap</span>`;
+  if (p.noAuth) {
+    const rot = getProxyRotationStrategy(p.id);
+    if (rot !== "off") {
+      const label = rot === "round_robin" ? "Rotasi" : "Acak";
+      return `<span class="pill pill-success">Siap</span> <span class="pill pill-accent" title="Terhubung ke Proxy Pool (${label})"><span class="dot dot-success"></span>Proxy Pool</span>`;
+    }
+    const hasBound = accounts.some((a) => a.proxy_pool_id || a.proxy_url);
+    if (hasBound) {
+      return `<span class="pill pill-success">Siap</span> <span class="pill pill-info" title="Terikat ke Proxy">Proxy</span>`;
+    }
+    return `<span class="pill pill-success">Siap</span>`;
+  }
   if (stats.healthy > 0) return `<span class="pill pill-success">${stats.healthy} Terhubung</span>`;
   if (stats.total > 0) return `<span class="pill pill-warning">${stats.total} tidak aktif</span>`;
   return `<span class="pill pill-muted">Belum ada akun</span>`;
@@ -943,6 +954,21 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
   const id = escapeHtml(p.id);
   const proxyPools = listProxyPools();
   const proxyRotationStrategy = getProxyRotationStrategy(p.id);
+  const activePoolCount = proxyPools.filter((pool) => pool.is_active).length;
+  const boundPools = accounts
+    .map((c) => (c.proxy_pool_id ? proxyPools.find((pool) => pool.id === c.proxy_pool_id) : null))
+    .filter(Boolean);
+  let noAuthProxyBadge = "";
+  if (p.noAuth) {
+    if (proxyRotationStrategy !== "off") {
+      const stratLabel = proxyRotationStrategy === "round_robin" ? "Bergiliran" : "Acak";
+      noAuthProxyBadge = `<span class="pill pill-accent" title="Provider noAuth ini terhubung ke Proxy Pool dengan rotasi ${stratLabel} (${activePoolCount} proxy aktif)"><span class="dot dot-success"></span>Proxy Pool: ${stratLabel} (${activePoolCount} aktif)</span>`;
+    } else if (boundPools.length > 0) {
+      noAuthProxyBadge = `<span class="pill pill-info" title="Provider noAuth ini terikat ke proxy: ${escapeHtml(boundPools.map((b) => b.name).join(', '))}"><span class="dot dot-success"></span>Proxy: ${escapeHtml(boundPools[0].name)}</span>`;
+    } else {
+      noAuthProxyBadge = `<span class="pill pill-muted" title="Provider noAuth ini memakai koneksi langsung (tanpa proxy)">Langsung (Tanpa Proxy)</span>`;
+    }
+  }
   const trafficUpdated = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
   // Explicit setting first, then the provider's own default, then the global cap.
   const concurrencySetting = getSetting(`provider_concurrency:${p.id}`, "");
@@ -1000,7 +1026,30 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
 
   let accountsBody;
   if (p.noAuth) {
-    accountsBody = `<p class="hint">Provider ini tidak butuh akun. Zenith Router langsung meneruskan request ke endpoint publik.</p>`;
+    accountsBody = `
+      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+          ${noAuthProxyBadge}
+          <span class="hint" style="margin: 0;">Provider noAuth ini tidak memerlukan akun autentikasi token/kunci.</span>
+        </div>
+        <p class="hint" style="margin: 0; line-height: 1.5;">
+          ${
+            proxyRotationStrategy !== "off"
+              ? `Request otomatis dirotasikan secara <strong>${proxyRotationStrategy === "round_robin" ? "bergiliran (round-robin)" : "acak"}</strong> ke <strong>${activePoolCount} proxy aktif</strong> di Proxy Pool saat melayani request ${escapeHtml(p.name)}.`
+              : `Saat ini rotasi proxy tidak aktif. Request diteruskan langsung atau melalui proxy yang terikat.`
+          }
+        </p>
+        ${
+          accounts.length > 0
+            ? `<div style="overflow-x: auto; margin-top: 0.5rem;">
+                <table class="accounts-table">
+                  <thead><tr><th title="Urutan prioritas">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy Terikat</th><th>Status</th><th></th></tr></thead>
+                  <tbody>${accountRows}</tbody>
+                </table>
+              </div>`
+            : ""
+        }
+      </div>`;
   } else if (accounts.length === 0) {
     accountsBody = `<div class="empty"><p class="big"><span class="pill pill-muted">Belum ada akun</span></p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
   } else {
@@ -1139,7 +1188,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
             <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "custom" ? "Custom" : p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : p.category === "session" ? "Sesi Browser" : "API Key"}</p>
           </div>
         </div>
-        ${statusPill(p, stats, accounts)}
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: auto; flex-wrap: wrap;">
+          ${noAuthProxyBadge}
+          ${statusPill(p, stats, accounts)}
+        </div>
       </div>
       ${p.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
       ${
@@ -1214,8 +1266,9 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
     ${
       p.noAuth
         ? `<div class="card" id="batas">
-      <div class="card-head">
+      <div class="card-head" style="flex-wrap: wrap; gap: 0.5rem;">
         <h3>Rotasi Proxy</h3>
+        ${noAuthProxyBadge}
       </div>
       <form action="/dashboard/providers/proxy-rotation" method="POST">
         <input type="hidden" name="provider" value="${id}" />

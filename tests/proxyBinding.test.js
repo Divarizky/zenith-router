@@ -10,7 +10,12 @@ import {
   addProxyPool,
   moveConnection,
 } from "../src/db/index.js";
-import { resolveConnectionProxy, requireResolvedProxy } from "../src/services/proxyPools.js";
+import {
+  resolveConnectionProxy,
+  requireResolvedProxy,
+  updateProxyPoolBindings,
+  listProxyPools,
+} from "../src/services/proxyPools.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 
 function form(fields) {
@@ -272,4 +277,154 @@ test("provider detail - proxy picker appears in the add form and per account row
   assert.ok(html.includes("Daftar: tampil"), "baris akun menampilkan proxy daftar yang dipakai");
   assert.ok(html.includes("/dashboard/providers/accounts/set-proxy"), "baris akun punya form ganti proxy");
   assert.ok(acc.id);
+});
+
+test("updateProxyPoolBindings - binds newly checked accounts and clears manual proxy_url", () => {
+  seedChat();
+  const pool = addProxyPool({ name: "pool-a", url: "http://pool-a.local:3128" });
+  const a = addConnection({ provider: "glm", name: "Acc A", credentials: { api_key: "k1" }, proxy_url: "http://manual.local:8080" });
+  const b = addConnection({ provider: "openai", name: "Acc B", credentials: { api_key: "k2" } });
+  const c = addConnection({ provider: "anthropic", name: "Acc C", credentials: { api_key: "k3" } });
+
+  // Bind accounts A and B to pool
+  updateProxyPoolBindings(pool.id, [a.id, b.id]);
+
+  const rowA = getConnectionById(a.id);
+  const rowB = getConnectionById(b.id);
+  const rowC = getConnectionById(c.id);
+
+  assert.strictEqual(rowA.proxy_pool_id, pool.id, "Akun A terikat ke pool");
+  assert.strictEqual(rowA.proxy_url, null, "Alamat proxy manual A dibersihkan");
+  assert.strictEqual(rowB.proxy_pool_id, pool.id, "Akun B terikat ke pool");
+  assert.strictEqual(rowC.proxy_pool_id, null, "Akun C tidak disentuh (tetap null)");
+});
+
+test("updateProxyPoolBindings - unbinds unchecked accounts from this pool without disturbing other pools", () => {
+  seedChat();
+  const pool1 = addProxyPool({ name: "pool-1", url: "http://pool-1.local:3128" });
+  const pool2 = addProxyPool({ name: "pool-2", url: "http://pool-2.local:3128" });
+
+  const a = addConnection({ provider: "glm", name: "Acc A", credentials: { api_key: "k1" }, proxy_pool_id: pool1.id });
+  const b = addConnection({ provider: "glm", name: "Acc B", credentials: { api_key: "k2" }, proxy_pool_id: pool1.id });
+  const c = addConnection({ provider: "openai", name: "Acc C", credentials: { api_key: "k3" }, proxy_pool_id: pool2.id });
+
+  // Update pool 1 to only bind B (A unchecked)
+  updateProxyPoolBindings(pool1.id, [b.id]);
+
+  const rowA = getConnectionById(a.id);
+  const rowB = getConnectionById(b.id);
+  const rowC = getConnectionById(c.id);
+
+  assert.strictEqual(rowA.proxy_pool_id, null, "Akun A dilepaskan dari pool 1");
+  assert.strictEqual(rowB.proxy_pool_id, pool1.id, "Akun B tetap terikat ke pool 1");
+  assert.strictEqual(rowC.proxy_pool_id, pool2.id, "Akun C di pool 2 tidak terganggu");
+});
+
+test("handleUpdateProxy - updates account bindings when bound_accounts_present sentinel is passed", async () => {
+  seedChat();
+  const pool = addProxyPool({ name: "pool-update", url: "http://pool.local:3128" });
+  const a = addConnection({ provider: "glm", name: "Acc A", credentials: { api_key: "k1" } });
+  const b = addConnection({ provider: "glm", name: "Acc B", credentials: { api_key: "k2" } });
+
+  // 1. Submit with multiple bound_connection_ids
+  const fd1 = form({
+    id: String(pool.id),
+    name: "pool-update",
+    url: "http://pool.local:3128",
+    bound_accounts_present: "1",
+  });
+  fd1.append("bound_connection_ids", String(a.id));
+  fd1.append("bound_connection_ids", String(b.id));
+
+  const res1 = await app.request("/dashboard/proxies/update", {
+    method: "POST",
+    body: fd1,
+  });
+  assert.strictEqual(res1.status, 302);
+  assert.strictEqual(getConnectionById(a.id).proxy_pool_id, pool.id);
+  assert.strictEqual(getConnectionById(b.id).proxy_pool_id, pool.id);
+
+  // 2. Submit with single bound_connection_ids (only account A)
+  const fd2 = form({
+    id: String(pool.id),
+    name: "pool-update",
+    url: "http://pool.local:3128",
+    bound_accounts_present: "1",
+    bound_connection_ids: String(a.id),
+  });
+
+  const res2 = await app.request("/dashboard/proxies/update", {
+    method: "POST",
+    body: fd2,
+  });
+  assert.strictEqual(res2.status, 302);
+  assert.strictEqual(getConnectionById(a.id).proxy_pool_id, pool.id);
+  assert.strictEqual(getConnectionById(b.id).proxy_pool_id, null, "Akun B sekarang dilepaskan");
+
+  // 3. Submit with zero accounts (all unchecked)
+  const fd3 = form({
+    id: String(pool.id),
+    name: "pool-update",
+    url: "http://pool.local:3128",
+    bound_accounts_present: "1",
+  });
+
+  const res3 = await app.request("/dashboard/proxies/update", {
+    method: "POST",
+    body: fd3,
+  });
+  assert.strictEqual(res3.status, 302);
+  assert.strictEqual(getConnectionById(a.id).proxy_pool_id, null, "Akun A sekarang dilepaskan");
+  assert.strictEqual(getConnectionById(b.id).proxy_pool_id, null);
+});
+
+test("handleUpdateProxy - backward compatibility: preserves bindings when bound_accounts_present is omitted", async () => {
+  seedChat();
+  const pool = addProxyPool({ name: "pool-compat", url: "http://pool-compat.local:3128" });
+  const a = addConnection({ provider: "glm", name: "Acc A", credentials: { api_key: "k1" }, proxy_pool_id: pool.id });
+
+  // Update proxy name and url without bound_accounts_present
+  const fd = form({
+    id: String(pool.id),
+    name: "pool-compat-renamed",
+    url: "http://pool-compat-new.local:3128",
+  });
+
+  const res = await app.request("/dashboard/proxies/update", {
+    method: "POST",
+    body: fd,
+  });
+  assert.strictEqual(res.status, 302);
+  assert.strictEqual(getConnectionById(a.id).proxy_pool_id, pool.id, "Binding akun tetap utuh");
+});
+
+test("UI proxies page - renders bound accounts chips and Edit modal multi-select selector", async () => {
+  seedChat();
+  const pool = addProxyPool({ name: "pool-ui", url: "http://pool-ui.local:3128" });
+  addConnection({
+    provider: "glm",
+    name: "GLM Production",
+    credentials: { api_key: "k1" },
+    proxy_pool_id: pool.id,
+  });
+  addConnection({
+    provider: "openai",
+    name: "OpenAI Fallback",
+    credentials: { api_key: "k2" },
+  });
+
+  const res = await app.request("/dashboard/proxies");
+  const html = await res.text();
+
+  // Row bound accounts chips
+  assert.ok(html.includes("Bound accounts:") || html.includes("Akun terikat:"), "label bound accounts tampil di baris");
+  assert.ok(html.includes("GLM Production"), "nama akun terikat tampil di chip");
+  assert.ok(html.includes("1 bound"), "badge jumlah bound tampil");
+
+  // Edit modal
+  assert.ok(html.includes('name="bound_accounts_present"'), "sentinel marker hadir di modal edit");
+  assert.ok(html.includes('name="bound_connection_ids"'), "checkbox selector akun hadir di modal edit");
+  assert.ok(html.includes("OpenAI Fallback"), "akun lain tampil di daftar pilihan edit modal");
+  assert.ok(html.includes("Pilih Semua"), "tombol pilih semua tersedia");
+  assert.ok(html.includes("Lepas Semua"), "tombol lepas semua tersedia");
 });

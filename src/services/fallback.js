@@ -25,6 +25,8 @@ import {
   planProxyRotationEntries,
   notifyProxyRotate,
   beginProxyStream,
+  signalProxy429,
+  extractWarpNode,
 } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
 import {
@@ -341,8 +343,8 @@ function freeTierModelIds(provider, modelId) {
  */
 const MIDSTREAM_ROTATE_RE = /FreeTierError|FreeUsageLimitError|"type"\s*:\s*"error"/i;
 
-function attachMidstreamRotateObserver(res, proxyEntry) {
-  if (!res?.body || !proxyEntry?.rotate_url) return res;
+function attachMidstreamRotateObserver(res, proxyEntry, modelId = "") {
+  if (!res?.body || (!proxyEntry?.rotate_url && !extractWarpNode(proxyEntry))) return res;
   const decoder = new TextDecoder();
   let triggered = false;
   const observer = new TransformStream({
@@ -352,7 +354,10 @@ function attachMidstreamRotateObserver(res, proxyEntry) {
         const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
         if (MIDSTREAM_ROTATE_RE.test(text)) {
           triggered = true;
-          notifyProxyRotate(proxyEntry, { status: 429, reason: "midstream_error" }).catch(() => {});
+          if (proxyEntry?.rotate_url) {
+            notifyProxyRotate(proxyEntry, { status: 429, reason: "midstream_error" }).catch(() => {});
+          }
+          signalProxy429(proxyEntry, { model: modelId }).catch(() => {});
         }
       }
     },
@@ -690,8 +695,8 @@ export async function executeWithFallback({
     if (res.ok) {
       clearStrikes(connection, modelId);
       const observedRes =
-        stream && provider.id === "opencode" && proxyEntry?.rotate_url
-          ? attachMidstreamRotateObserver(res, proxyEntry)
+        stream && provider.id === "opencode" && (proxyEntry?.rotate_url || extractWarpNode(proxyEntry))
+          ? attachMidstreamRotateObserver(res, proxyEntry, modelId || targetModel)
           : res;
       const trackedRes =
         stream && proxyEntry?.rotate_url ? attachProxyStreamTracker(observedRes, proxyEntry) : observedRes;
@@ -802,6 +807,9 @@ export async function executeWithFallback({
       // A transport failure means the path to upstream dropped, not that the
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
+      if (res.status === 429) {
+        signalProxy429(proxyEntry, { model: modelId || targetModel }).catch(() => {});
+      }
       if ((res.status === 429 || res.status === 403) && proxyEntry?.rotate_url) {
         notifyProxyRotate(proxyEntry, { status: res.status, reason: errText.slice(0, 120) }).catch(() => {});
       }

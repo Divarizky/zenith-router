@@ -5,6 +5,7 @@ import {
   countProxyAccounts,
   updateProxyPool,
   removeProxyPool,
+  getDb,
 } from "../db/index.js";
 import { proxyFetch } from "../executors/proxy.js";
 import { getSetting, setSetting } from "./settings.js";
@@ -585,6 +586,107 @@ async function sendProxyRotate(poolEntry, { status, reason, fetchFn, now }) {
     return { sent: false, skipped: "network_error" };
   }
 }
+
+export const DEFAULT_WARP_SIGNAL_URL = "http://127.0.0.1:8405/signal/429";
+
+export function extractWarpNode(entry) {
+  if (!entry) return null;
+  const name = typeof entry === "string" ? entry : entry.name;
+  if (name && typeof name === "string") {
+    const match = name.match(/warp-node-(\d+)/i);
+    if (match) {
+      const n = Number(match[1]);
+      if (Number.isInteger(n) && n >= 1 && n <= 10) return n;
+    }
+  }
+
+  const rawUrl = typeof entry === "string" ? entry : entry.url;
+  if (rawUrl && typeof rawUrl === "string") {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.port) {
+        const port = Number(parsed.port);
+        const node = port - 3128;
+        if (Number.isInteger(node) && node >= 1 && node <= 10) return node;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+const signal429DebounceMap = new Map();
+
+export function resetProxy429Debounce() {
+  signal429DebounceMap.clear();
+}
+
+export async function signalProxy429(
+  poolEntry,
+  {
+    model = "",
+    fetchFn = fetch,
+    timeoutMs = 2000,
+    signalUrl = null,
+    token = null,
+    now = Date.now(),
+    debounceMs = 2000,
+  } = {}
+) {
+  const node = extractWarpNode(poolEntry);
+  if (node === null) {
+    return { sent: false, skipped: "not_warp_node" };
+  }
+
+  const key = String(node);
+  const last = signal429DebounceMap.get(key);
+  if (debounceMs > 0 && last !== undefined && now - last < debounceMs) {
+    return { sent: false, skipped: "debounced" };
+  }
+  signal429DebounceMap.set(key, now);
+
+  const targetUrl =
+    signalUrl ||
+    process.env.WARP_POOL_SIGNAL_URL ||
+    (poolEntry?.rotate_url
+      ? new URL("/signal/429", poolEntry.rotate_url).href
+      : DEFAULT_WARP_SIGNAL_URL);
+
+  let credVal = token ?? poolEntry?.[ROT_FIELD] ?? poolEntry?.rotate_token;
+  if (!credVal && poolEntry?.id) {
+    try {
+      const row = getDb()
+        .prepare(`SELECT ${ROT_FIELD} FROM proxy_pools WHERE id = ?`)
+        .get(poolEntry.id);
+      if (row?.[ROT_FIELD]) {
+        credVal = row[ROT_FIELD];
+      }
+    } catch {}
+  }
+
+  const headers = { "Content-Type": "application/json" };
+  if (credVal) {
+    headers[AUTH_HDR_NAME] = `${AUTH_HDR_SCHEME} ${credVal}`;
+  }
+
+  try {
+    const res = await fetchFn(targetUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        node,
+        model: model ? String(model) : "",
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    await res?.body?.cancel().catch(() => {});
+    return { sent: true, status: res?.status || 0, node };
+  } catch (err) {
+    return { sent: false, skipped: "network_error", error: err?.message };
+  }
+}
+
+export const signalWarp429 = signalProxy429;
 
 export function planProxyRotationEntries(providerId, strategy) {
   if (strategy !== "round_robin" && strategy !== "random") return [];

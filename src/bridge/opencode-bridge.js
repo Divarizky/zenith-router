@@ -326,7 +326,8 @@ export async function handleBridgeRequest(
         : await fetchImpl(upstreamUrl, fetchOptions);
       clearTimeout(timeout);
 
-      // Pass error status from upstream (e.g. 429, 401, 500) as-is
+      // Pass error status from upstream (e.g. 429, 401, 500) as-is;
+      // router handles failover and triggers fire-and-forget 429 signal to warp-pool agent
       if (!upstreamRes.ok) {
         const errorHeaders = new Headers();
         const passHeaders = ["content-type", "retry-after", "x-opencode-log-id", "cache-control"];

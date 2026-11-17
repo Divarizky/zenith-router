@@ -22,7 +22,7 @@ import {
 import { ensureOpencodeBridge } from "../services/opencodeBridge.js";
 import { DEFAULT_BRIDGE_URL } from "../bridge/opencode-bridge.js";
 import { parseRetryAfterMs } from "../services/fallback.js";
-import { notifyProxyRotate } from "../services/proxyPools.js";
+import { notifyProxyRotate, signalProxy429 } from "../services/proxyPools.js";
 
 export const OPENCODE_UA = "opencode/latest/2.2.5/cli";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
@@ -723,6 +723,9 @@ export class OpencodeExecutor extends BaseExecutor {
         // An explicit network block or quota limit is not a shape problem: a second request
         // from the same IP/account only extends it, so the cooldown starts right away.
         if ((isOpencodeNetworkBlock(firstText) || isQuotaLimit) && shapeOk) {
+          if (res.status === 429) {
+            signalProxy429(proxyMeta, { model }).catch(() => {});
+          }
           if (proxyMeta?.rotate_url) {
             notifyProxyRotate(proxyMeta, { status: res.status, reason: firstText.slice(0, 120) }).catch(() => {});
           }
@@ -758,6 +761,9 @@ export class OpencodeExecutor extends BaseExecutor {
             if (!isOpencodeGateRejection(retryRes.status, retryText)) {
               res = retryRes;
             } else {
+              if (retryRes.status === 429) {
+                signalProxy429(proxyMeta, { model }).catch(() => {});
+              }
               if (proxyMeta?.rotate_url) {
                 notifyProxyRotate(proxyMeta, { status: retryRes.status, reason: retryText.slice(0, 120) }).catch(() => {});
               }

@@ -666,6 +666,7 @@ export async function signalProxy429(
     token = null,
     now = Date.now(),
     debounceMs = 2000,
+    async: useAsync = true,
   } = {}
 ) {
   const node = extractWarpNode(poolEntry);
@@ -711,11 +712,12 @@ export async function signalProxy429(
       body: JSON.stringify({
         node,
         model: model ? String(model) : "",
+        ...(useAsync ? { async: true } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     await res?.body?.cancel().catch(() => {});
-    if (res?.ok || res?.status === 200) {
+    if (res?.ok || res?.status === 200 || res?.status === 202) {
       if (poolEntry?.url) {
         clearOpencodeGateCooldown(poolEntry.url);
       }
@@ -727,6 +729,22 @@ export async function signalProxy429(
 }
 
 export const signalWarp429 = signalProxy429;
+
+/**
+ * Dispatch failure notification for a proxy entry without double-calling rotation.
+ * For WARP nodes on HTTP 429, signals /signal/429 (async queued) only; otherwise
+ * falls back to notifyProxyRotate when rotate_url is configured.
+ */
+export function dispatchProxyFailureSignal(proxyEntry, { model = "", status = null, reason = "" } = {}) {
+  if (!proxyEntry) return;
+  if (status === 429 && extractWarpNode(proxyEntry) !== null) {
+    signalProxy429(proxyEntry, { model, async: true }).catch(() => {});
+    return;
+  }
+  if ((status === 429 || status === 403) && proxyEntry?.rotate_url) {
+    notifyProxyRotate(proxyEntry, { status, reason: String(reason || "").slice(0, 120) }).catch(() => {});
+  }
+}
 
 export function planProxyRotationEntries(providerId, strategy) {
   if (strategy !== "round_robin" && strategy !== "random") return [];

@@ -20,6 +20,7 @@ const {
   extractWarpNode,
   signalProxy429,
   signalWarp429,
+  dispatchProxyFailureSignal,
   resetProxy429Debounce,
 } = await import("../src/services/proxyPools.js");
 
@@ -352,6 +353,37 @@ test("executeWithFallback triggers signalProxy429 on midstream FreeUsageLimitErr
     assert.equal(JSON.parse(signalCalls[0].init.body).node, 3);
     assert.equal(JSON.parse(signalCalls[0].init.body).model, "gpt-5-nano");
     assert.equal(signalCalls[0].init.headers["Authorization"], `Bearer ${tok3}`);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("dispatchProxyFailureSignal sends /signal/429 with async:true for WARP 429 without calling /rotate", async () => {
+  resetProxy429Debounce();
+  const origFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init?.body || "{}") });
+    return new Response(JSON.stringify({ ok: true, queued: true }), { status: 202 });
+  };
+  try {
+    const warpEntry = {
+      id: 99,
+      name: "warp-node-5",
+      url: "http://127.0.0.1:3133",
+      rotate_url: "http://127.0.0.1:8405/rotate",
+      rotate_token: "test-tok",
+    };
+    dispatchProxyFailureSignal(warpEntry, {
+      model: "glm-5.3-flash-free",
+      status: 429,
+      reason: "FreeUsageLimitError",
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].url.endsWith("/signal/429"));
+    assert.equal(calls[0].body.node, 5);
+    assert.equal(calls[0].body.async, true);
   } finally {
     globalThis.fetch = origFetch;
   }

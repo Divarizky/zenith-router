@@ -26,6 +26,7 @@ import {
   notifyProxyRotate,
   beginProxyStream,
   signalProxy429,
+  dispatchProxyFailureSignal,
   extractWarpNode,
 } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
@@ -354,10 +355,11 @@ function attachMidstreamRotateObserver(res, proxyEntry, modelId = "") {
         const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
         if (MIDSTREAM_ROTATE_RE.test(text)) {
           triggered = true;
-          if (proxyEntry?.rotate_url) {
-            notifyProxyRotate(proxyEntry, { status: 429, reason: "midstream_error" }).catch(() => {});
-          }
-          signalProxy429(proxyEntry, { model: modelId }).catch(() => {});
+          dispatchProxyFailureSignal(proxyEntry, {
+            model: modelId,
+            status: 429,
+            reason: "midstream_error",
+          });
         }
       }
     },
@@ -809,12 +811,11 @@ export async function executeWithFallback({
       // A transport failure means the path to upstream dropped, not that the
       // account is unusable. Parking the account for a network blip would push
       // every request onto the other connections for a minute.
-      if (res.status === 429) {
-        signalProxy429(proxyEntry, { model: modelId || targetModel }).catch(() => {});
-      }
-      if ((res.status === 429 || res.status === 403) && proxyEntry?.rotate_url) {
-        notifyProxyRotate(proxyEntry, { status: res.status, reason: errText.slice(0, 120) }).catch(() => {});
-      }
+      dispatchProxyFailureSignal(proxyEntry, {
+        model: modelId || targetModel,
+        status: res.status,
+        reason: errText,
+      });
       if (!isTransportFailure(res, errText)) {
         const skipVirtual = !connection?.id && rotationEntries.length > 0 && attempt < maxAttempts;
         if (!skipVirtual && parkThresholdReached(connection, { modelId, requestId: attemptId })) {

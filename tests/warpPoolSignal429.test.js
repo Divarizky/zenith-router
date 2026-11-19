@@ -17,11 +17,16 @@ const {
 const {
   createProxyPool,
   setProxyRotationStrategy,
+  planProxyRotationEntries,
   extractWarpNode,
   signalProxy429,
   signalWarp429,
   dispatchProxyFailureSignal,
+  isProxyPoolExhausted,
   resetProxy429Debounce,
+  resetProxyPoolExhausted,
+  resetProxyRotateDebounce,
+  resetProxyRotation,
 } = await import("../src/services/proxyPools.js");
 
 const {
@@ -29,6 +34,12 @@ const {
 } = await import("../src/services/fallback.js");
 
 const { OpencodeExecutor } = await import("../src/executors/opencode.js");
+const {
+  getOpencodeGateState,
+  noteOpencodeGateRejection,
+  opencodeGateKey,
+  resetOpencodeGate,
+} = await import("../src/services/opencodeGate.js");
 
 initDb();
 
@@ -43,6 +54,10 @@ function clearAll() {
   const db = getDb();
   db.exec("DELETE FROM connections; DELETE FROM proxy_pools; DELETE FROM settings;");
   resetProxy429Debounce();
+  resetProxyPoolExhausted();
+  resetProxyRotateDebounce();
+  resetProxyRotation();
+  resetOpencodeGate();
 }
 
 test("extractWarpNode extracts node 1..10 from proxy name or port", () => {
@@ -358,8 +373,28 @@ test("executeWithFallback triggers signalProxy429 on midstream FreeUsageLimitErr
   }
 });
 
-test("dispatchProxyFailureSignal sends /signal/429 with async:true for WARP 429 without calling /rotate", async () => {
-  resetProxy429Debounce();
+test("dispatchProxyFailureSignal preserves async gate cooldown and deprioritizes exhausted WARP lane", async () => {
+  clearAll();
+  const p1 = createProxyPool({
+    name: "warp-node-5",
+    url: "http://127.0.0.1:3133",
+    rotate_url: "http://127.0.0.1:8405/rotate",
+  });
+  const p2 = createProxyPool({
+    name: "warp-node-6",
+    url: "http://127.0.0.1:3134",
+    rotate_url: "http://127.0.0.1:8405/rotate",
+  });
+  setProxyRotationStrategy("opencode", "round_robin");
+
+  const gateKey = opencodeGateKey(p1.url);
+  noteOpencodeGateRejection(gateKey, {
+    status: 429,
+    shapeOk: true,
+    error: "FreeUsageLimitError",
+    retryAfterMs: 60000,
+  });
+
   const origFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
@@ -367,24 +402,47 @@ test("dispatchProxyFailureSignal sends /signal/429 with async:true for WARP 429 
     return new Response(JSON.stringify({ ok: true, queued: true }), { status: 202 });
   };
   try {
-    const warpEntry = {
-      id: 99,
-      name: "warp-node-5",
-      url: "http://127.0.0.1:3133",
-      rotate_url: "http://127.0.0.1:8405/rotate",
-      rotate_token: "test-tok",
-    };
-    dispatchProxyFailureSignal(warpEntry, {
+    dispatchProxyFailureSignal(p1, {
       model: "glm-5.3-flash-free",
       status: 429,
       reason: "FreeUsageLimitError",
     });
     await new Promise((r) => setTimeout(r, 30));
+
     assert.equal(calls.length, 1);
     assert.ok(calls[0].url.endsWith("/signal/429"));
     assert.equal(calls[0].body.node, 5);
     assert.equal(calls[0].body.async, true);
+    assert.ok(getOpencodeGateState(gateKey), "202 queued acknowledgement must not clear the gate cooldown");
+    assert.equal(isProxyPoolExhausted(p1.id), true, "FreeUsageLimit 429 must exhaust the lane locally");
+
+    const plan = planProxyRotationEntries("opencode", "round_robin");
+    assert.deepEqual(plan.map((entry) => entry.id), [p2.id, p1.id]);
   } finally {
     globalThis.fetch = origFetch;
   }
+});
+
+test("signalProxy429 clears gate only after an explicitly synchronous successful rotate", async () => {
+  clearAll();
+  const pool = createProxyPool({
+    name: "warp-node-2",
+    url: "http://127.0.0.1:3130",
+    rotate_url: "http://127.0.0.1:8405/rotate",
+  });
+  const key = opencodeGateKey(pool.url);
+  noteOpencodeGateRejection(key, {
+    status: 429,
+    shapeOk: true,
+    error: "FreeUsageLimitError",
+    retryAfterMs: 60000,
+  });
+
+  const result = await signalProxy429(pool, {
+    async: false,
+    fetchFn: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(getOpencodeGateState(key), null);
 });

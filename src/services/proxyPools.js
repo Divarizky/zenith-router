@@ -543,6 +543,24 @@ export function beginProxyStream(poolEntry) {
   };
 }
 
+function recordProxyPool429Strike(poolEntry, { status = null, reason = "", now = Date.now() } = {}) {
+  if (status !== 429 || !/FreeUsageLimit/i.test(String(reason || ""))) return false;
+  const poolKey = String(poolEntry.id ?? poolEntry.url ?? "");
+  if (!poolKey || isProxyPoolExhausted(poolKey, now) || (poolEntry.id && isProxyPoolExhausted(poolEntry.id, now))) {
+    return false;
+  }
+  const budget = poolEntry.kind === "gateway" ? Math.max(1, Number(poolEntry.retry_budget) || 1) : 1;
+  const prevStrike = rotateStrikeMap.get(poolKey);
+  const strikes = prevStrike && now - prevStrike.at <= PROXY_STRIKE_WINDOW_MS ? prevStrike.count + 1 : 1;
+  rotateStrikeMap.set(poolKey, { count: strikes, at: now });
+  if (strikes < budget) return false;
+
+  const until = now + msUntilNextMidnightUtc(now) + 30000;
+  markProxyPoolExhausted(poolKey, until);
+  if (poolEntry.id) markProxyPoolExhausted(poolEntry.id, until);
+  return true;
+}
+
 export async function notifyProxyRotate(
   poolEntry,
   { status = null, reason = "", fetchFn = fetch, now = Date.now(), debounceMs = PROXY_ROTATE_DEBOUNCE_MS, maxDeferMs = PROXY_ROTATE_MAX_DEFER_MS } = {}
@@ -553,17 +571,7 @@ export async function notifyProxyRotate(
   if (isProxyPoolExhausted(poolKey, now) || (poolEntry.id && isProxyPoolExhausted(poolEntry.id, now))) {
     return { sent: false, skipped: "pool_exhausted" };
   }
-  if (status === 429 && /FreeUsageLimit/i.test(String(reason || ""))) {
-    const budget = poolEntry.kind === "gateway" ? Math.max(1, Number(poolEntry.retry_budget) || 1) : 1;
-    const prevStrike = rotateStrikeMap.get(poolKey);
-    const strikes = prevStrike && now - prevStrike.at <= PROXY_STRIKE_WINDOW_MS ? prevStrike.count + 1 : 1;
-    rotateStrikeMap.set(poolKey, { count: strikes, at: now });
-    if (strikes >= budget) {
-      const until = now + msUntilNextMidnightUtc(now) + 30000;
-      markProxyPoolExhausted(poolKey, until);
-      if (poolEntry.id) markProxyPoolExhausted(poolEntry.id, until);
-    }
-  }
+  recordProxyPool429Strike(poolEntry, { status, reason, now });
   const key = String(poolEntry.id ?? rotateUrl);
   const lastSentAt = rotateDebounceMap.get(key);
   if (lastSentAt !== undefined && now - lastSentAt < debounceMs) {
@@ -717,10 +725,10 @@ export async function signalProxy429(
       signal: AbortSignal.timeout(timeoutMs),
     });
     await res?.body?.cancel().catch(() => {});
-    if (res?.ok || res?.status === 200 || res?.status === 202) {
-      if (poolEntry?.url) {
-        clearOpencodeGateCooldown(poolEntry.url);
-      }
+    // Async acknowledgements only confirm that rotation was queued. Preserve the
+    // local gate until a successful request or an explicitly synchronous rotate.
+    if (!useAsync && res?.status === 200 && poolEntry?.url) {
+      clearOpencodeGateCooldown(poolEntry.url);
     }
     return { sent: true, status: res?.status || 0, node };
   } catch (err) {
@@ -738,6 +746,7 @@ export const signalWarp429 = signalProxy429;
 export function dispatchProxyFailureSignal(proxyEntry, { model = "", status = null, reason = "" } = {}) {
   if (!proxyEntry) return;
   if (status === 429 && extractWarpNode(proxyEntry) !== null) {
+    recordProxyPool429Strike(proxyEntry, { status, reason, now: Date.now() });
     signalProxy429(proxyEntry, { model, async: true }).catch(() => {});
     return;
   }

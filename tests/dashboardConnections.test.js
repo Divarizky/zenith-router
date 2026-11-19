@@ -55,8 +55,9 @@ test("GET /dashboard/providers/:id - shows accounts and models for one provider"
 test("GET /dashboard/providers/opencode - noAuth provider hides the add account form", async () => {
   initDb(":memory:");
   const html = await (await app.request("/dashboard/providers/opencode")).text();
-  assert.ok(html.includes("tidak butuh akun"));
+  assert.ok(html.includes("tidak memerlukan akun autentikasi token/kunci."));
   assert.ok(!html.includes("openModal('add-account-modal')"));
+  assert.ok(!html.includes('id="add-account-modal"'));
 });
 
 test("POST /dashboard/providers/accounts/add - creates account and redirects to provider page", async () => {

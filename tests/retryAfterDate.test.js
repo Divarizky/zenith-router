@@ -35,3 +35,21 @@ test("Retry-After tanpa header tetap membaca retryDelay dari body", () => {
   const body = JSON.stringify({ error: { details: [{ retryDelay: "7.5s" }] } });
   assert.strictEqual(extractQuotaCooldownMs(resWith(undefined), body, 60_000), 7_500);
 });
+
+test("Retry-After tanpa header membaca direct retry_after dari body (Nous Research)", () => {
+  const bodyDirect = JSON.stringify({
+    status: 429,
+    message: "You've reached this model's current fair-share rate limit.",
+    reason: "rate_limited",
+    retry_after: 8,
+  });
+  assert.strictEqual(extractQuotaCooldownMs(resWith(undefined), bodyDirect, 60_000), 8_000);
+
+  const bodyNested = JSON.stringify({
+    error: {
+      message: "Rate limit reached",
+      retry_after: "5",
+    },
+  });
+  assert.strictEqual(extractQuotaCooldownMs(resWith(undefined), bodyNested, 60_000), 5_000);
+});

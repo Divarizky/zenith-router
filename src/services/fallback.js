@@ -431,6 +431,16 @@ export function extractQuotaCooldownMs(res, bodyText, defaultDurationMs = 60000)
 
   try {
     const payload = JSON.parse(bodyText);
+
+    // Direct retry_after field (e.g. Nous Research: { "status": 429, "retry_after": 8 })
+    const directRetryAfter = payload?.retry_after ?? payload?.error?.retry_after;
+    if (directRetryAfter !== undefined && directRetryAfter !== null) {
+      const sec = typeof directRetryAfter === "string" ? parseFloat(directRetryAfter) : Number(directRetryAfter);
+      if (Number.isFinite(sec) && sec > 0) {
+        return Math.ceil(sec * 1000);
+      }
+    }
+
     const errorObj = payload?.error || payload;
     const details = Array.isArray(errorObj?.details) ? errorObj.details : [];
 
@@ -502,6 +512,15 @@ export function buildErrorResponse(res, bodyText, targetFormat) {
   ]) {
     const value = res.headers?.get?.(name);
     if (value) headers[name] = value;
+  }
+  if (!headers["retry-after"] && (res.status === 429 || res.status === 503)) {
+    const bodyRetryAfter = payload?.retry_after ?? payload?.error?.retry_after;
+    if (bodyRetryAfter !== undefined && bodyRetryAfter !== null) {
+      const sec = typeof bodyRetryAfter === "string" ? parseFloat(bodyRetryAfter) : Number(bodyRetryAfter);
+      if (Number.isFinite(sec) && sec > 0) {
+        headers["retry-after"] = String(Math.ceil(sec));
+      }
+    }
   }
   return new Response(JSON.stringify(payload), { status: res.status, headers });
 }

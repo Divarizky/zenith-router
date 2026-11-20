@@ -1,4 +1,5 @@
 import { proxyFetch } from "./proxy.js";
+import { logQuiet } from "../services/logger.js";
 
 let customExecutor = null;
 const EXECUTORS = new Map();
@@ -167,7 +168,7 @@ export class BaseExecutor {
 
         const code = transportErrorCode(err);
         if (attempt < TRANSPORT_ATTEMPTS && isReplayable && TRANSPORT_RETRY_CODES.has(code)) {
-          console.warn(`[UPSTREAM] ${code} on ${hostOf(url)}, retrying once on a new connection`);
+          logQuiet(`[UPSTREAM] ${code} on ${hostOf(url)}, retrying once on a new connection`, "warn");
           continue;
         }
 

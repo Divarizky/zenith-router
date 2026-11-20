@@ -64,6 +64,8 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   const candidates = connections.filter(
     (c) =>
       c.is_active === 1 &&
+      // a grant marked dead needs a fresh login; routing it would only fail
+      !c.credentials?.needs_login &&
       !isConnectionInCooldown(c, model) &&
       !isQuotaBlocking(c) &&
       // an account whose list proxy is inactive or gone is skipped
@@ -955,6 +957,10 @@ export async function executeWithFallback({
   if (virtualUntil && virtualUntil > now) cooldownEnds.push(virtualUntil);
   const retryAfterSec = cooldownEnds.length ? Math.ceil((Math.min(...cooldownEnds) - now) / 1000) : 0;
   let message = `No available connection for provider '${provider.id}'.`;
+  const needLogin = getConnections(provider.id).filter((c) => c.is_active === 1 && c.credentials?.needs_login).length;
+  if (needLogin) {
+    message += ` ${needLogin} account${needLogin === 1 ? "" : "s"} need a new login in the dashboard.`;
+  }
   if (retryAfterSec) {
     message += ` All accounts are cooling down after upstream errors; retry in ${retryAfterSec}s.`;
   }

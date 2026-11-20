@@ -133,6 +133,14 @@ export const OAUTH_CONFIG = {
     apiBaseUrl: "https://api.z.ai",
     planApiKeyName: "zcode-api-key",
   },
+  nous: {
+    // Portal device grant. CLIENT_ID is overridable; the default is the Hermes CLI client
+    // id that the public Nous clients use, which Nous has not confirmed for Zenith.
+    clientId: process.env.ZENITH_NOUS_CLIENT_ID || "hermes-cli",
+    scope: "inference:invoke",
+    deviceCodeUrl: "https://portal.nousresearch.com/api/oauth/device/code",
+    tokenUrl: "https://portal.nousresearch.com/api/oauth/token",
+  },
 };
 
 /** Fetch a fresh Copilot API token for a GitHub OAuth token. Used at login and on refresh. */
@@ -716,7 +724,86 @@ async function resolveGlmPlanApiKey(zaiToken, { proxyUrl = null } = {}) {
   return `${apiKey}.${secret.secretKey.trim()}`;
 }
 
-export const OAUTH_FLOWS = { claude, codex, antigravity, cline, github, kilocode, kiro, glm };
+// Token lifetime in seconds. A missing, non-numeric, non-finite or absurd value falls back to
+// one hour so the account always carries a finite expires_at and keeps refreshing.
+export function nousTtlSeconds(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 && n <= 365 * 24 * 3600 ? n : 3600;
+}
+
+// Upper bound for one Nous token poll, so a silent endpoint cannot hang the flow.
+const NOUS_POLL_TIMEOUT_MS = 10000;
+
+// Nous Portal device grant. The token response is stored as-is; the refresher reads it back.
+const nous = {
+  flowType: "device_code",
+  async start({ proxyUrl = null } = {}) {
+    const cfg = OAUTH_CONFIG.nous;
+    const res = await oauthFetch(cfg.deviceCodeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: cfg.clientId, scope: cfg.scope }),
+    }, { proxyUrl });
+    const d = await readJson(res, "Nous device code");
+    if (!d || typeof d.device_code !== "string" || !d.device_code || typeof d.user_code !== "string") {
+      throw new Error("Nous device code response is missing device_code or user_code");
+    }
+    return {
+      deviceCode: d.device_code,
+      userCode: d.user_code,
+      verificationUri: d.verification_uri_complete || d.verification_uri,
+      expiresIn: d.expires_in || 900,
+      interval: Math.max(1, Number(d.interval) || 5),
+    };
+  },
+  async poll({ deviceCode, proxyUrl = null }) {
+    const cfg = OAUTH_CONFIG.nous;
+    let res;
+    let d;
+    try {
+      res = await oauthFetch(cfg.tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        signal: AbortSignal.timeout(NOUS_POLL_TIMEOUT_MS),
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          client_id: cfg.clientId,
+          device_code: deviceCode,
+        }),
+      }, { proxyUrl });
+      // The body read sits inside the same guard: the timeout also covers a stalled body.
+      const text = await res.text();
+      try {
+        d = JSON.parse(text);
+        if (!d || typeof d !== "object") d = {};
+      } catch {
+        d = {};
+      }
+    } catch {
+      // A stalled or dropped poll is transient: the flow retries until the code expires.
+      return { pending: true };
+    }
+    // A server-side hiccup is as transient as a dropped connection.
+    if (res.status >= 500) return { pending: true };
+    if (res.ok && typeof d.access_token === "string" && d.access_token && typeof d.refresh_token === "string" && d.refresh_token) {
+      return {
+        tokens: {
+          access_token: d.access_token,
+          refresh_token: d.refresh_token,
+          expires_in: nousTtlSeconds(d.expires_in),
+        },
+      };
+    }
+    if (d.error === "slow_down") return { pending: true, slowDown: true };
+    if (d.error === "authorization_pending") return { pending: true };
+    if (d.error === "access_denied") return { error: "Login ditolak." };
+    if (d.error === "expired_token") return { error: "Kode login kedaluwarsa." };
+    if (res.ok) return { error: "Respons Nous tidak berisi pasangan token yang lengkap." };
+    return { error: `Nous token poll gagal (HTTP ${res.status})` };
+  },
+};
+
+export const OAUTH_FLOWS = { claude, codex, antigravity, cline, github, kilocode, kiro, glm, nous };
 
 export function getOAuthFlow(providerId) {
   return OAUTH_FLOWS[providerId] || null;

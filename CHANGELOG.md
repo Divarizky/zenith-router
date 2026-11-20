@@ -4,6 +4,11 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
 
 ### Fitur
 
+- **Provider Nous Research**:
+  - Provider `nous` (apikey) memakai `freeModelSync: "merge"` tanpa model bawaan; model gratis diambil dari `/v1/models` publik dan ikut jadwal sinkron 6 jam. Gagal/kosong mempertahankan daftar terakhir yang berhasil.
+  - Konteks, output maksimum, vision, tools, dan reasoning dicatat bila upstream menyediakannya.
+  - Uji koneksi memakai chat minimal ke model gratis (401/403, 402, 404, 429, 2xx dipetakan terpisah), bukan GET daftar model publik.
+  - Belum ada dukungan tanpa key atau pembayaran x402; kebutuhan tag pada request chat belum terverifikasi, sehingga tidak ada transformasi khusus Nous.
 - **Pencocokan Katalog Provider**:
   - Penanda `catalogRefresh` membuat sinkron menulis ulang tabel `retired_models` dari daftar live provider, tanpa mengubah daftar model gratis.
   - `builtinAliases` melindungi id yang bisa dipanggil tetapi tidak pernah dipublikasikan, seperti alias `default` dan `fast` milik LLM7.

@@ -269,7 +269,14 @@ export async function pollOAuthFlow(flowId) {
       state: flow.deviceState,
       proxyUrl: flow.proxyUrl,
     });
-    if (result.pending) return { status: "pending" };
+    if (result.pending) {
+      // RFC 8628 3.5: slow_down requires polling at least 5 seconds slower from now on.
+      if (result.slowDown) {
+        flow.interval += 5000;
+        flow.nextPollAt = Date.now() + flow.interval;
+      }
+      return { status: "pending" };
+    }
     if (result.error) {
       finish(flow, { status: "error", error: result.error });
     } else {

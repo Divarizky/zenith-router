@@ -14,6 +14,7 @@ import kiloFree from "./registry/kilo-free.js";
 import together from "./registry/together.js";
 import freebuff from "./registry/freebuff.js";
 import ollama from "./registry/ollama.js";
+import nous from "./registry/nous.js";
 import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
@@ -143,6 +144,7 @@ const REGISTRY = [
   together,
   freebuff,
   ollama,
+  nous,
   commandcode,
   ovhcloud,
   xkiro,

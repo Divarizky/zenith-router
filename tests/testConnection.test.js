@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { initDb, addConnection } from "../src/db/index.js";
+import { initDb, getDb, addConnection } from "../src/db/index.js";
 import { testConnection } from "../src/services/testConnection.js";
 import { handleTestConnection } from "../src/ui/pages/providers.js";
 import { setCustomExecutor } from "../src/executors/base.js";
@@ -144,4 +144,49 @@ test("handleTestConnection - redirects with test_fail when upstream fails", asyn
   } finally {
     setCustomExecutor(null);
   }
+});
+
+/** Nous probe: the public model list always answers; only the chat status decides. */
+async function nousProbe(chatStatus) {
+  initDb(":memory:");
+  getDb()
+    .prepare("INSERT INTO synced_models (provider, model_id, name, synced_at) VALUES (?, ?, ?, ?)")
+    .run("nous", "x/free:free", "Free", Date.now());
+  const conn = addConnection({ provider: "nous", name: "Nous Key", credentials: { api_key: "test-key-1" } });
+  const calls = [];
+  setCustomExecutor({
+    async execute(req) {
+      calls.push(req);
+      if (req.method === "GET") return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      return new Response("{}", { status: chatStatus });
+    },
+  });
+  try {
+    return { res: await testConnection("nous", { connection: conn }), calls };
+  } finally {
+    setCustomExecutor(null);
+  }
+}
+
+test("testConnection nous - does not treat the public model list as proof of access", async () => {
+  const { res, calls } = await nousProbe(401);
+  assert.equal(res.ok, false);
+  assert.match(res.error, /401/);
+  assert.ok(calls.every((c) => c.method === "POST"), "no GET /v1/models used as the check");
+  const body = JSON.parse(calls[0].body);
+  assert.equal(body.model, "x/free:free");
+  assert.equal(body.max_tokens, 1);
+});
+
+test("testConnection nous - maps 403, 402, 404, 429 and 2xx to distinct outcomes", async () => {
+  const outcomes = {};
+  for (const status of [200, 403, 402, 404, 429]) outcomes[status] = (await nousProbe(status)).res;
+  assert.equal(outcomes[200].ok, true);
+  assert.match(outcomes[200].details, /berhasil/);
+  assert.match(outcomes[403].error, /403.*(ditolak|akses)/);
+  assert.match(outcomes[402].error, /402.*(kredit|pembayaran)/);
+  assert.match(outcomes[404].error, /404.*tidak ditemukan/);
+  assert.equal(outcomes[429].ok, true);
+  assert.match(outcomes[429].details, /rate limit/);
+  assert.equal(new Set(Object.values(outcomes).map((o) => o.error || o.details)).size, 5);
 });

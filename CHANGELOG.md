@@ -9,6 +9,10 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
   - Konteks, output maksimum, vision, tools, dan reasoning dicatat bila upstream menyediakannya.
   - Uji koneksi memakai chat minimal ke model gratis (401/403, 402, 404, 429, 2xx dipetakan terpisah), bukan GET daftar model publik.
   - Belum ada dukungan tanpa key atau pembayaran x402; kebutuhan tag pada request chat belum terverifikasi, sehingga tidak ada transformasi khusus Nous.
+- **Login OAuth Nous Research**:
+  - Login device code (client `hermes-cli`, scope `inference:invoke`, bisa diganti lewat `ZENITH_NOUS_CLIENT_ID`). Polling mengikuti `slow_down` (+5 detik), timeout 10 detik, dan error jaringan atau 5xx dianggap sementara.
+  - Kredensial refresh berputar tiap grant. Refresh ditolak (400) menandai akun `needs_login`: tidak di-refresh lagi, dilewati routing, dan pesan 503 menyebutnya. Login ulang membuat akun baru.
+  - Belum diuji dengan akun Nous sungguhan: endpoint, format respons, dan client ID bersumber dari klien pihak ketiga. UI belum menampilkan status `needs_login`.
 - **Pencocokan Katalog Provider**:
   - Penanda `catalogRefresh` membuat sinkron menulis ulang tabel `retired_models` dari daftar live provider, tanpa mengubah daftar model gratis.
   - `builtinAliases` melindungi id yang bisa dipanggil tetapi tidak pernah dipublikasikan, seperti alias `default` dan `fast` milik LLM7.

@@ -1,6 +1,6 @@
 import { getConnectionById, getConnections, mergeConnectionCredentials } from "../db/index.js";
 import { logQuiet } from "./logger.js";
-import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn } from "./oauth/providers.js";
+import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn, nousTtlSeconds } from "./oauth/providers.js";
 import { requireResolvedProxy } from "./proxyPools.js";
 
 let customTokenRefresher = null;
@@ -188,6 +188,47 @@ const REFRESHERS = {
     };
   },
 
+  // Portal rotates the refresh token on every grant, so the returned pair replaces the old one.
+  // A 400 means the grant is dead (expired, revoked, or reused): the account needs a new login.
+  async nous(creds, proxyUrl) {
+    const cfg = OAUTH_CONFIG.nous;
+    const res = await oauthFetch(cfg.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "x-nous-refresh-token": creds.refresh_token,
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: cfg.clientId,
+        refresh_token: creds.refresh_token,
+      }),
+      signal: AbortSignal.timeout(refreshTimeoutMs),
+    }, { proxyUrl });
+    if (res.status === 400) {
+      // The grant is dead (expired, revoked or reused). Retrying would only repeat the spent token.
+      const err = new Error("Nous refresh rejected; login is required again");
+      err.needsLogin = true;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`Nous refresh failed with HTTP ${res.status}`);
+    let t;
+    try {
+      t = await res.json();
+    } catch {
+      throw new Error("Nous refresh returned invalid JSON");
+    }
+    if (!t || typeof t !== "object") throw new Error("Nous refresh returned invalid JSON");
+    if (typeof t.access_token !== "string" || !t.access_token || typeof t.refresh_token !== "string" || !t.refresh_token) {
+      throw new Error("Nous refresh response has no rotated token pair");
+    }
+    return {
+      access_token: t.access_token,
+      refresh_token: t.refresh_token,
+      expires_at: expiresAt(nousTtlSeconds(t.expires_in)),
+    };
+  },
+
   async github(creds, proxyUrl) {
     const ghToken = creds.github_token || creds.access_token;
     const copilot = await fetchCopilotToken(ghToken, { proxyUrl });
@@ -212,7 +253,12 @@ async function executeRefresh(connection) {
   if (customTokenRefresher) {
     newTokens = await customTokenRefresher(connection);
   } else {
-    newTokens = await defaultRefreshHandler(connection);
+    try {
+      newTokens = await defaultRefreshHandler(connection);
+    } catch (err) {
+      if (err.needsLogin) mergeConnectionCredentials(connection.id, { needs_login: true });
+      throw err;
+    }
   }
 
   if (!newTokens || !newTokens.access_token) {
@@ -228,6 +274,9 @@ async function executeRefresh(connection) {
     expires_at: expires_at || Date.now() + 3600 * 1000,
   };
   if (refresh_token) patch.refresh_token = refresh_token;
+
+  // A healthy refresh ends any earlier login-required state.
+  patch.needs_login = undefined;
 
   const updated = mergeConnectionCredentials(connection.id, patch);
   logQuiet(
@@ -262,6 +311,12 @@ export function refreshOAuthToken(connection, { force = false } = {}) {
 
   const run = async () => {
     const freshConn = getConnectionById(id) || connection;
+    // A grant already marked dead must not be sent again by any caller (scheduler, fallback, quota).
+    if (freshConn.credentials?.needs_login) {
+      const err = new Error("Nous refresh rejected; login is required again");
+      err.needsLogin = true;
+      throw err;
+    }
     if (!force && !needsTokenRefresh(freshConn)) {
       return freshConn;
     }
@@ -284,7 +339,7 @@ export async function scanAndRefreshTokens() {
   let refreshedCount = 0;
 
   for (const conn of allConnections) {
-    if (conn.is_active && needsTokenRefresh(conn)) {
+    if (conn.is_active && !conn.credentials?.needs_login && needsTokenRefresh(conn)) {
       try {
         await refreshOAuthToken(conn);
         refreshedCount++;

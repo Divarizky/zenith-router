@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initDb, getConnections, addConnection } from "../src/db/index.js";
+import { saveOAuthConnection } from "../src/services/oauth/flows.js";
 import { setOAuthFetch } from "../src/services/oauth/providers.js";
 import {
   startOAuthFlow,
@@ -12,7 +13,9 @@ import {
   importLocalLogin,
   resetOAuthFlows,
 } from "../src/services/oauth/flows.js";
-import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "../src/services/tokenRefresh.js";
+import { canRefresh, needsTokenRefresh, refreshOAuthToken, scanAndRefreshTokens } from "../src/services/tokenRefresh.js";
+import { applyConnectionAuth } from "../src/services/auth.js";
+import { getNextConnection } from "../src/services/fallback.js";
 import { formatManualOAuthError } from "../src/ui/pages/providers.js";
 import { app } from "../src/index.js";
 
@@ -731,3 +734,401 @@ test("claude login - completeManual menerima kode polos, code#state, dan callbac
   assert.strictEqual(call3.body.state, s3);
 });
 
+
+test("nous device flow - form request with hermes-cli client, pending, then token saved", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  let polls = 0;
+  const calls = mockFetch({
+    "portal.nousresearch.com/api/oauth/device/code": json({
+      device_code: "dev-n1",
+      user_code: "NOUS-1",
+      verification_uri: "https://portal.nousresearch.com/device",
+      verification_uri_complete: "https://portal.nousresearch.com/device?user_code=NOUS-1",
+      expires_in: 900,
+      interval: 1,
+    }),
+    "portal.nousresearch.com/api/oauth/token": () =>
+      ++polls === 1
+        ? json({ error: "authorization_pending" }, 400)
+        : json({ access_token: "acc-n", refresh_token: "ref-n", token_type: "Bearer", expires_in: 3600 }),
+  });
+  const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+  assert.strictEqual(started.flowType, "device_code");
+  assert.strictEqual(started.userCode, "NOUS-1");
+  assert.strictEqual(started.verificationUri, "https://portal.nousresearch.com/device?user_code=NOUS-1");
+  assert.deepStrictEqual(
+    { client: calls[0].body.client_id, scope: calls[0].body.scope },
+    { client: "hermes-cli", scope: "inference:invoke" }
+  );
+  assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "pending");
+  await new Promise((r) => setTimeout(r, 1050));
+  assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "done");
+  const tokenCall = calls.find((c) => c.url.includes("/api/oauth/token"));
+  assert.strictEqual(tokenCall.body.grant_type, "urn:ietf:params:oauth:grant-type:device_code");
+  assert.strictEqual(tokenCall.body.device_code, "dev-n1");
+  const [conn] = getConnections("nous");
+  assert.deepStrictEqual(
+    { access: conn.credentials.access_token, refresh: conn.credentials.refresh_token },
+    { access: "acc-n", refresh: "ref-n" }
+  );
+});
+
+test("nous device flow - access_denied and expired_token end the flow with an error", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  mockFetch({
+    "portal.nousresearch.com/api/oauth/device/code": json({
+      device_code: "dev-n2",
+      user_code: "NOUS-2",
+      verification_uri: "https://portal.nousresearch.com/device",
+      expires_in: 900,
+      interval: 1,
+    }),
+    "portal.nousresearch.com/api/oauth/token": json({ error: "access_denied" }, 400),
+  });
+  const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+  const result = await pollOAuthFlow(started.flowId);
+  assert.strictEqual(result.status, "error");
+  assert.strictEqual(getConnections("nous").length, 0);
+});
+
+test("nous refresh - rotated pair is saved and the old refresh token is sent in the header", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "old-a", refresh_token: "old-r", expires_at: Date.now() - 1000 },
+  });
+  const calls = mockFetch({
+    "portal.nousresearch.com/api/oauth/token": json({
+      access_token: "new-a",
+      refresh_token: "new-r",
+      token_type: "Bearer",
+      expires_in: 3600,
+    }),
+  });
+  const refreshed = await refreshOAuthToken(conn, { force: true });
+  assert.ok(refreshed);
+  assert.strictEqual(calls[0].headers["x-nous-refresh-token"], "old-r");
+  assert.strictEqual(calls[0].body.grant_type, "refresh_token");
+  assert.strictEqual(calls[0].body.client_id, "hermes-cli");
+  const stored = getConnections("nous")[0].credentials;
+  assert.deepStrictEqual({ a: stored.access_token, r: stored.refresh_token }, { a: "new-a", r: "new-r" });
+});
+
+test("nous refresh - a 400 from the token endpoint is terminal and keeps the account without new tokens", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ error: "refresh_token_reused" }, 400) });
+  await assert.rejects(refreshOAuthToken(conn, { force: true }));
+  const stored = getConnections("nous")[0].credentials;
+  assert.strictEqual(stored.refresh_token, "r0");
+});
+
+test("nous - provider page offers the browser login and the connection sends the OAuth access token as Bearer", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const html = await (await app.request("/dashboard/providers/nous")).text();
+  assert.ok(html.includes("/dashboard/oauth/start"), "login start is offered for nous");
+  const headers = applyConnectionAuth({}, {
+    provider: "nous",
+    auth_type: "oauth",
+    credentials: { access_token: "acc-n", refresh_token: "ref-n" },
+  });
+  assert.strictEqual(headers.Authorization, "Bearer acc-n");
+});
+
+test("nous refresh - a response without a new refresh token fails instead of reusing the spent one", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ access_token: "a1", expires_in: 3600 }) });
+  await assert.rejects(refreshOAuthToken(conn, { force: true }));
+  const stored = getConnections("nous")[0].credentials;
+  assert.deepStrictEqual({ a: stored.access_token, r: stored.refresh_token }, { a: "a0", r: "r0" });
+});
+
+test("nous poll - a token endpoint that never answers is aborted and the login keeps polling", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  let aborted = false;
+  setOAuthFetch(async (url, init = {}) => {
+    if (String(url).includes("/api/oauth/device/code")) {
+      return json({ device_code: "dev-t", user_code: "T-1", verification_uri: "https://portal.nousresearch.com/device", expires_in: 900, interval: 1 });
+    }
+    // Keep a live timer so the event loop does not exit before the abort fires.
+    const keepAlive = setInterval(() => {}, 50);
+    return new Promise((_, reject) => {
+      init.signal?.addEventListener("abort", () => {
+        aborted = true;
+        clearInterval(keepAlive);
+        reject(new Error("aborted"));
+      });
+    });
+  });
+  const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+  const result = await pollOAuthFlow(started.flowId);
+  assert.strictEqual(aborted, true, "the token request must carry an abort signal");
+  assert.strictEqual(result.status, "pending", "one stalled poll must not end the login; it is retried until the code expires");
+}, { timeout: 15000 });
+
+test("nous poll - slow_down raises the polling interval by five seconds", async (t) => {
+  t.after(reset);
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  initDb(":memory:");
+  const calls = mockFetch({
+    "portal.nousresearch.com/api/oauth/device/code": json({
+      device_code: "dev-s", user_code: "S-1", verification_uri: "https://portal.nousresearch.com/device", expires_in: 900, interval: 1,
+    }),
+    "portal.nousresearch.com/api/oauth/token": json({ error: "slow_down" }, 400),
+  });
+  const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+  const tokenCalls = () => calls.filter((c) => c.url.includes("/api/oauth/token")).length;
+
+  assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "pending");
+  assert.strictEqual(tokenCalls(), 1);
+
+  // The base interval is 1s. With the 5s penalty the next request is due at 6s, not 1s.
+  t.mock.timers.tick(5999);
+  await pollOAuthFlow(started.flowId);
+  assert.strictEqual(tokenCalls(), 1, "no request before the widened 6 second interval");
+
+  t.mock.timers.tick(1);
+  await pollOAuthFlow(started.flowId);
+  assert.strictEqual(tokenCalls(), 2, "the request resumes exactly at 6 seconds");
+});
+
+test("nous refresh - after an expired grant the account is marked for login and is not refreshed again", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  const calls = mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ error: "invalid_grant" }, 400) });
+  await assert.rejects(refreshOAuthToken(conn, { force: true }));
+  await scanAndRefreshTokens();
+  await scanAndRefreshTokens();
+  const tokenCalls = calls.filter((c) => c.url.includes("/api/oauth/token")).length;
+  assert.strictEqual(tokenCalls, 1, "a dead grant must not be sent again by the scheduler");
+  assert.strictEqual(getConnections("nous")[0].credentials.needs_login, true);
+});
+
+test("nous refresh - a fresh login after a dead grant starts without the needs_login flag", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const dead = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000, needs_login: true },
+  });
+  const saved = saveOAuthConnection("nous", { access_token: "a-new", refresh_token: "r-new", expires_in: 3600 }, { name: "Nous" });
+  assert.notStrictEqual(saved.id, dead.id);
+  assert.strictEqual(saved.credentials.needs_login, undefined);
+  assert.strictEqual(saved.credentials.refresh_token, "r-new");
+});
+
+test("nous refresh - a forced or fallback refresh does not resend a grant already marked for login", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000, needs_login: true },
+  });
+  const calls = mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ access_token: "a1", refresh_token: "r1", expires_in: 3600 }) });
+  await assert.rejects(refreshOAuthToken(conn, { force: true }), /login is required/);
+  await assert.rejects(refreshOAuthToken(conn), /login is required/);
+  assert.strictEqual(calls.filter((c) => c.url.includes("/api/oauth/token")).length, 0);
+});
+
+test("nous refresh - a marked account stays blocked until a fresh login replaces the row", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ error: "invalid_grant" }, 400) });
+  await assert.rejects(refreshOAuthToken(conn, { force: true }));
+  assert.strictEqual(getConnections("nous")[0].credentials.needs_login, true, "the 400 marks the account");
+
+  const calls = mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ access_token: "a1", refresh_token: "r1", expires_in: 3600 }) });
+  await assert.rejects(refreshOAuthToken(getConnections("nous")[0], { force: true }), /login is required/);
+  assert.strictEqual(calls.length, 0, "no token request while the flag is set");
+
+  const fresh = saveOAuthConnection("nous", { access_token: "a-new", refresh_token: "r-new", expires_in: 3600 }, { name: "Nous" });
+  assert.strictEqual(fresh.credentials.needs_login, undefined, "a fresh login starts clean");
+});
+
+test("nous routing - an account marked needs_login is skipped, a fresh login is used", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const dead = addConnection({
+    provider: "nous",
+    name: "Nous lama",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000, needs_login: true },
+  });
+  const fresh = saveOAuthConnection("nous", { access_token: "a-new", refresh_token: "r-new", expires_in: 3600 }, { name: "Nous baru" });
+  const picked = getNextConnection("nous");
+  assert.ok(picked, "a usable account exists");
+  assert.strictEqual(picked.id, fresh.id, "the dead account must not be chosen");
+  assert.notStrictEqual(picked.id, dead.id);
+});
+
+test("nous routing - when every account needs a login the 503 says so", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000, needs_login: true },
+  });
+  const res = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "nous/Hermes-4-405B", messages: [{ role: "user", content: "hi" }] }),
+  });
+  assert.strictEqual(res.status, 503);
+  const body = await res.json();
+  assert.strictEqual(body.error.code, "no_available_connection");
+  assert.match(body.error.message, /1 account.*login/i);
+});
+
+test("nous poll - a body that stalls after the headers, or a 5xx, keeps the login polling", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  let mode = "stall";
+  setOAuthFetch(async (url, init = {}) => {
+    if (String(url).includes("/api/oauth/device/code")) {
+      return json({ device_code: "dev-b", user_code: "B-1", verification_uri: "https://portal.nousresearch.com/device", expires_in: 900, interval: 1 });
+    }
+    if (mode === "5xx") return new Response("bad gateway", { status: 502 });
+    const keepAlive = setInterval(() => {}, 50);
+    const body = new ReadableStream({
+      start(controller) {
+        init.signal?.addEventListener("abort", () => {
+          clearInterval(keepAlive);
+          controller.error(new Error("aborted"));
+        });
+      },
+    });
+    return new Response(body, { status: 200 });
+  });
+  const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+  assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "pending", "stalled body");
+  mode = "5xx";
+  await new Promise((r) => setTimeout(r, 1100));
+  assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "pending", "5xx from the token endpoint");
+}, { timeout: 20000 });
+
+test("nous poll - a JSON null or non-object body does not crash the poll", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  let body = "null";
+  let status = 200;
+  setOAuthFetch(async (url) => {
+    if (String(url).includes("/api/oauth/device/code")) {
+      return json({ device_code: "dev-n", user_code: "N-1", verification_uri: "https://portal.nousresearch.com/device", expires_in: 900, interval: 1 });
+    }
+    return new Response(body, { status });
+  });
+  const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+  const first = await pollOAuthFlow(started.flowId);
+  assert.strictEqual(first.status, "error");
+  assert.match(first.error, /pasangan token/, "a null body is reported as an incomplete token pair, not a TypeError");
+});
+
+test("nous login - a malformed device code response or token pair is rejected instead of stored", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const dev = { device_code: "d", user_code: "U", verification_uri: "https://portal.nousresearch.com/device", expires_in: 900, interval: 1 };
+
+  setOAuthFetch(async () => json({ ...dev, device_code: undefined }));
+  await assert.rejects(startOAuthFlow({ providerId: "nous", origin: ORIGIN }), /device code/i);
+
+  for (const tok of [{ access_token: 123, refresh_token: "r" }, { access_token: "a" }]) {
+    resetOAuthFlows();
+    setOAuthFetch(async (url) => (String(url).includes("device/code") ? json(dev) : json({ ...tok, expires_in: 3600 })));
+    const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+    assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "error", JSON.stringify(Object.keys(tok)));
+    assert.strictEqual(getConnections("nous").length, 0, "nothing is stored for an unusable token pair");
+  }
+});
+
+test("nous refresh - a non-string access token is rejected and the stored pair is kept", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ access_token: 5, refresh_token: "r1", expires_in: 3600 }) });
+  await assert.rejects(refreshOAuthToken(conn, { force: true }));
+  const stored = getConnections("nous")[0].credentials;
+  assert.deepStrictEqual({ a: stored.access_token, r: stored.refresh_token }, { a: "a0", r: "r0" });
+});
+
+test("nous tokens - an invalid expires_in falls back to one hour on login and on refresh", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const dev = { device_code: "d", user_code: "U", verification_uri: "https://portal.nousresearch.com/device", expires_in: 900, interval: 1 };
+  for (const bad of ["abc", -5, 0, null, "Infinity", 1e309, 1e12]) {
+    resetOAuthFlows();
+    setOAuthFetch(async (url) => (String(url).includes("device/code") ? json(dev) : json({ access_token: "a", refresh_token: "r", expires_in: bad })));
+    const started = await startOAuthFlow({ providerId: "nous", origin: ORIGIN });
+    assert.strictEqual((await pollOAuthFlow(started.flowId)).status, "done", `login with expires_in=${bad}`);
+    const login = getConnections("nous").at(-1).credentials;
+    const loginTtl = login.expires_at - Date.now();
+    assert.ok(loginTtl > 3_500_000 && loginTtl <= 3_600_000, `login ttl for ${bad}: ${loginTtl}`);
+  }
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous refresh",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  mockFetch({ "portal.nousresearch.com/api/oauth/token": json({ access_token: "a1", refresh_token: "r1", expires_in: "Infinity" }) });
+  await refreshOAuthToken(conn, { force: true });
+  const refreshTtl = getConnections("nous").find((c) => c.id === conn.id).credentials.expires_at - Date.now();
+  assert.ok(refreshTtl > 3_500_000 && refreshTtl <= 3_600_000, `refresh ttl: ${refreshTtl}`);
+});
+
+test("nous refresh - a non-JSON 200 response fails with a clear message and keeps the stored pair", async (t) => {
+  t.after(reset);
+  initDb(":memory:");
+  const conn = addConnection({
+    provider: "nous",
+    name: "Nous",
+    auth_type: "oauth",
+    credentials: { access_token: "a0", refresh_token: "r0", expires_at: Date.now() - 1000 },
+  });
+  setOAuthFetch(async () => new Response("<html>gateway</html>", { status: 200 }));
+  await assert.rejects(refreshOAuthToken(conn, { force: true }), /invalid JSON/);
+  const stored = getConnections("nous")[0].credentials;
+  assert.deepStrictEqual({ a: stored.access_token, r: stored.refresh_token }, { a: "a0", r: "r0" });
+});

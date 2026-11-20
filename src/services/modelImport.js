@@ -43,6 +43,28 @@ function payloadSaysFree(m) {
   return Boolean(p) && Number(p.prompt) === 0 && Number(p.completion) === 0;
 }
 
+/** Capability metadata Nous publishes; only values the payload actually carries. */
+function nousCapabilities(m) {
+  const out = {};
+  const ctx = Number(m.top_provider?.context_length ?? m.context_length);
+  if (ctx > 0) out.context_length = ctx;
+  const maxOut = Number(m.top_provider?.max_completion_tokens);
+  if (maxOut > 0) out.max_output_tokens = maxOut;
+  if (Array.isArray(m.architecture?.input_modalities)) out.vision = m.architecture.input_modalities.includes("image");
+  if (Array.isArray(m.supported_parameters)) {
+    out.tools = m.supported_parameters.includes("tools");
+    out.reasoning = m.supported_parameters.includes("reasoning") || m.supported_parameters.includes("include_reasoning");
+  } else if (typeof m.reasoning === "object" && m.reasoning) out.reasoning = true;
+  return Object.keys(out).length ? out : undefined;
+}
+
+function nousIsChat(m) {
+  const outputs = m.architecture?.output_modalities;
+  if (Array.isArray(outputs) && !outputs.includes("text")) return false;
+  const eps = m.endpoints;
+  return !Array.isArray(eps) || eps.some((e) => /\/chat\/completions$/.test(String(e)));
+}
+
 function cleanClineDisplayName(rawName, id) {
   let name = rawName || id || "";
   for (const prefix of ["cline-free/", "cline-pass/", "cline-cloud/"]) {
@@ -113,6 +135,17 @@ const IMPORTERS = {
     public: true,
     modes: ["all", "free"],
     parse: (json) => listOf(json).map((m) => ({ id: m.id, name: m.name || m.id, isFree: payloadSaysFree(m) })),
+  },
+  nous: {
+    url: "https://inference-api.nousresearch.com/v1/models",
+    public: true,
+    // Free-only: paid catalog entries are never exposed, and free models are
+    // synced automatically (freeModelSync), so there is no import choice.
+    modes: [],
+    parse: (json) =>
+      listOf(json)
+        .filter((m) => m && nousIsChat(m) && payloadSaysFree(m))
+        .map((m) => ({ id: m.id, name: m.name || m.id, isFree: true, capabilities: nousCapabilities(m) })),
   },
   glm: {
     url: "https://api.z.ai/api/coding/paas/v4/models",

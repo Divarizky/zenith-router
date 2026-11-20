@@ -1,4 +1,5 @@
 import { getProvider } from "../providers/index.js";
+import { listSyncedModels } from "./modelOverrides.js";
 import { getConnections } from "../db/index.js";
 import { applyConnectionAuth } from "./auth.js";
 import { requireResolvedProxy } from "./proxyPools.js";
@@ -89,6 +90,10 @@ export async function testConnection(providerId, options = {}) {
       return { ok: false, error: `HTTP ${status}: Gagal menguji sesi Freebuff` };
     }
 
+    // 3b. Nous: GET /v1/models bersifat publik, jadi sukses di sana bukan bukti
+    // akses. Uji dengan chat minimal ke model gratis.
+    if (provider.id === "nous") return await probeNousChat(provider, connection);
+
     // 4. Provider yang memiliki importer model (OpenAI-compatible list, Ollama, OVHcloud, OpenCode, dll)
     const importer = getImporter(provider.id);
     if (importer) {
@@ -162,5 +167,42 @@ export async function testConnection(providerId, options = {}) {
     return { ok: false, error: `HTTP ${res.status}` };
   } catch (err) {
     return { ok: false, error: err.message || "koneksi gagal" };
+  }
+}
+
+const NOUS_PROBE_BODY = { messages: [{ role: "user", content: "hi" }], max_tokens: 1, stream: false };
+
+/** Minimal chat probe against a free Nous model; maps status codes to honest outcomes. */
+async function probeNousChat(provider, connection) {
+  let model = listSyncedModels(provider.id)[0]?.model_id;
+  if (!model) {
+    const fetched = await fetchProviderModels(provider);
+    model = fetched.ok ? fetched.models.find((m) => m.isFree)?.id : null;
+  }
+  if (!model) return { ok: false, error: "Tidak ada model gratis Nous untuk diuji." };
+
+  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  applyConnectionAuth(headers, connection);
+  const res = await getExecutor(provider.id).execute({
+    url: provider.transport.baseUrl,
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...NOUS_PROBE_BODY, model }),
+    timeoutMs: TEST_TIMEOUT_MS,
+    proxyUrl: requireResolvedProxy(connection),
+  });
+  if (res.ok) return { ok: true, details: `Chat ke model gratis ${model} berhasil.` };
+  switch (res.status) {
+    case 401:
+    case 403:
+      return { ok: false, error: `HTTP ${res.status}: API key ditolak atau tidak punya akses.` };
+    case 402:
+      return { ok: false, error: "HTTP 402: kredit/pembayaran diperlukan." };
+    case 404:
+      return { ok: false, error: `HTTP 404: model ${model} tidak ditemukan.` };
+    case 429:
+      return { ok: true, details: "Key valid, tetapi terkena rate limit (HTTP 429)." };
+    default:
+      return { ok: false, error: `HTTP ${res.status}` };
   }
 }

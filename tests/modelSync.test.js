@@ -503,13 +503,14 @@ test("sync - only providers with freeModelSync; disabled toggles still apply", a
     "kilo-free",
     "kilocode",
     "llm7",
+    "nous",
     "ollama",
     "opencode",
     "openrouter",
     "xkiro",
   ]);
-  // 9 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff dan glm return no_account tanpa calls
-  assert.strictEqual(calls.length, 10);
+  // 10 public providers make calls (+1 dari sync commandcode langsung di atas); freebuff dan glm return no_account tanpa calls
+  assert.strictEqual(calls.length, 11);
 
   disableModel("opencode", "exo-free");
   assert.ok(!ids().includes("oc/exo-free"));
@@ -608,4 +609,97 @@ test("dashboard - Sync Now redirects with a notice and the page shows synced row
   html = await (await app.request(failed.headers.get("location"))).text();
   assert.ok(html.includes("Sinkron gagal (HTTP 502)"));
   assert.ok(html.includes("gagal:"));
+});
+
+const nousModel = (id, extra = {}) => ({
+  id,
+  name: `Nous ${id}`,
+  context_length: 262144,
+  architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+  endpoints: ["/api/v1/chat/completions"],
+  pricing: { prompt: "0.000003", completion: "0.000015" },
+  ...extra,
+});
+const NOUS_FREE_PRICING = { prompt: "0", completion: "0" };
+
+test("nous - registry has no static models, so nothing is listed before the first sync", () => {
+  initDb(":memory:");
+  const provider = getProvider("nous");
+  assert.strictEqual(provider.category, "apikey");
+  assert.strictEqual(provider.freeModelSync, "merge");
+  assert.deepStrictEqual(getProviderModels(provider), []);
+  assert.strictEqual(getImportModes(provider).length, 0, "no 'all' import for a free-only feature");
+});
+
+test("nous sync - publishes only free chat models and carries metadata", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  const calls = mockUpstream({
+    "inference-api.nousresearch.com/v1/models": {
+      payload: {
+        data: [
+          nousModel("a/free-one:free", {
+            pricing: NOUS_FREE_PRICING,
+            architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+            top_provider: { context_length: 100000, max_completion_tokens: 8000 },
+            supported_parameters: ["tools", "reasoning"],
+          }),
+          nousModel("b/free-two", { pricing: NOUS_FREE_PRICING }),
+          nousModel("c/paid"),
+          nousModel("d/free-embed:free", { endpoints: ["/api/v1/embeddings"] }),
+        ],
+      },
+    },
+  });
+  const result = await syncFreeModels("nous");
+  assert.deepStrictEqual(result, { code: "synced", count: 2 });
+  assert.strictEqual(calls[0].method, "GET");
+  const ids = getProviderModels(getProvider("nous")).map((m) => m.id);
+  assert.deepStrictEqual(ids.sort(), ["a/free-one:free", "b/free-two"]);
+
+  const rows = Object.fromEntries(listSyncedModels("nous").map((r) => [r.model_id, JSON.parse(r.capabilities)]));
+  assert.deepStrictEqual(rows["a/free-one:free"], {
+    context_length: 100000,
+    max_output_tokens: 8000,
+    vision: true,
+    tools: true,
+    reasoning: true,
+  });
+  assert.deepStrictEqual(rows["b/free-two"], { context_length: 262144, vision: false }, "no max-output, tools or reasoning claimed without data");
+});
+
+test("nous sync - added and removed free models follow the catalog", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  const free = (id) => nousModel(id, { pricing: NOUS_FREE_PRICING });
+  mockUpstream({ "nousresearch.com/v1/models": { payload: { data: [free("m/one"), free("m/two")] } } });
+  await syncFreeModels("nous");
+  mockUpstream({ "nousresearch.com/v1/models": { payload: { data: [free("m/two"), free("m/three")] } } });
+  await syncFreeModels("nous");
+  assert.deepStrictEqual(listSyncedModels("nous").map((r) => r.model_id), ["m/three", "m/two"]);
+});
+
+test("nous sync - upstream error, malformed and empty payloads keep the last-known-good list", async (t) => {
+  t.after(() => setCustomExecutor(null));
+  initDb(":memory:");
+  // Before any success: failure leaves the list empty.
+  mockUpstream({ "nousresearch.com/v1/models": { payload: {}, status: 503 } });
+  assert.strictEqual((await syncFreeModels("nous")).code, "upstream_error");
+  assert.deepStrictEqual(getProviderModels(getProvider("nous")), []);
+
+  mockUpstream({
+    "nousresearch.com/v1/models": { payload: { data: [nousModel("m/keep", { pricing: NOUS_FREE_PRICING })] } },
+  });
+  await syncFreeModels("nous");
+
+  mockUpstream({ "nousresearch.com/v1/models": { payload: {}, status: 500 } });
+  assert.strictEqual((await syncFreeModels("nous")).code, "upstream_error");
+  mockUpstream({ "nousresearch.com/v1/models": { payload: { data: "garbage" } } });
+  assert.strictEqual((await syncFreeModels("nous")).code, "empty");
+  mockUpstream({ "nousresearch.com/v1/models": { payload: { data: [nousModel("m/paid")] } } });
+  assert.strictEqual((await syncFreeModels("nous")).code, "empty");
+  setCustomExecutor({ execute: async () => { throw new Error("timeout"); } });
+  assert.strictEqual((await syncFreeModels("nous")).code, "upstream_error");
+
+  assert.deepStrictEqual(listSyncedModels("nous").map((r) => r.model_id), ["m/keep"]);
 });

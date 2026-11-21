@@ -4,15 +4,40 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
 
 ### Fitur
 
-- **Provider Nous Research**:
-  - Provider `nous` (apikey) memakai `freeModelSync: "merge"` tanpa model bawaan; model gratis diambil dari `/v1/models` publik dan ikut jadwal sinkron 6 jam. Gagal/kosong mempertahankan daftar terakhir yang berhasil.
+- **Provider Nous Research / Hermes**:
+  - Provider `nous` (apikey dan OAuth device code) memakai `freeModelSync: "merge"` tanpa model bawaan; model gratis diambil dari `/v1/models` publik dan ikut jadwal sinkron 6 jam. Gagal/kosong mempertahankan daftar terakhir yang berhasil.
+  - Ikon resmi provider Hermes (`public/providers/nous.png`) pada UI dan dashboard.
+  - Pacing serial turns (`concurrency: 1`, `serialTurns: true`, `softRateLimit: true`, `throttleMs: 2500`) untuk menjaga agar request concurrent tidak melampaui fair-share rate limit jendela model gratis Nous (seperti `qwen4-max`).
+  - Parsing langsung field `retry_after` dari payload error respons HTTP 429 upstream (baik format numerik maupun string detik) ke durasi cooldown akun lokal dalam milidetik dan penetapan header `Retry-After`.
   - Konteks, output maksimum, vision, tools, dan reasoning dicatat bila upstream menyediakannya.
   - Uji koneksi memakai chat minimal ke model gratis (401/403, 402, 404, 429, 2xx dipetakan terpisah), bukan GET daftar model publik.
   - Belum ada dukungan tanpa key atau pembayaran x402; kebutuhan tag pada request chat belum terverifikasi, sehingga tidak ada transformasi khusus Nous.
 - **Login OAuth Nous Research**:
   - Login device code (client `hermes-cli`, scope `inference:invoke`, bisa diganti lewat `ZENITH_NOUS_CLIENT_ID`). Polling mengikuti `slow_down` (+5 detik), timeout 10 detik, dan error jaringan atau 5xx dianggap sementara.
   - Kredensial refresh berputar tiap grant. Refresh ditolak (400) menandai akun `needs_login`: tidak di-refresh lagi, dilewati routing, dan pesan 503 menyebutnya. Login ulang membuat akun baru.
-  - Belum diuji dengan akun Nous sungguhan: endpoint, format respons, dan client ID bersumber dari klien pihak ketiga. UI belum menampilkan status `needs_login`.
+- **Cloudflare WARP Lanes & Rotasi 429 Fire-and-Forget**:
+  - Skrip otomasi `scripts/setupWarpLanes.js` untuk menyiapkan 10 lane per-node (`warp-node-1` s.d. `warp-node-10` di port 3129–3138) dan optional load balancer `warp-gate` (port 3128) dari konfigurasi pool WARP lokal.
+  - Sinyal rotasi 429 fire-and-forget (`signalProxy429` / `signalWarp429`) dengan payload asinkron `{ node, model, async: true }` ke endpoint `/signal/429` (default port 8405) untuk memicu rotasi node WARP tanpa memblokir request stream klien.
+  - Deduplikasi sinyal rotasi dengan debounce 2 detik dan pemisahan kanal kegagalan: node WARP hanya mengirim sinyal 429 asinkron tanpa menembak webhook `rotate_url` ganda.
+  - Pelestarian status cooldown gerbang lokal (*gate cooldown*) setelah menerima HTTP 200 async ack dari service rotasi WARP, mencegah request langsung membanjiri node sebelum rotasi fisik IP di node selesai.
+- **Manajemen Akun Terikat & Visibilitas Proxy Pool**:
+  - Pengelolaan bound accounts langsung dari modal edit proxy di dashboard: checklist koneksi akun untuk mengikat atau melepas banyak akun sekaligus ke pool tertentu.
+  - Badge indikator status proxy pada provider noAuth di halaman Providers: `Proxy Pool` (rotasi bergiliran / acak), `Proxy` (terikat ke proxy tertentu), atau `Langsung (Tanpa Proxy)`.
+  - Prioritisasi proxy sehat (*healthy proxies prioritization*) saat rotasi round-robin atau acak: mendahulukan proxy aktif yang tidak berstatus exhausted atau dalam masa gate cooldown.
+- **Proxy Gateway Tunggal untuk Provider Publik**:
+  - Entri proxy punya tipe `gateway` dengan `retry_budget` (1-5): satu alamat load balancer dicoba ulang beberapa kali dalam satu request, sehingga tiap percobaan bisa jatuh ke node egress berbeda.
+  - Penolakan gerbang OpenCode (403 FreeTierError, 429 FreeUsageLimitError) pada proxy gateway baru mengunci rute setelah `retry_budget` penolakan beruntun.
+  - Webhook rotasi opsional per proxy (`rotate_url` + token bearer) dipanggil tanpa memblokir request saat terjadi 403/429 atau error di tengah stream, dengan debounce 10 detik.
+  - Dashboard Proxy Pools menampilkan tipe, retry budget, dan webhook; token disamarkan.
+- **Peningkatan OpenAI Codex & Responses**:
+  - Sinkronisasi katalog model Codex otomatis di latar belakang pasca login OAuth tanpa membatalkan status koneksi login atau menghapus model lama.
+  - Pembuatan otomatis `prompt_cache_key` dan propagasi `prompt_cache_retention` untuk memaksimalkan efisiensi prompt cache upstream OpenAI Responses.
+  - Pelaporan dan normalisasi `cached_tokens` pada Responses API melalui `normalizeUsage` serta pencatatan token usage estimated.
+  - Dukungan penuh tangga level thinking dari `low` hingga `max` (termasuk `xhigh` dan `max`) untuk model Codex `gpt-6` dan `gpt-5.6`.
+  - Pembatasan transmisi field Responses (`reasoning`, `prompt_cache_key`, `prompt_cache_retention`) hanya untuk provider Codex agar kompatibel dengan upstream Responses lainnya.
+- **Tingkat Berpikir Antigravity & Diagnostik**:
+  - Dukungan level thinking `xhigh` pada model Antigravity (varian `(XHigh)` dan suffix `xhigh`).
+  - Tracer sidik jari prefix prompt opt-in (`ZENITH_CACHE_TRACE=1`) untuk memantau konsistensi cache konteks upstream.
 - **Pencocokan Katalog Provider**:
   - Penanda `catalogRefresh` membuat sinkron menulis ulang tabel `retired_models` dari daftar live provider, tanpa mengubah daftar model gratis.
   - `builtinAliases` melindungi id yang bisa dipanggil tetapi tidak pernah dipublikasikan, seperti alias `default` dan `fast` milik LLM7.
@@ -22,17 +47,32 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
   - OVHcloud hanya menjalankan pencocokan katalog, karena akses gratisnya berupa kredit akun dan bukan tier per model.
 - **Combo Terkelola Ikut Diperbarui**:
   - Aksi "Sinkron Sekarang" dan "Import Models" langsung menyusun ulang combo zenith tanpa menunggu siklus scheduler, dan tanpa menembak model ke upstream.
-- **Proxy Gateway Tunggal untuk Provider Publik**:
-  - Entri proxy punya tipe `gateway` dengan `retry_budget` (1-5): satu alamat load balancer dicoba ulang beberapa kali dalam satu request, sehingga tiap percobaan bisa jatuh ke node egress berbeda.
-  - Penolakan gerbang OpenCode (403 FreeTierError, 429 FreeUsageLimitError) pada proxy gateway baru mengunci rute setelah `retry_budget` penolakan beruntun.
-  - Webhook rotasi opsional per proxy (`rotate_url` + token bearer) dipanggil tanpa memblokir request saat terjadi 403/429 atau error di tengah stream, dengan debounce 10 detik.
-  - Dashboard Proxy Pools menampilkan tipe, retry budget, dan webhook; token disamarkan.
+- **Managed Smart Combos & Benchmark**:
+  - Penambahan `sortFastTierModels()` pada `managedCombos` untuk merangking `zenith-fast` berdasarkan latensi terukur, tingkat kegagalan, arsitektur cepat (`flash`/`mini`/`nano`/`lite`), dan ukuran parameter kecil.
+  - Pelestarian `strategy` dan status `enabled` milik pengguna pada `saveCombo()` serta penyaringan provider berakun tanpa koneksi aktif saat `syncManagedCombos()` otomatis.
+  - Pengurutan kualitas koding dasar bagi sesama model yang diparkir pada `zenith-cooldown` dan pembungkus transaksi SQLite atomik saat sinkronisasi combo.
 
 ### Perbaikan
 
-- Sinkron yang mengembalikan daftar kosong tidak lagi menyembunyikan seluruh model bawaan.
-- Cooldown virtual provider publik tidak lagi dipasang selama masih ada percobaan proxy tersisa dalam request yang sama.
-- Stream Gemini yang berakhir tanpa `finishReason` kini ditutup eksplisit (tool_calls bila tool call sudah terkirim, error frame bila tidak) dan punya trace diagnostik opsional `ZENITH_STREAM_TRACE=1`.
+- **OpenCode Bridge & Tunneling**:
+  - Penerusan proxy langsung ke opsi fetch bawaan Bun pada bridge worker alih-alih dispatcher undici untuk mencegah kebocoran IP host.
+  - Penanganan event exit pada worker Bun dengan pembersihan state dan auto-respawn otomatis saat worker berhenti.
+  - Penerusan konfigurasi proxy ke bridge lokal melalui header internal untuk mencegah pemicuan error HTTP 405.
+  - Penanganan respons upstream tanpa body (status 204, 205, 304) agar tidak melempar pengecualian saat konstruksi `Response`.
+  - Perbaikan timestamp debounce pada rotasi proxy tertunda dan pembatasan cabang cooldown midnight hanya untuk `FreeUsageLimitError` (429 biasa menggunakan eskalasi normal).
+  - Konsistensi dispatch bridge pada retry gerbang OpenCode dan penambahan timeout header serta pembatalan request.
+- **Model Sync & Gateway**:
+  - Sinkron yang mengembalikan daftar kosong tidak lagi menyembunyikan seluruh model bawaan.
+  - Cooldown virtual provider publik tidak lagi dipasang selama masih ada percobaan proxy tersisa dalam request yang sama.
+  - Stream Gemini yang berakhir tanpa `finishReason` kini ditutup eksplisit (tool_calls bila tool call sudah terkirim, error frame bila tidak) dan punya trace diagnostik opsional `ZENITH_STREAM_TRACE=1`.
+  - Pembersihan artefak bracket yatim (`!]`, `$]`, `*]`) pada output stream Gemini.
+  - Pengambilan metrik token penggunaan akumulatif (`accumulated_token_usage`) dari event stream DeepSeek Web sebagai data diagnostik tanpa merusak unit estimasi lokal.
+  - Sinkronisasi versi berkas `package-lock.json` dengan `package.json` v2.2.0.
+- **Smart Combos, Benchmark & UI**:
+  - Perbaikan urutan degradasi `probeSmartTier()` menjadi `[...healthy, ...rest, ...degraded]`, sinkronisasi degradasi ke `zenith-free`/`zenith-cooldown`, serta penanganan `transportError` lokal saat startup.
+  - Penambahan `INTERNAL_PROBE_TOKEN` loopback dan header `x-zenith-no-failover: 1` pada `testModelHealth()`, serta pemindahan `serve()` sebelum scheduler background untuk mencegah race condition double-sync saat startup.
+  - Penghapusan `max_tokens` dari prioritas awal context length pada `passesAgenticGate()`, penambahan guard varian ringan (`mini`/`nano`/`lite`/`flash`) & non-coding pada pencocokan benchmark, serta penyelarasan ambang `determineTier()`.
+  - Optimasi performa: `toPercentiles()` single-pass linear $O(M)$, paralelisasi `refreshBenchmarkSnapshot()`, Schwartzian transform $O(N)$ pada `sortModelsByCodingQuality()`, caching per-koneksi SQLite berbasis `total_changes()` + `buildSyncedCapabilitiesLookup()` untuk menghapus N+1 query, serta eliminasi duplikasi DOM $O(N^2)$ via `remove_index` dan `data-copy-text` pada UI Combos.
 
 ## [2.2.0] - 11-11-2026
 

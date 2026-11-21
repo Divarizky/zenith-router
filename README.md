@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen.svg" alt="Node.js version"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/version-2.1.0-blue.svg" alt="Version"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/version-2.2.0-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/architecture-zero--telemetry-success.svg" alt="Zero Telemetry">
   <img src="https://img.shields.io/badge/storage-node%3Asqlite-orange.svg" alt="Embedded SQLite">
@@ -15,7 +15,7 @@
 
 ---
 
-Zenith Router adalah gateway AI lokal mandiri untuk coding agents (Pi, Cursor, Claude Code, Cline, Roo Code, Aider) dan aplikasi apa pun yang menggunakan protokol OpenAI/Anthropic. Satu endpoint menerima permintaan berformat OpenAI Chat Completions, Anthropic Messages, maupun OpenAI Responses, lalu meneruskannya ke akun provider milik Anda sendiri: langganan Claude Pro/Team, ChatGPT/Codex, GitHub Copilot, Kiro, Antigravity, Cline, API key provider, sesi web DeepSeek, atau provider gratis dengan rotasi akun dan failover otomatis.
+Zenith Router adalah gateway AI lokal mandiri untuk coding agents (Pi, Cursor, Claude Code, Cline, Roo Code, Aider) dan aplikasi apa pun yang menggunakan protokol OpenAI/Anthropic. Satu endpoint menerima permintaan berformat OpenAI Chat Completions, Anthropic Messages, maupun OpenAI Responses, lalu meneruskannya ke akun provider milik Anda sendiri: langganan Claude Pro/Team, ChatGPT/Codex, GitHub Copilot, Kiro, Antigravity, Cline, API key provider, sesi web DeepSeek, Nous Portal / Hermes, atau provider gratis dengan rotasi akun dan failover otomatis.
 
 Zenith Router berjalan 100% lokal, tanpa akun cloud perantara, tanpa analitik atau telemetry, dan tanpa dependensi runtime berat. Seluruh kredensial tersimpan aman di database SQLite lokal mesin Anda.
 
@@ -42,8 +42,8 @@ Zenith Router berjalan 100% lokal, tanpa akun cloud perantara, tanpa analitik at
 └────────────────────────────────────────────────────────────────────────┘
              │
              ▼
-[ Upstream AI Providers ] (20 Built-in Providers + Custom BYOP)
-Claude · Codex · Copilot · Kiro · Antigravity · GLM · OpenRouter · BYOP...
+[ Upstream AI Providers ] (21 Built-in Providers + Custom BYOP)
+Claude · Codex · Copilot · Kiro · Antigravity · GLM · Nous · OpenRouter · BYOP...
 ```
 
 ---
@@ -51,19 +51,21 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · OpenRouter · BYOP..
 ## ✨ Fitur Utama
 
 - **Protokol Terpadu & Universal Translator:** Menerima format OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), dan OpenAI Responses (`/v1/responses`), baik streaming SSE maupun non-streaming. Translasi otomatis tool-calling lintas protokol (dialek JSON schema, tool_use Claude, function_call Responses, hingga DSML).
-- **20 Provider Built-in + BYOP (Bring Your Own Provider):** Mendukung login OAuth dengan PKCE, device code flow, import session browser, API key, free tier tanpa login, dan custom endpoint OpenAI/Claude.
-- **Failover & Rotasi Akun Cerdas:** Failover otomatis ke akun berikutnya saat terkena rate-limit (429) atau server down (5xx), dilengkapi cooldown cerdas dan refresh token otomatis.
-- **Model Combos:** Agregasi virtual model lintas provider dalam satu alias (misalnya `combo/smart-coding`) dengan urutan prioritas fallback otomatis.
-- **Proxy Pools Terintegrasi:** Manajemen pool proxy HTTP, HTTPS, dan SOCKS5 langsung dari dashboard, uji latensi, rotasi proxy per provider, serta penugasan proxy spesifik per akun.
+- **21 Provider Built-in + BYOP (Bring Your Own Provider):** Mendukung login OAuth dengan PKCE, device code flow, import session browser, API key, free tier tanpa login, dan custom endpoint OpenAI/Claude. Termasuk provider **Nous Portal / Hermes (`nous`)** dengan login device code, auto-sync model gratis, dan pacing serial turns.
+- **Failover & Rotasi Akun Cerdas:** Failover otomatis ke akun berikutnya saat terkena rate-limit (429) atau server down (5xx), dilengkapi cooldown cerdas, parsing `retry_after` langsung dari body respons, dan refresh token otomatis (dengan penanda status `needs_login`).
+- **Model Combos:** Agregasi virtual model lintas provider dalam satu alias (misalnya `combo/smart-coding`) dengan urutan prioritas fallback otomatis dan rebuild otomatis pasca sinkronisasi katalog.
+- **Proxy Pools & Cloudflare WARP Lanes:** Manajemen pool proxy HTTP, HTTPS, dan SOCKS5 langsung dari dashboard, uji latensi, rotasi proxy per provider, penugasan bound accounts per proxy, dukungan tipe proxy `gateway` dengan retry budget & webhook rotasi, per-node Cloudflare WARP lanes dengan skrip `scripts/setupWarpLanes.js`, sinyal rotasi 429 fire-and-forget terdeduplikasi, dan prioritas proxy sehat.
 - **Live Quota Scraper (10 Provider):** Memantau sisa kuota, jendela batas pemakaian (5 jam, harian, mingguan), dan waktu reset akun secara akurat tanpa perlu membuka situs provider.
+- **Peningkatan OpenAI Codex & Responses API:** Sinkronisasi model Codex otomatis pasca login OAuth, auto-generate `prompt_cache_key`, pelaporan cached/estimated tokens, dan dukungan tangga level thinking hingga `xhigh` dan `max`.
+- **Tingkat Berpikir Fleksibel (Adaptive & XHigh):** Dukungan level thinking `xhigh` pada Google Antigravity dan tangga thinking penuh pada OpenAI Codex serta Claude via prefix model.
 - **Data Loss Prevention (DLP):** Redaksi dan sensor otomatis kredensial, kunci API, dan token privat sebelum meninggalkan mesin Anda.
 - **Zero-Overhead Token Saver:** Pemadatan prompt otomatis menggunakan algoritma RTK dan mode Caveman opsional untuk menghemat konsumsi token konteks.
-- **Dukungan Multi-Language (ID & EN):** Antarmuka web dashboard mendukung dwi-bahasa (Bahasa Indonesia dan English) dengan tombol switcher cepat di sidebar atau melalui menu Pengaturan.
-- **Web Dashboard & Admin Security:** Dilengkapi antarmuka Web modern dengan dark/light theme, visualisasi kuota, audit log penggunaan, dan proteksi login password / admin token.
+- **Dukungan Multi-Language (ID & EN):** Antarmuka web dashboard mendukung dwi-bahasa (Bahasa Indonesia dan English) dengan tombol switcher cepat di sidebar tanpa reload halaman dan pilihan bahasa permanen di pengaturan.
+- **Web Dashboard & Admin Security:** Dilengkapi antarmuka Web modern bertema neo-brutalism dengan dark/light theme, visualisasi kuota, audit log penggunaan, dan proteksi login password / admin token.
 
 ---
 
-## 🔌 Provider yang Didukung (20 Built-in + BYOP)
+## 🔌 Provider yang Didukung (21 Built-in + BYOP)
 
 | Prefix | Provider | Autentikasi | Live Quota | Tool Calling |
 |---|---|---|:---:|:---:|
@@ -86,10 +88,11 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · OpenRouter · BYOP..
 | `tg` | Together AI | API key | — | ✅ |
 | `ol` | Ollama Cloud | API key | ✅ | ✅ |
 | `l7` | LLM7 | API key | — | ✅ |
+| `nous` | Nous Research (Hermes) | OAuth Device Code / API key | — | ✅ |
 | `dsw` | DeepSeek Web Chat | Token sesi browser / CDP | — | ✅ |
 | *custom* | **Custom Provider (BYOP)** | OpenAI / Claude Endpoint | — | ✅ |
 
-> **Catatan Prefix:** Anda dapat memanggil model menggunakan prefix singkat (misal `cc/claude-3-7-sonnet`, `cx/gpt-4o`, `glm/glm-4`) maupun nama lengkap provider (misal `together/meta-llama/Llama-3-70b-chat-hf`).
+> **Catatan Prefix:** Anda dapat memanggil model menggunakan prefix singkat (misal `cc/claude-3-7-sonnet`, `cx/gpt-4o`, `glm/glm-4`, `nous/hermes-3-llama-3.1-405b`) maupun nama lengkap provider (misal `together/meta-llama/Llama-3-70b-chat-hf`).
 
 ---
 
@@ -128,7 +131,7 @@ Setelah terpasang, perintah `zenith` dapat dipanggil dari terminal mana pun untu
 
 1. **Buka Web Dashboard:** Kunjungi `http://127.0.0.1:20120/dashboard` di browser Anda.
 2. **Tambah Akun Provider:** Masuk ke tab **Providers**, pilih provider yang Anda miliki, dan klik **Add Account**:
-   * *OAuth Provider (Claude, Copilot, Antigravity, dll):* Klik tombol login browser atau selesaikan device code.
+   * *OAuth Provider (Claude, Copilot, Antigravity, Nous Research, dll):* Klik tombol login browser atau selesaikan device code (untuk Nous, selesaikan verifikasi di portal Hermes).
    * *API Key Provider (OpenRouter, NVIDIA, dll):* Masukkan API key Anda.
    * *Free Provider (Kilo Free, OpenCode, OVH):* Langsung aktif dan siap dipakai.
    * *DeepSeek Web:* Gunakan fitur **Login sekali klik di browser** via Chrome DevTools Protocol atau tempel `userToken` sesi web Anda.
@@ -141,16 +144,41 @@ Setelah terpasang, perintah `zenith` dapat dipanggil dari terminal mana pun untu
 
 ## 🧩 Kemampuan Lanjutan
 
-### Model Combos (Intelligent Failover)
+### Model Combos (Intelligent Failover & Auto-Rebuild)
 Fitur Combos memungkinkan Anda membuat alias virtual yang menggabungkan beberapa model lintas provider (misalnya `combo/backend-dev` yang berisi `cc/claude-3-7-sonnet`, lalu fallback ke `cx/gpt-4o`, dan terakhir `glm/glm-4`):
 * **Failover Otomatis:** Jika model prioritas utama terkena rate limit (429) atau upstream error (5xx), request otomatis dialihkan ke model cadangan berikutnya tanpa memutus sesi agent.
 * **Preservasi Klaim Tools:** Menjaga metadata kapabilitas agentic tools agar coding agent tetap dapat menjalankan instruksi tool-calling dengan benar.
+* **Auto-Rebuild Combo Terkelola:** Aksi "Sinkron Sekarang" atau "Import Models" langsung menyusun ulang konfigurasi super-combo secara instan tanpa menunggu jadwal scheduler dan tanpa menembak probe ke upstream.
 
-### Proxy Pools & Isolasi IP
-* Mendukung pool proxy `HTTP`, `HTTPS`, dan `SOCKS5`.
-* **Rotasi Proxy:** Mengonfigurasi rotasi IP otomatis per request untuk provider tertentu guna mencegah rate-limit berbasis IP.
-* **Pinning Akun ke Proxy:** Menugaskan akun spesifik ke proxy tertentu (berguna jika akun Anda membutuhkan IP residensial tetap).
-* **Pengujian Latensi:** Tombol uji koneksi dan latensi proxy langsung dari antarmuka web.
+### Proxy Pools, Gateway, & Cloudflare WARP Lanes
+* **Dukungan Protokol Lengkap:** Mendukung pool proxy `HTTP`, `HTTPS`, dan `SOCKS5`.
+* **Tipe Proxy Standar & Gateway:** Mendukung proxy bertipe `single` (satu proxy per request) dan `gateway` dengan parameter `retry_budget` (1–5 percobaan). Satu endpoint load balancer dapat dicoba ulang beberapa kali dalam request yang sama untuk mendapatkan egress node berbeda sebelum memicu failover akun atau kunci cooldown gerbang.
+* **Webhook Rotasi Otomatis:** Webhook rotasi opsional (`rotate_url` + bearer token) dipanggil tanpa memblokir request saat terjadi HTTP 403/429 atau error di tengah stream, dilengkapi debounce 10 detik.
+* **Cloudflare WARP Lanes (`scripts/setupWarpLanes.js`):** Skrip automasi untuk mendaftarkan 10 lane per-node (`warp-node-1` s.d. `warp-node-10` di port 3129–3138) dan optional load balancer `warp-gate` (port 3128) dari pool WARP lokal serta mengaktifkan strategi rotasi round-robin.
+* **Sinyal Rotasi 429 Fire-and-Forget:** Node WARP yang terkena rate-limit secara otomatis mengirimkan sinyal rotasi asinkron (`signalProxy429` / `signalWarp429`) ke `/signal/429` (port 8405) dengan debounce deduplikasi 2 detik, serta melestarikan cooldown gerbang lokal (*gate cooldown*) hingga proses rotasi fisik IP di node benar-benar selesai.
+* **Manajemen Akun Terikat (Bound Accounts):** Ikat atau lepaskan akun provider ke proxy pool spesifik secara massal melalui checklist pada modal edit proxy dashboard.
+* **Prioritisasi Proxy Sehat:** Rotasi proxy (round-robin maupun acak) secara cerdas mendahulukan proxy aktif yang sehat (tidak berstatus exhausted atau dalam masa gate cooldown).
+* **Indikator Status No-Auth:** Menampilkan status koneksi provider tanpa login di dashboard: `Proxy Pool` (rotasi bergiliran/acak), `Proxy` (terikat ke proxy tertentu), atau `Langsung (Tanpa Proxy)`.
+
+### OpenAI Codex & Responses API
+* **Auto-Sync Model Codex:** Mengambil katalog model Codex di latar belakang secara otomatis setelah login OAuth berhasil tanpa mengganggu sesi login.
+* **Prompt Cache Otomatis:** Menghasilkan `prompt_cache_key` otomatis dan meneruskan `prompt_cache_retention` untuk mengoptimalkan caching upstream Responses.
+* **Pelaporan Token Cached & Usage:** Normalisasi metrik token cached (`prompt_cache_hit_tokens`) melalui `normalizeUsage` dan pencatatan usage estimasi yang akurat.
+* **Tangga Level Thinking Lengkap:** Mendukung level reasoning dari `low`, `medium`, `high`, `xhigh`, hingga `max` untuk model Codex generasi terbaru (`gpt-6` dan `gpt-5.6`).
+* **Isolasi Field Responses:** Field spesifik (`reasoning`, `prompt_cache_key`, `prompt_cache_retention`) dibatasi hanya untuk provider Codex guna menjaga kompatibilitas dengan upstream Responses lainnya.
+
+### Provider Antigravity & Sinkronisasi Katalog No-Auth
+* **Level Thinking XHigh:** Mendukung varian model dengan level thinking `xhigh` (suffix `xhigh` dan label `(XHigh)`).
+* **Prefix Cache Tracer:** Trace diagnostik sidik jari prefix prompt opt-in melalui env `ZENITH_CACHE_TRACE=1`.
+* **Sinkronisasi Katalog No-Auth:** Katalog provider publik (`kilo-free`, `llm7`, `ovhcloud`) disinkronkan secara live; model bawaan yang dihentikan upstream otomatis dipensiunkan (`retired_models`) dengan perlindungan alias bawaan (`builtinAliases`).
+* **Batas Lock Kuota per Model:** Menerapkan pembatasan (*cap*) lock concurrency per-model agar akun yang kehabisan kuota cepat kembali dapat dirutekan setelah masa cooldown selesai.
+
+### Provider Nous Research (Hermes)
+* **Login OAuth Device Code:** Login device code praktis menggunakan client resmi `hermes-cli` dan scope `inference:invoke` (dapat dikustomisasi via env `ZENITH_NOUS_CLIENT_ID`).
+* **Rotasi Refresh Token & Penanda Status `needs_login`:** Token refresh berputar pada tiap grant; penolakan refresh HTTP 400 menandai akun `needs_login` agar tidak di-refresh berulang dan dilewati routing dengan aman.
+* **Auto-Sync Model Gratis:** Menyinkronkan model publik dari endpoint `/v1/models` secara periodik setiap 6 jam (`freeModelSync: "merge"`).
+* **Pacing Serial Turns:** Pembatasan 1 request aktif per akun (`concurrency: 1`) dengan jeda minimum 2.500 ms (`throttleMs: 2500`) untuk mematuhi jendela fair-share rate limit model gratis (seperti `qwen4-max`).
+* **Direct `retry_after` Parsing:** Membaca field `retry_after` langsung dari JSON respons 429 upstream untuk menentukan durasi cooldown akun secara presisi dan meneruskan header `Retry-After`.
 
 ### Data Loss Prevention (DLP)
 * Mencegah kebocoran rahasia sensitif (Private Keys, API Keys, AWS Credentials, Bearer Tokens, format PII).
@@ -238,6 +266,12 @@ Zenith Router dapat dikonfigurasi melalui environment variables (atau berkas `.e
 | `ZENITH_DEEPSEEK_BASE_URL` | `https://chat.deepseek.com` | Base URL upstream antarmuka web DeepSeek |
 | `ZENITH_DEEPSEEK_KEEP_SESSIONS` | *kosong* | Set `1` agar chat sesi gateway tidak dihapus otomatis dari akun web |
 | `ZENITH_DEEPSEEK_TOOL_RESULT_MAX` | `12000` | Batas karakter hasil eksekusi tool sebelum dipangkas di tengah |
+| `WARP_POOL_SIGNAL_URL` | `http://127.0.0.1:8405/signal/429` | URL endpoint sinyal 429 fire-and-forget rotasi Cloudflare WARP |
+| `ZENITH_NOUS_CLIENT_ID` | `hermes-cli` | Client ID OAuth device code untuk provider Nous Research |
+| `ZENITH_STREAM_TRACE` | *kosong* | Set `1` untuk mengaktifkan trace diagnostik parsing stream SSE |
+| `ZENITH_CACHE_TRACE` | *kosong* | Set `1` untuk mengaktifkan trace sidik jari prefix prompt Antigravity |
+| `ZENITH_OPENCODE_BASE_URL` | *kosong* | URL upstream kustom untuk provider OpenCode |
+| `ZENITH_OPENCODE_BRIDGE_PORT` | *otomatis* | Port listen worker bridge Bun lokal untuk OpenCode |
 
 ---
 

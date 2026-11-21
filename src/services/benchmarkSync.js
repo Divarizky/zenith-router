@@ -92,11 +92,13 @@ export function calculateHeuristicScore(modelIdentifier) {
 }
 
 export function determineTier(score) {
-  if (score >= 80) return "S";
-  if (score >= 70) return "A+";
-  if (score >= 60) return "A";
-  if (score >= 50) return "B+";
-  if (score >= 45) return "B";
+  const num = typeof score === "number" ? score : Number(score);
+  if (Number.isNaN(num) || num < 0) return "C+";
+  if (num >= 80) return "S";
+  if (num >= 70) return "A+";
+  if (num >= 60) return "A";
+  if (num >= 50) return "B+";
+  if (num >= 40) return "B";
   return "C+";
 }
 
@@ -159,15 +161,26 @@ export function toPercentiles(scores) {
   const values = [...map.values()].filter(isNum).sort((a, b) => a - b);
   const out = {};
   if (!values.length) return out;
+
+  const pctByVal = new Map();
+  const n = values.length;
+  let i = 0;
+  while (i < n) {
+    const v = values[i];
+    let j = i + 1;
+    while (j < n && values[j] === v) {
+      j++;
+    }
+    const below = i;
+    const equal = j - i;
+    const pct = Math.round(((below + equal / 2) / n) * 1000) / 10;
+    pctByVal.set(v, pct);
+    i = j;
+  }
+
   for (const [key, v] of map) {
     if (!isNum(v)) continue;
-    let below = 0;
-    let equal = 0;
-    for (const x of values) {
-      if (x < v) below++;
-      else if (x === v) equal++;
-    }
-    out[key] = Math.round(((below + equal / 2) / values.length) * 1000) / 10;
+    out[key] = pctByVal.get(v);
   }
   return out;
 }
@@ -228,6 +241,8 @@ export function loadSnapshot() {
   }
 }
 
+const LIGHT_TIER_RE = /(?:^|-)(mini|nano|lite|small|micro|tiny|haiku|flash)(?:$|-)/;
+
 /**
  * Mengambil semua sumber leaderboard lalu menyimpan snapshot skor mentah.
  * Membutuhkan minimal MIN_VALID_SOURCES sumber berhasil.
@@ -241,27 +256,29 @@ export async function refreshBenchmarkSnapshot({ fetchImpl = fetch, now = Date.n
   const sources = {};
   const errors = {};
 
-  for (const [name, run] of Object.entries(SOURCE_FETCHERS)) {
-    try {
-      const res = await run(fetchImpl);
-      if (name === "benchlm") {
-        if (res.coding.size >= MIN_SOURCE_MODELS) {
-          sources.blm_coding = Object.fromEntries(res.coding);
+  await Promise.all(
+    Object.entries(SOURCE_FETCHERS).map(async ([name, run]) => {
+      try {
+        const res = await run(fetchImpl);
+        if (name === "benchlm") {
+          if (res.coding.size >= MIN_SOURCE_MODELS) {
+            sources.blm_coding = Object.fromEntries(res.coding);
+          }
+          if (res.agentic.size >= MIN_SOURCE_MODELS) {
+            sources.blm_agent = Object.fromEntries(res.agentic);
+          }
+        } else {
+          if (res.size < MIN_SOURCE_MODELS) {
+            errors[name] = `hanya ${res.size} model (minimum ${MIN_SOURCE_MODELS})`;
+            return;
+          }
+          sources[name] = Object.fromEntries(res);
         }
-        if (res.agentic.size >= MIN_SOURCE_MODELS) {
-          sources.blm_agent = Object.fromEntries(res.agentic);
-        }
-      } else {
-        if (res.size < MIN_SOURCE_MODELS) {
-          errors[name] = `hanya ${res.size} model (minimum ${MIN_SOURCE_MODELS})`;
-          continue;
-        }
-        sources[name] = Object.fromEntries(res);
+      } catch (err) {
+        errors[name] = err?.message || String(err);
       }
-    } catch (err) {
-      errors[name] = err?.message || String(err);
-    }
-  }
+    }),
+  );
 
   if (Object.keys(sources).length < MIN_VALID_SOURCES) {
     return { ok: false, kept: Boolean(existing), errors };
@@ -286,6 +303,7 @@ export function resolveLiveScores(candidateIds = [], snapshot = null) {
   if (!Array.isArray(candidateIds) || candidateIds.length === 0) return result;
 
   const percentilesBySource = {};
+  const entriesBySource = {};
   if (snap?.sources) {
     for (const [srcName, board] of Object.entries(snap.sources)) {
       if (!board || typeof board !== "object") continue;
@@ -294,7 +312,9 @@ export function resolveLiveScores(candidateIds = [], snapshot = null) {
         if (isNum(v)) scoresMap.set(k, v);
       }
       if (scoresMap.size >= MIN_SOURCE_MODELS) {
-        percentilesBySource[srcName] = toPercentiles(scoresMap);
+        const pMap = toPercentiles(scoresMap);
+        percentilesBySource[srcName] = pMap;
+        entriesBySource[srcName] = Object.entries(pMap);
       }
     }
   }
@@ -306,14 +326,36 @@ export function resolveLiveScores(candidateIds = [], snapshot = null) {
     const sourcesFound = [];
 
     if (key) {
+      const keyHasLight = LIGHT_TIER_RE.test(key);
       for (const [srcName, pMap] of Object.entries(percentilesBySource)) {
         let p = pMap[key];
         if (p === undefined && key.length > 5) {
-          for (const [pk, val] of Object.entries(pMap)) {
-            if (pk === key || pk.includes(key) || key.includes(pk)) {
-              p = val;
-              break;
+          const entries = entriesBySource[srcName] || [];
+          let bestMatch = null;
+          for (const [pk, val] of entries) {
+            if (pk.length <= 5) continue;
+            const pkHasLight = LIGHT_TIER_RE.test(pk);
+            if (keyHasLight !== pkHasLight) continue;
+
+            const isBoundaryMatch =
+              pk.startsWith(key + "-") ||
+              pk.endsWith("-" + key) ||
+              pk.includes("-" + key + "-") ||
+              key.startsWith(pk + "-") ||
+              key.endsWith("-" + pk) ||
+              key.includes("-" + pk + "-");
+            if (!isBoundaryMatch) continue;
+
+            if (
+              !bestMatch ||
+              pk.length > bestMatch.pk.length ||
+              (pk.length === bestMatch.pk.length && Math.abs(pk.length - key.length) < Math.abs(bestMatch.pk.length - key.length))
+            ) {
+              bestMatch = { pk, val };
             }
+          }
+          if (bestMatch) {
+            p = bestMatch.val;
           }
         }
         if (isNum(p)) {

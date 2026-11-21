@@ -91,7 +91,7 @@ export const BENCHMARKS_DATABASE = [
     swe_bench: 48.9,
     livecodebench: 61.7,
     tier: "S",
-    patterns: ["*o1", "*o1-preview*", "*o1-2024*"],
+    patterns: ["o1", "*/o1", "*o1-preview*", "*o1-2024*"],
     aliases: ["o1", "openai/o1", "o1-preview"]
   },
   {
@@ -186,7 +186,7 @@ export const BENCHMARKS_DATABASE = [
   },
   {
     id: "qwen-2-5-coder-32b",
-    "name": "Qwen 2.5 Coder 32B",
+    name: "Qwen 2.5 Coder 32B",
     score: 76,
     swe_bench: 44.8,
     livecodebench: 51.2,
@@ -223,6 +223,16 @@ export const BENCHMARKS_DATABASE = [
     tier: "A+",
     patterns: ["*mimo*v2*5*", "*mimo*v2.5*", "*mimo*"],
     aliases: ["mimo-v2.5", "mimo-v2-5", "mimo"]
+  },
+  {
+    id: "gpt-4o-mini",
+    name: "GPT-4o-mini",
+    score: 56,
+    swe_bench: 23.5,
+    livecodebench: 31.4,
+    tier: "B+",
+    patterns: ["*gpt*4o*mini*"],
+    aliases: ["gpt-4o-mini", "gpt-4o-mini-2024-07-18"]
   },
   {
     id: "gpt-4o",
@@ -293,16 +303,6 @@ export const BENCHMARKS_DATABASE = [
     tier: "A",
     patterns: ["*claude*3*5*haiku*", "*claude*3.5*haiku*"],
     aliases: ["claude-3-5-haiku", "claude-3.5-haiku"]
-  },
-  {
-    id: "gpt-4o-mini",
-    name: "GPT-4o-mini",
-    score: 56,
-    swe_bench: 23.5,
-    livecodebench: 31.4,
-    tier: "B+",
-    patterns: ["*gpt*4o*mini*"],
-    aliases: ["gpt-4o-mini", "gpt-4o-mini-2024-07-18"]
   },
   {
     id: "llama-3-1-8b",
@@ -412,6 +412,7 @@ export function normalizeModelIdentifier(raw) {
 
   // Strip suffix umum :free, :beta, :default, :preview, :online
   s = s.replace(/:(?:free|beta|preview|default|online|nitro)$/i, "");
+  s = s.replace(/-free$/i, "");
 
   // Strip timestamp / tanggal pada model ID (misal -20250219, -2024-08-06, -0613)
   s = s.replace(/[-_@](?:20\d{2}[-_]?\d{2}[-_]?\d{2}|\d{4})\b/g, "");
@@ -431,15 +432,25 @@ export function findBenchmarkMatch(modelIdentifier, benchmarks = null) {
     return null;
   }
 
+  const rawLower = modelIdentifier.toLowerCase().trim();
+
+  // Non-coding / Media / Safety Guard
+  if (/(?:embed|embedding|image|audio|tts|whisper|flux|diffusion|content-safety|moderation|rerank|transcribe)/i.test(rawLower)) {
+    return null;
+  }
+
   const list = Array.isArray(benchmarks)
     ? benchmarks
     : benchmarks && typeof benchmarks === "object"
       ? Object.values(benchmarks)
       : COMPILED_BENCHMARKS;
 
-  const rawLower = modelIdentifier.toLowerCase().trim();
   const normalized = normalizeModelIdentifier(modelIdentifier);
   const isThinking = isThinkingVariant(modelIdentifier);
+
+  // Downsized Tier Guard
+  const downsizedMatch = rawLower.match(/(?:^|[-_.:/])(mini|nano|lite|micro|tiny|small)(?:$|[-_.:/0-9])/i);
+  const downsizedModifier = downsizedMatch ? downsizedMatch[1].toLowerCase() : null;
 
   // 1. Jika ini varian thinking, utamakan entry thinking
   if (isThinking) {
@@ -478,6 +489,9 @@ export function findBenchmarkMatch(modelIdentifier, benchmarks = null) {
 
   // 3. Pencocokan pola regex (glob)
   for (const item of list) {
+    if (downsizedModifier && !item.id.includes(downsizedModifier)) {
+      continue;
+    }
     const patterns = item.compiledPatterns || (item.patterns || []).map(globToRegex);
     if (patterns.some((re) => re.test(rawLower) || re.test(normalized))) {
       return item;
@@ -488,8 +502,18 @@ export function findBenchmarkMatch(modelIdentifier, benchmarks = null) {
   // Bersihkan pemisah untuk perbandingan longgar
   const cleanNorm = normalized.replace(/[^a-z0-9]/g, "");
   for (const item of list) {
+    if (downsizedModifier && !item.id.includes(downsizedModifier)) {
+      continue;
+    }
     const cleanId = item.id.replace(/[^a-z0-9]/g, "");
-    if (cleanNorm && cleanId && (cleanNorm === cleanId || cleanNorm.startsWith(cleanId) || cleanId.startsWith(cleanNorm))) {
+    if (
+      cleanId.length >= 5 &&
+      cleanNorm.length >= 5 &&
+      (cleanNorm === cleanId ||
+        normalized === item.id ||
+        normalized.startsWith(item.id + "-") ||
+        item.id.startsWith(normalized + "-"))
+    ) {
       return item;
     }
     if (item.aliases) {
@@ -612,6 +636,15 @@ export function sortModelsByCodingQuality(models, { latencyMap = {}, failureRate
 
   const getModelId = (m) => (typeof m === "string" ? m : (m?.id || m?.model || m?.name || ""));
 
+  let effectiveLiveScores = liveScores;
+  if (!effectiveLiveScores && models.length > 0) {
+    try {
+      effectiveLiveScores = resolveLiveScores(models.map(getModelId).filter(Boolean));
+    } catch {
+      // Abaikan kegagalan baca snapshot live
+    }
+  }
+
   const getLatency = (modelId, item) => {
     if (latencyMap instanceof Map) {
       if (latencyMap.has(modelId)) return latencyMap.get(modelId);
@@ -637,33 +670,27 @@ export function sortModelsByCodingQuality(models, { latencyMap = {}, failureRate
     return 0;
   };
 
-  return [...models].sort((a, b) => {
-    const idA = getModelId(a);
-    const idB = getModelId(b);
+  const decorated = models.map((item) => {
+    const id = getModelId(item);
+    const lat = getLatency(id, item);
+    const isParked = isParkedLatency(lat) || (typeof item === "object" && item !== null && (item.status === "quota" || item.isParked === true));
+    const fail = getFailureRate(id, item);
+    const adj = adjustments && Number.isFinite(adjustments[id]) ? adjustments[id] : 0;
+    const score = calculateCodingScore(id, {
+      latencyMs: isParked ? 0 : lat,
+      failureRate: fail,
+      benchmarks,
+      liveScores: effectiveLiveScores,
+    }) + adj;
 
-    const latA = getLatency(idA, a);
-    const latB = getLatency(idB, b);
-
-    const isParkedA = isParkedLatency(latA) || (typeof a === "object" && (a?.status === "quota" || a?.isParked === true));
-    const isParkedB = isParkedLatency(latB) || (typeof b === "object" && (b?.status === "quota" || b?.isParked === true));
-
-    // 1. Model yang diparkir (quota limit) diposisikan di paling bawah
-    if (isParkedA && !isParkedB) return 1;
-    if (!isParkedA && isParkedB) return -1;
-
-    // 2. Jika keduanya aktif atau keduanya parkir, urutkan berdasarkan coding score terbobot
-    const failA = getFailureRate(idA, a);
-    const failB = getFailureRate(idB, b);
-
-    const adjA = adjustments && Number.isFinite(adjustments[idA]) ? adjustments[idA] : 0;
-    const adjB = adjustments && Number.isFinite(adjustments[idB]) ? adjustments[idB] : 0;
-    const scoreA = isParkedA ? -999999 : calculateCodingScore(idA, { latencyMs: latA, failureRate: failA, benchmarks, liveScores }) + adjA;
-    const scoreB = isParkedB ? -999999 : calculateCodingScore(idB, { latencyMs: latB, failureRate: failB, benchmarks, liveScores }) + adjB;
-
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-
-    return idA.localeCompare(idB);
+    return { item, id, isParked, score };
   });
+
+  decorated.sort((a, b) => {
+    if (a.isParked !== b.isParked) return a.isParked ? 1 : -1;
+    if (b.score !== a.score) return b.score - a.score;
+    return a.id.localeCompare(b.id);
+  });
+
+  return decorated.map((entry) => entry.item);
 }

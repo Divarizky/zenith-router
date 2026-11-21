@@ -238,3 +238,92 @@ test("sortModelsByCodingQuality - mengurutkan model berdasarkan skor dan memarki
   assert.equal(sortedObjects[1].id, "gpt-4o-mini");
   assert.equal(sortedObjects[2].id, "claude-3-7-sonnet");
 });
+
+test("normalizeModelIdentifier - membersihkan sufiks -free", () => {
+  assert.equal(normalizeModelIdentifier("deepseek-r1-free"), "deepseek-r1");
+  assert.equal(normalizeModelIdentifier("claude-3-5-sonnet-free"), "claude-3-5-sonnet");
+  assert.equal(normalizeModelIdentifier("openrouter/deepseek/deepseek-r1-free"), "deepseek-r1");
+});
+
+test("findBenchmarkMatch - guard model non-coding dan modifier downsized", () => {
+  // a) o1-mini tidak boleh mencocoki flagship o1
+  const o1Mini = findBenchmarkMatch("o1-mini");
+  assert.notEqual(o1Mini?.id, "o1");
+  assert.equal(o1Mini, null);
+
+  // gpt-4o-mini-preview mencocoki benchmark gpt-4o-mini, BUKAN gpt-4o
+  const gpt4oMiniPrev = findBenchmarkMatch("gpt-4o-mini-preview");
+  assert.ok(gpt4oMiniPrev);
+  assert.equal(gpt4oMiniPrev.id, "gpt-4o-mini");
+  assert.notEqual(gpt4oMiniPrev.id, "gpt-4o");
+
+  // deepseek-v4-lite tidak boleh mencocoki flagship deepseek-v4
+  const dsV4Lite = findBenchmarkMatch("deepseek-v4-lite");
+  assert.notEqual(dsV4Lite?.id, "deepseek-v4");
+  assert.equal(dsV4Lite, null);
+
+  // glm-5-nano tidak boleh mencocoki flagship glm-5
+  const glm5Nano = findBenchmarkMatch("glm-5-nano");
+  assert.notEqual(glm5Nano?.id, "glm-5");
+  assert.equal(glm5Nano, null);
+
+  // gemini-embedding-001 (model non-coding/embedding) segera return null
+  const geminiEmbed = findBenchmarkMatch("gemini-embedding-001");
+  assert.equal(geminiEmbed, null);
+
+  // Non-coding media & safety guards lainnya
+  assert.equal(findBenchmarkMatch("whisper-large-v3"), null);
+  assert.equal(findBenchmarkMatch("flux-dev-image"), null);
+  assert.equal(findBenchmarkMatch("openai-moderation-latest"), null);
+
+  // Token boundary & minimum length di Langkah 4 (fuzzy match tanpa pattern)
+  const customList = [
+    { id: "step-2", name: "Step 2", score: 65 },
+    { id: "o1", name: "OpenAI o1", score: 86 },
+  ];
+  assert.equal(findBenchmarkMatch("step-20", customList), null);
+  assert.equal(findBenchmarkMatch("o1-mini", customList), null);
+  assert.equal(findBenchmarkMatch("step-2", customList)?.id, "step-2");
+});
+
+test("sortModelsByCodingQuality - mengurutkan sesama model parked/cooldown berdasarkan kualitas koding", () => {
+  // b) sortModelsByCodingQuality mengurutkan sesama model isParked/quota berdasarkan kualitas koding
+  // sambil tetap menaruh seluruh model parked di bawah model aktif
+  const models = [
+    { id: "gpt-4o-mini", status: "quota" }, // parked, base score 56
+    { id: "llama-3-1-8b", status: "active" }, // aktif, base score 48
+    { id: "claude-3-7-sonnet", status: "quota" }, // parked, base score 88
+    { id: "deepseek-v3", status: "active" }, // aktif, base score 78
+  ];
+
+  const sorted = sortModelsByCodingQuality(models);
+
+  // Model aktif di atas, diurutkan descending:
+  // 1. deepseek-v3 (78)
+  // 2. llama-3-1-8b (48)
+  assert.equal(sorted[0].id, "deepseek-v3");
+  assert.equal(sorted[1].id, "llama-3-1-8b");
+
+  // Model parked di bawah, diurutkan descending kualitas koding:
+  // 3. claude-3-7-sonnet (88)
+  // 4. gpt-4o-mini (56)
+  assert.equal(sorted[2].id, "claude-3-7-sonnet");
+  assert.equal(sorted[3].id, "gpt-4o-mini");
+
+  // Pengujian dengan latencyMap sentinel (isParkedLatency)
+  const stringModels = [
+    "gpt-4o-mini",
+    "llama-3-1-8b",
+    "claude-3-7-sonnet",
+  ];
+  const sortedString = sortModelsByCodingQuality(stringModels, {
+    latencyMap: {
+      "gpt-4o-mini": QUOTA_LATENCY_SENTINEL,
+      "claude-3-7-sonnet": QUOTA_LATENCY_SENTINEL,
+      "llama-3-1-8b": 100, // aktif
+    },
+  });
+  assert.equal(sortedString[0], "llama-3-1-8b");
+  assert.equal(sortedString[1], "claude-3-7-sonnet");
+  assert.equal(sortedString[2], "gpt-4o-mini");
+});

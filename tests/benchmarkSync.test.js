@@ -266,3 +266,120 @@ test("assembleManagedCombos: model kr/ tidak muncul di combo mana pun dan model 
   assert.ok(out["zenith-smart"].includes("xkr/qwen/qwen3.8-max:free"));
   assert.ok(!out["zenith-smart"].includes("or/nvidia/nemotron-3.5-content-safety:free"));
 });
+
+// --- Wave 2 additions: determineTier, toPercentiles O(M), & resolveLiveScores fuzzy match ---
+
+test("determineTier: ambang batas selaras B=40 dan C+ < 40 serta validasi input", () => {
+  assert.strictEqual(determineTier(80), "S");
+  assert.strictEqual(determineTier(70), "A+");
+  assert.strictEqual(determineTier(60), "A");
+  assert.strictEqual(determineTier(50), "B+");
+  assert.strictEqual(determineTier(45), "B");
+  assert.strictEqual(determineTier(40), "B");
+  assert.strictEqual(determineTier(39.9), "C+");
+  assert.strictEqual(determineTier(39), "C+");
+  assert.strictEqual(determineTier("40"), "B");
+  assert.strictEqual(determineTier("39"), "C+");
+  assert.strictEqual(determineTier(-5), "C+");
+  assert.strictEqual(determineTier(NaN), "C+");
+  assert.strictEqual(determineTier("invalid"), "C+");
+});
+
+test("toPercentiles: menghasilkan nilai akurat untuk dataset besar dan nilai duplikat (ties)", () => {
+  // 1. Verifikasi penanganan ties duplikat
+  const tiedScores = new Map([
+    ["m1", 10],
+    ["m2", 10],
+    ["m3", 20],
+    ["m4", 30],
+    ["m5", 30],
+    ["m6", 30],
+  ]);
+  // n = 6
+  // m1, m2: below=0, equal=2 -> (0 + 1)/6 = 16.7
+  // m3: below=2, equal=1 -> (2 + 0.5)/6 = 41.7
+  // m4, m5, m6: below=3, equal=3 -> (3 + 1.5)/6 = 75.0
+  const pctTied = toPercentiles(tiedScores);
+  assert.strictEqual(pctTied.m1, 16.7);
+  assert.strictEqual(pctTied.m2, 16.7);
+  assert.strictEqual(pctTied.m3, 41.7);
+  assert.strictEqual(pctTied.m4, 75.0);
+  assert.strictEqual(pctTied.m5, 75.0);
+  assert.strictEqual(pctTied.m6, 75.0);
+
+  // 2. Verifikasi dataset besar (5000 entri)
+  const largeMap = new Map();
+  for (let i = 0; i < 5000; i++) {
+    largeMap.set(`model_${i}`, i % 100);
+  }
+  const pctLarge = toPercentiles(largeMap);
+  assert.strictEqual(typeof pctLarge.model_0, "number");
+  assert.strictEqual(pctLarge.model_0, pctLarge.model_100);
+  assert.ok(pctLarge.model_0 < pctLarge.model_50);
+  assert.ok(pctLarge.model_50 < pctLarge.model_99);
+});
+
+test("resolveLiveScores: fuzzy fallback memilih longest match pada batas token dan menolak varian ringan", () => {
+  const snapshot = {
+    version: 3,
+    sources: {
+      blm_coding: {
+        "gpt-4o": 90,
+        "deepseek-v4": 88,
+        "deepseek-v4-flash": 82,
+        "qwen-2-5": 50,
+        "qwen-2-5-72b-instruct": 85,
+      },
+    },
+  };
+  // Isi pool sintetis hingga MIN_SOURCE_MODELS (20)
+  for (let i = 0; i < 20; i++) {
+    snapshot.sources.blm_coding[`synth-model-${i}`] = 20 + i;
+  }
+
+  const candidateIds = [
+    // 1. gpt-4o-mini (varian ringan) TIDAK boleh mencocoki gpt-4o non-mini
+    "openai/gpt-4o-mini",
+    // 2. deepseek-v4-flash (varian ringan) TIDAK boleh mencocoki deepseek-v4 non-flash (saat flash tidak ada di board lain)
+    // Untuk tes ini, periksa model yang hanya ada versi non-flash di board
+    "deepseek/v4-flash-custom",
+    // 3. Flagship non-flash deepseek-v4 TIDAK boleh mencocoki deepseek-v4-flash saat flagship tidak ada
+    "deepseek/deepseek-v4-nonexistent-flagship",
+    // 4. Fuzzy fallback memilih kecocokan paling spesifik (longest match):
+    // qwen-2-5-72b-instruct vs qwen-2-5 -> harus memilih qwen-2-5-72b-instruct
+    "provider/qwen-2-5-72b-instruct-v2",
+  ];
+
+  // Gunakan snapshot khusus tanpa deepseek-v4-flash untuk uji isolasi flash -> non-flash
+  const snapshotIsolation = {
+    version: 3,
+    sources: {
+      blm_coding: {
+        "gpt-4o": 90,
+        "deepseek-v4": 88,
+        "qwen-2-5": 50,
+        "qwen-2-5-72b-instruct": 85,
+      },
+    },
+  };
+  for (let i = 0; i < 20; i++) {
+    snapshotIsolation.sources.blm_coding[`synth-model-${i}`] = 20 + i;
+  }
+
+  const results = resolveLiveScores(candidateIds, snapshotIsolation);
+
+  // gpt-4o-mini ditolak dari fallback gpt-4o
+  assert.strictEqual(results["openai/gpt-4o-mini"].empiricalCount, 0);
+  assert.ok(results["openai/gpt-4o-mini"].source.includes("heuristic"));
+
+  // deepseek-v4-flash ditolak dari fallback deepseek-v4
+  const flashCandidate = resolveLiveScores(["deepseek/deepseek-v4-flash"], snapshotIsolation);
+  assert.strictEqual(flashCandidate["deepseek/deepseek-v4-flash"].empiricalCount, 0);
+  assert.ok(flashCandidate["deepseek/deepseek-v4-flash"].source.includes("heuristic"));
+
+  // Longest match: provider/qwen-2-5-72b-instruct-v2 memilih qwen-2-5-72b-instruct (bukan qwen-2-5)
+  const qwenCandidate = results["provider/qwen-2-5-72b-instruct-v2"];
+  assert.strictEqual(qwenCandidate.empiricalCount, 1);
+  assert.ok(qwenCandidate.source.includes("empirical"));
+  assert.ok(qwenCandidate.score >= 70.0);
+});

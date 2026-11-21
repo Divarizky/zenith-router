@@ -13,6 +13,7 @@ import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/p
 import { disableModel } from "./modelOverrides.js";
 import { isQuotaBlocking, isQuotaProbeDue, syncProviderQuota } from "./quota.js";
 import { isAntigravityPoolExhausted } from "./antigravityPools.js";
+import { buildAntigravityFamilies, normalizeEffort } from "./antigravityCatalog.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { extractClaudeSessionId } from "./claudeIdentity.js";
 import { applyClaudeOAuthCloaking, isClaudeOAuthToken } from "./claudeCloaking.js";
@@ -99,6 +100,11 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   // healthy account would let a lower-priority, stale-cache account jump the queue.
   if (quotaProbe && available.length === 0) available.push(quotaProbe);
 
+  if (antigravityInventory && normalizeEffort(effort)) {
+    // Stable partition: unknown inventories remain eligible but cannot prove an exact tier.
+    available.sort((a, b) => Number(hasExactAntigravityTier(b, request, antigravityInventory)) - Number(hasExactAntigravityTier(a, request, antigravityInventory)));
+  }
+
   if (available.length === 0 && providerDef?.noAuth) {
     if (!isVirtualInCooldown(providerId, model)) {
       available.push({
@@ -139,6 +145,19 @@ function servesModel(connection, { providerDef, model, effort }, inventory) {
   const isExhausted = typeof row.quota_remaining === "number" && row.quota_remaining === 0;
   const hasFutureReset = Number(row.quota_reset_at || 0) > Date.now();
   return !(isExhausted && hasFutureReset);
+}
+
+function hasExactAntigravityTier(connection, { providerDef, model, effort }, inventory) {
+  const wanted = normalizeEffort(effort);
+  const rows = inventory?.get(connection.id);
+  if (!wanted || wanted === "off" || !rows?.size) return false;
+  const family = buildAntigravityFamilies(
+    Object.fromEntries([...rows].map(([id, row]) => [id, { displayName: row.display_name }]))
+  ).get(model);
+  if (!family) return false;
+  const runtime = resolveProviderRuntime(providerDef, model, effort, rows);
+  return Boolean(runtime && (family.variants[wanted] === runtime.id ||
+    (family.tiered === runtime.id && runtime.thinkingLevel === wanted)));
 }
 
 export function getNextConnection(providerId, triedIds = [], model = null, effort = undefined) {
@@ -743,10 +762,16 @@ export async function executeWithFallback({
       // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
       connection = available[0] || { id: null, provider: provider.id, auth_type: "none", is_active: 1 };
     } else {
-      const pinned = pickPinnedConnection(available, triedIds, pin);
+      // Do not let session affinity override an untried, eligible exact-tier account.
+      const inventory = provider.id === "antigravity" && modelId && normalizeEffort(effort)
+        ? getAntigravityModelsByConnection() : null;
+      const request = { providerDef: provider, model: modelId, effort };
+      const exact = inventory ? available.filter((c) => !triedIds.includes(c.id) && hasExactAntigravityTier(c, request, inventory)) : [];
+      const pinCandidates = exact.length ? exact : available;
+      const pinned = pickPinnedConnection(pinCandidates, triedIds, pin);
       // A pin that points at an eligible but full account hands the turn to an idle sibling.
-      const pinnedFull = !pinned && pin ? pinnedAccountIsFull(available, pin) : false;
-      connection = pinned || (pinnedFull ? pickIdleSibling(available, triedIds, pin) : null) || getNextConnection(provider.id, triedIds, modelId, effort);
+      const pinnedFull = !pinned && pin ? pinnedAccountIsFull(pinCandidates, pin) : false;
+      connection = pinned || (pinnedFull ? pickIdleSibling(pinCandidates, triedIds, pin) : null) || getNextConnection(provider.id, triedIds, modelId, effort);
       if (!connection) break;
       triedIds.push(connection.id);
     }

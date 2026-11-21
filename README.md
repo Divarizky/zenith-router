@@ -178,7 +178,7 @@ Daftar katalog per provider:
 
 * `cc/` (Claude OAuth): `low`, `medium`, `high`, `xhigh`, `max`.
 * `cx/` (Codex): `low`, `medium`, `high`, `xhigh`, `max` untuk model dalam ladder (`gpt-6*`, `gpt-5.6*`), dihitung oleh `codexThinkingLevelsFor` di `src/providers/codexTiers.js`. Model lain, mis. `cx/gpt-5.5`, tidak mengiklankan tier.
-* `ag/` (Antigravity): level yang ditemukan dari varian akun, bukan daftar bawaan. Family tanpa varian `xhigh` tidak mengiklankan `xhigh`.
+* `ag/` (Antigravity): level berasal dari inventori varian akun; varian bawaan dipakai jika discovery belum melaporkan family tersebut. Family tanpa varian `xhigh` tidak mengiklankan `xhigh`. Routing mengutamakan akun yang melayani level persis sebelum turun ke level lain.
 
 Model tanpa data level tidak menerima field ini. Field `capabilities` lain (`vision`, `reasoning`, `tools`) tidak berubah.
 

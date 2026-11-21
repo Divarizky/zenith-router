@@ -52,6 +52,7 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
   - Pembatasan transmisi field Responses (`reasoning`, `prompt_cache_key`, `prompt_cache_retention`) hanya untuk provider Codex agar kompatibel dengan upstream Responses lainnya.
 - **Tingkat Berpikir Antigravity & Diagnostik**:
   - Dukungan level thinking `xhigh` pada model Antigravity (varian `(XHigh)` dan suffix `xhigh`).
+  - Routing multi-akun Antigravity mengutamakan akun dengan tier thinking persis sebelum fallback ke tier lain, termasuk untuk sesi yang dipin.
   - Tracer sidik jari prefix prompt opt-in (`ZENITH_CACHE_TRACE=1`) untuk memantau konsistensi cache konteks upstream.
 - **Pencocokan Katalog Provider**:
   - Penanda `catalogRefresh` membuat sinkron menulis ulang tabel `retired_models` dari daftar live provider, tanpa mengubah daftar model gratis.

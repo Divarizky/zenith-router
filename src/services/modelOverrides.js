@@ -1,5 +1,22 @@
 import { getDb } from "../db/index.js";
 
+const dbCache = new WeakMap();
+
+function getDbState(db) {
+  const changeSeq = db.prepare("SELECT total_changes() AS c").get()?.c ?? -1;
+  let entry = dbCache.get(db);
+  if (!entry || entry.changeSeq !== changeSeq) {
+    entry = {
+      changeSeq,
+      disabledMap: null,
+      syncedByProvider: new Map(),
+      allSynced: null,
+    };
+    dbCache.set(db, entry);
+  }
+  return entry;
+}
+
 /**
  * Custom models + disabled models repository.
  * Custom models ride along in the route table; disabled entries are filtered out.
@@ -76,9 +93,21 @@ export function replaceRetiredModels(provider, modelIds) {
 /** Free models synced from providers with freeModelSync (written by services/modelSync.js). */
 export function listSyncedModels(provider = null) {
   const db = getDb();
-  return provider
-    ? db.prepare(`SELECT * FROM synced_models WHERE provider = ? ORDER BY model_id`).all(provider)
-    : db.prepare(`SELECT * FROM synced_models ORDER BY provider, model_id`).all();
+  const state = getDbState(db);
+  if (provider) {
+    if (state.syncedByProvider.has(provider)) {
+      return state.syncedByProvider.get(provider);
+    }
+    const rows = db.prepare(`SELECT * FROM synced_models WHERE provider = ? ORDER BY model_id`).all(provider);
+    state.syncedByProvider.set(provider, rows);
+    return rows;
+  }
+  if (state.allSynced) {
+    return state.allSynced;
+  }
+  const rows = db.prepare(`SELECT * FROM synced_models ORDER BY provider, model_id`).all();
+  state.allSynced = rows;
+  return rows;
 }
 
 export function getModelSyncState(provider) {
@@ -134,12 +163,17 @@ export function enableModels(provider, modelIds) {
 
 export function getDisabledModels() {
   const db = getDb();
+  const state = getDbState(db);
+  if (state.disabledMap) {
+    return state.disabledMap;
+  }
   const rows = db.prepare(`SELECT provider, model_id FROM disabled_models`).all();
   const map = {};
   for (const row of rows) {
     if (!map[row.provider]) map[row.provider] = [];
     map[row.provider].push(row.model_id);
   }
+  state.disabledMap = map;
   return map;
 }
 

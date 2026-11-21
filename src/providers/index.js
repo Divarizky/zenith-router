@@ -359,21 +359,48 @@ export function resolveModel(modelStr) {
 }
 
 /**
+ * Build a lookup map of synced model capabilities across all providers:
+ * Map<providerId, Map<modelId, capabilities>>.
+ */
+export function buildSyncedCapabilitiesLookup() {
+  const lookup = new Map();
+  try {
+    const rows = listSyncedModels();
+    for (const row of rows) {
+      if (!row?.provider || !row?.model_id) continue;
+      let providerMap = lookup.get(row.provider);
+      if (!providerMap) {
+        providerMap = new Map();
+        lookup.set(row.provider, providerMap);
+      }
+      providerMap.set(row.model_id, row.capabilities ?? null);
+    }
+  } catch {
+    // Return empty lookup if reading synced models fails
+  }
+  return lookup;
+}
+
+/**
  * Capabilities of one canonical `provider/model` combo member, resolved the same
  * way the catalog resolves provider models: stored sync data first, then the
  * pattern table. Null when nothing is known — same rule as modelCapabilityFields,
  * so both the catalog rollup and the vision reorder stay honest about what they
  * do not know.
  */
-export function memberCapabilities(member) {
+export function memberCapabilities(member, syncedLookup = null) {
   const resolved = resolveModel(member);
   if (!resolved) return null;
   let stored = null;
-  try {
-    stored =
-      listSyncedModels(resolved.provider.id).find((m) => m.model_id === resolved.targetModel)?.capabilities || null;
-  } catch {
-    stored = null;
+  if (syncedLookup instanceof Map) {
+    stored = syncedLookup.get(resolved.provider.id)?.get(resolved.targetModel) ?? null;
+  } else {
+    try {
+      stored =
+        listSyncedModels(resolved.provider.id).find((m) => m.model_id === resolved.targetModel)?.capabilities || null;
+    } catch {
+      stored = null;
+    }
   }
   return resolveCapabilities(resolved.targetModel, stored);
 }

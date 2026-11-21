@@ -1,4 +1,4 @@
-import { resolveModel, memberCapabilities } from "../providers/index.js";
+import { resolveModel, memberCapabilities, buildSyncedCapabilitiesLookup } from "../providers/index.js";
 import { getActiveComboByName } from "../services/combos.js";
 import { captureLine } from "../services/logger.js";
 import { executeWithFallback } from "../services/fallback.js";
@@ -45,10 +45,11 @@ function requestCarriesImages(body) {
 
 /** Stable partition: members that read images first, stored order preserved. */
 function prioritizeVision(members) {
+  const syncedLookup = buildSyncedCapabilitiesLookup();
   const vision = [];
   const rest = [];
   for (const member of members) {
-    (memberCapabilities(member)?.vision ? vision : rest).push(member);
+    (memberCapabilities(member, syncedLookup)?.vision ? vision : rest).push(member);
   }
   return [...vision, ...rest];
 }

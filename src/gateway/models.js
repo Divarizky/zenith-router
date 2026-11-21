@@ -1,4 +1,4 @@
-import { getAvailableModels, getProvider, memberCapabilities } from "../providers/index.js";
+import { getAvailableModels, getProvider, memberCapabilities, buildSyncedCapabilitiesLookup } from "../providers/index.js";
 import { listCombos } from "../services/combos.js";
 import { getProviderIconPath } from "../ui/assets.js";
 
@@ -14,10 +14,11 @@ import { getProviderIconPath } from "../ui/assets.js";
  * provider registry keeps no dependency on the combo service.
  */
 function comboCatalogEntries(now) {
+  const syncedLookup = buildSyncedCapabilitiesLookup();
   return listCombos()
     .filter((combo) => combo.enabled === 1 && combo.models.length > 0)
     .map((combo) => {
-      const caps = combo.models.map(memberCapabilities).filter(Boolean);
+      const caps = combo.models.map((m) => memberCapabilities(m, syncedLookup)).filter(Boolean);
       const entry = {
         id: combo.name,
         object: "model",

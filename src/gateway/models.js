@@ -18,6 +18,8 @@ function comboCatalogEntries(now) {
   return listCombos()
     .filter((combo) => combo.enabled === 1 && combo.models.length > 0)
     .map((combo) => {
+      // Combo tidak mengumumkan thinking_levels: anggota bisa berasal dari provider
+      // dengan daftar level berbeda, dan irisan tier belum dibuktikan. Field dihilangkan.
       const caps = combo.models.map((m) => memberCapabilities(m, syncedLookup)).filter(Boolean);
       const entry = {
         id: combo.name,

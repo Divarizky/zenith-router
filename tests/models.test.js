@@ -163,7 +163,8 @@ test("GET /v1/models - publishes capabilities and token limits, and omits them w
   const find = (id) => body.data.find((m) => m.id === id);
 
   const gpt = find("cx/gpt-6.1-sol");
-  assert.deepEqual(gpt.capabilities, { vision: true, reasoning: true });
+  // thinking_levels ikut di capabilities sejak TASK-0211 (katalog Codex dari codexThinkingLevelsFor).
+  assert.deepEqual(gpt.capabilities, { vision: true, reasoning: true, thinking_levels: ["low", "medium", "high", "xhigh", "max"] });
   assert.equal(gpt.context_length, 1050000);
 
   const unknown = find("glm/codegeex-4");

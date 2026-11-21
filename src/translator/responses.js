@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { parseSSEEvents } from "../utils/sse.js";
+import { codexReasoningEffort } from "../providers/codexTiers.js";
 
 // Whether a tool call is a Responses custom tool is decided per request from
 // the client's own `tools` declarations (customToolNamesFromBody), threaded
@@ -48,13 +49,11 @@ function shouldEmitCustom(name, explicitSet) {
   return explicitSet instanceof Set && explicitSet.has(name);
 }
 
-// Chat `reasoning_effort` -> Responses `reasoning.effort`. Pi's own Codex catalog
-// maps minimal to low; every other level is accepted by the backend as-is.
-const RESPONSES_EFFORT = { none: "none", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
-
+// Chat `reasoning_effort` -> Responses `reasoning.effort`. Pemetaannya berasal dari
+// codexTiers (single source bersama katalog). Dispatch tidak memfilter tier per model.
 function responsesReasoning(body) {
   const raw = body.reasoning_effort ?? body.reasoning?.effort;
-  const effort = typeof raw === "string" ? RESPONSES_EFFORT[raw.toLowerCase()] : undefined;
+  const effort = codexReasoningEffort(raw);
   if (!effort) return undefined;
   if (effort === "none") return { effort };
   const summary = body.reasoning?.summary;

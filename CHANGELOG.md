@@ -4,6 +4,11 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
 
 ### Fitur
 
+- **Level thinking pada `/v1/models`**:
+  - `capabilities.thinking_levels` terbit untuk model `cc/` (Claude OAuth), `cx/` (Codex ladder `gpt-6*`/`gpt-5.6*`), dan `ag/` (level dari varian akun yang ditemukan). Translator dan katalog Codex memakai satu sumber effort (`src/providers/codexTiers.js`). Dispatch meneruskan effort yang dikenal tanpa filter per model. Effort yang dikenal sudah dibuktikan sampai payload; penerimaan upstream belum diuji.
+  - `thinking_levels` top-level tetap ada sebagai alias untuk Pi, identik dengan `capabilities.thinking_levels`.
+  - Model Codex non-ladder (mis. `cx/gpt-5.5`) tidak mengiklankan tier. Dispatch tetap meneruskan `reasoning_effort` apa adanya.
+  - Entri combo sengaja tanpa `thinking_levels`: anggota bisa beda provider dan irisan level belum dihitung. Rollup `capabilities` dan `context_length` tidak berubah. Dokumentasi di README bagian `GET /v1/models`.
 - **Provider Nous Research / Hermes**:
   - Provider `nous` (apikey dan OAuth device code) memakai `freeModelSync: "merge"` tanpa model bawaan; model gratis diambil dari `/v1/models` publik dan ikut jadwal sinkron 6 jam. Gagal/kosong mempertahankan daftar terakhir yang berhasil.
   - Ikon resmi provider Hermes (`public/providers/nous.png`) pada UI dan dashboard.

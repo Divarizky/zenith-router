@@ -21,6 +21,7 @@ import xkiro from "./registry/xkiro.js";
 import deepseekWeb from "./registry/deepseek-web.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled, listRetiredModels } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
+import { codexThinkingLevelsFor } from "./codexTiers.js";
 
 /**
  * Capability fields published per model on /v1/models, same shape as the upstream reference:
@@ -59,14 +60,6 @@ function modelCapabilityFields(modelId, storedCaps = null, providerTools = undef
 export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 /**
- * Codex models whose backend accepts the full ladder up to `max`. The list follows
- * the levels Pi's own openai-codex catalog declares for these families; other Codex
- * models omit the field rather than claim a level nobody verified.
- */
-export const CODEX_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
-const CODEX_FULL_LADDER = /^gpt-(?:6(?:\.\d+)?|5\.6)(?:-|$)/;
-
-/**
  * Antigravity families publish the levels their own variants cover, so a family
  * without an `xhigh` variant never offers xhigh (it would fall back to high).
  * Pi adds `off` itself, so only the named levels are listed here.
@@ -77,10 +70,22 @@ export function antigravityThinkingLevels(family) {
   return LEVEL_DISPLAY_ORDER.filter((level) => levels.includes(level));
 }
 
+/**
+ * Publish the levels on the entry in two places: `capabilities.thinking_levels`
+ * (the documented location) and the top-level `thinking_levels` alias that Pi reads.
+ * Both come from the same array, so they cannot drift apart.
+ */
+function publishThinkingLevels(entry, fields) {
+  if (!fields.thinking_levels) return;
+  entry.thinking_levels = [...fields.thinking_levels];
+  entry.capabilities = { ...(entry.capabilities || {}), thinking_levels: [...fields.thinking_levels] };
+}
+
 function thinkingLevelFields(providerId, model = null) {
   if (providerId === "claude") return { thinking_levels: [...CLAUDE_OAUTH_THINKING_LEVELS] };
   if (providerId === "codex") {
-    return CODEX_FULL_LADDER.test(String(model?.id || "")) ? { thinking_levels: [...CODEX_THINKING_LEVELS] } : {};
+    const levels = codexThinkingLevelsFor(model?.id);
+    return levels ? { thinking_levels: levels } : {};
   }
   if (providerId === "antigravity") {
     const levels = antigravityThinkingLevels(model);
@@ -462,7 +467,8 @@ export function getAvailableModels({ all = false } = {}) {
         root: m.id,
         parent: null,
       };
-      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities, p.supportsTools === true ? true : undefined), thinkingLevelFields(p.id, m));
+      Object.assign(entry, modelCapabilityFields(m.id, m.capabilities, p.supportsTools === true ? true : undefined));
+      publishThinkingLevels(entry, thinkingLevelFields(p.id, m));
       result.push(entry);
     }
   }
@@ -482,7 +488,8 @@ export function getAvailableModels({ all = false } = {}) {
       parent: null,
       imported: true,
     };
-    Object.assign(entry, modelCapabilityFields(im.model_id, null, provider.supportsTools === true ? true : undefined), thinkingLevelFields(provider.id, { id: im.model_id }));
+    Object.assign(entry, modelCapabilityFields(im.model_id, null, provider.supportsTools === true ? true : undefined));
+    publishThinkingLevels(entry, thinkingLevelFields(provider.id, { id: im.model_id }));
     result.push(entry);
   }
 

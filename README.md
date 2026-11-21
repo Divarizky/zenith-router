@@ -167,6 +167,29 @@ Fitur Combos memungkinkan Anda membuat alias virtual yang menggabungkan beberapa
 * **Tangga Level Thinking Lengkap:** Mendukung level reasoning dari `low`, `medium`, `high`, `xhigh`, hingga `max` untuk model Codex generasi terbaru (`gpt-6` dan `gpt-5.6`).
 * **Isolasi Field Responses:** Field spesifik (`reasoning`, `prompt_cache_key`, `prompt_cache_retention`) dibatasi hanya untuk provider Codex guna menjaga kompatibilitas dengan upstream Responses lainnya.
 
+### Referensi `GET /v1/models`: `thinking_levels`
+
+Entri model provider dapat memuat daftar level thinking. Daftar itu terbit di dua tempat dengan nilai yang sama:
+
+* `capabilities.thinking_levels`: lokasi resmi. Klien membaca ini untuk memilih `reasoning_effort`.
+* `thinking_levels` (top-level): alias untuk Pi, yang sudah membaca field ini. Nilainya selalu identik dengan `capabilities.thinking_levels`.
+
+Daftar katalog per provider:
+
+* `cc/` (Claude OAuth): `low`, `medium`, `high`, `xhigh`, `max`.
+* `cx/` (Codex): `low`, `medium`, `high`, `xhigh`, `max` untuk model dalam ladder (`gpt-6*`, `gpt-5.6*`), dihitung oleh `codexThinkingLevelsFor` di `src/providers/codexTiers.js`. Model lain, mis. `cx/gpt-5.5`, tidak mengiklankan tier.
+* `ag/` (Antigravity): level yang ditemukan dari varian akun, bukan daftar bawaan. Family tanpa varian `xhigh` tidak mengiklankan `xhigh`.
+
+Model tanpa data level tidak menerima field ini. Field `capabilities` lain (`vision`, `reasoning`, `tools`) tidak berubah.
+
+**Combo tidak mengiklankan `thinking_levels`.** Combo adalah rantai beberapa anggota dari provider berbeda. Setiap anggota bisa memiliki daftar level yang berbeda, dan irisan level antar-anggota belum dihitung. Karena itu entri combo hanya memuat rollup `capabilities` (`vision`, `reasoning`) dan `context_length`, tanpa `thinking_levels`. Klien yang memilih combo harus memakai level yang didukung anggota yang dituju.
+
+**Effort yang dikenal dan bukti upstream.** Translator dan katalog memakai satu tabel effort Codex (`src/providers/codexTiers.js`), dan daftar tier yang diiklankan diturunkan dari tabel itu: `codexReasoningEffort` untuk pemetaan `reasoning_effort` ke `reasoning.effort`, dan `codexThinkingLevelsFor` untuk daftar yang diiklankan. Pemetaannya: `none` tetap `none`, `minimal` menjadi `low`, `low`/`medium`/`high`/`xhigh`/`max` tetap apa adanya. Nilai `none` dan `minimal` dikenali sebagai input, tetapi tidak diiklankan sebagai thinking tier.
+
+Dispatch Codex tidak memfilter effort per model. Model di luar ladder (mis. `cx/gpt-5.5`) tetap menerima `xhigh` dan `max` apa adanya, dan effort yang tidak dikenal tidak dikirim. Daftar pada `/v1/models` tidak menjadi pagar yang menolak request.
+
+Yang sudah dibuktikan adalah payload: effort yang dikenal sampai ke `reasoning.effort` di jalur dispatch. Penerimaan upstream belum diuji. Tidak ada request nyata ke upstream, sehingga tidak diketahui apakah upstream menerima tier yang diiklankan atau effort di luar ladder.
+
 ### Provider Antigravity & Sinkronisasi Katalog No-Auth
 * **Level Thinking XHigh:** Mendukung varian model dengan level thinking `xhigh` (suffix `xhigh` dan label `(XHigh)`).
 * **Prefix Cache Tracer:** Trace diagnostik sidik jari prefix prompt opt-in melalui env `ZENITH_CACHE_TRACE=1`.

@@ -18,11 +18,10 @@ const STRATEGY_OPTIONS = [
 ];
 
 /** One chain row: position badge, the member, reorder buttons, and delete button. */
-function renderMemberRow(name, member, index, total, combo) {
+function renderMemberRow(name, member, index, total) {
   const isUpDisabled = index === 0;
   const isDownDisabled = index === total - 1;
   const formattedOrder = `#${String(index + 1).padStart(2, "0")}`;
-  const remainingModels = combo.models.filter((_, idx) => idx !== index).join("\n");
 
   const row = `
     <div class="combo-member" data-model="${escapeHtml(member)}">
@@ -41,8 +40,7 @@ function renderMemberRow(name, member, index, total, combo) {
         </form>
         <form action="/dashboard/combos/update" method="POST" class="combo-remove-member" data-confirm="Hapus model ini dari rantai?">
           <input type="hidden" name="name" value="${escapeHtml(name)}" />
-          <input type="hidden" name="strategy" value="${escapeHtml(combo.strategy)}" />
-          <input type="hidden" name="models" value="${escapeHtml(remainingModels)}" />
+          <input type="hidden" name="remove_index" value="${index}" />
           <button type="submit" class="btn btn-ghost btn-xs btn-remove" title="Hapus dari rantai">&times;</button>
         </form>
       </div>
@@ -106,7 +104,7 @@ function renderComboDetailCard(combo) {
         <div class="combo-card-value">
           <div class="combo-client-box">
             <code>zenith-router/${name}</code>
-            <button type="button" class="btn btn-ghost btn-sm btn-copy-combo" onclick="copyCombo(this, 'zenith-router/${name}')">Salin</button>
+            <button type="button" class="btn btn-ghost btn-sm btn-copy-combo" data-copy-text="zenith-router/${name}" onclick="copyCombo(this)">Salin</button>
           </div>
         </div>
       </div>
@@ -125,7 +123,7 @@ function renderComboDetailCard(combo) {
             ${
               total === 0
                 ? `<span class="hint">Belum ada anggota</span>`
-                : combo.models.map((m, i) => renderMemberRow(combo.name, m, i, total, combo)).join("")
+                : combo.models.map((m, i) => renderMemberRow(combo.name, m, i, total)).join("")
             }
           </div>
         </div>
@@ -644,11 +642,12 @@ export function renderCombosContent(query = {}, lang = DEFAULT_LANGUAGE) {
 
     <script>
     function copyCombo(btn, text) {
+      var val = typeof text === "string" && text.length > 0 ? text : (btn && btn.getAttribute ? btn.getAttribute("data-copy-text") || "" : "");
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text);
+        navigator.clipboard.writeText(val);
       } else {
         var ta = document.createElement("textarea");
-        ta.value = text;
+        ta.value = val;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand("copy");
@@ -1027,8 +1026,19 @@ export async function handleUpdateCombo(c) {
   const name = String(body.name || "").trim();
 
   try {
-    const payload = { strategy: String(body.strategy || "").trim() };
+    const strategyInput = body.strategy !== undefined ? String(body.strategy).trim() : undefined;
+    const payload = {};
+    if (strategyInput !== undefined && strategyInput !== "") payload.strategy = strategyInput;
     if (body.models !== undefined) payload.models = parseMemberLines(body.models);
+    if (body.remove_index !== undefined && body.models === undefined) {
+      const current = getComboByName(name);
+      if (!current) throw new Error(`combo "${name}" tidak ada`);
+      const rmIdx = Number.parseInt(String(body.remove_index), 10);
+      if (!Number.isInteger(rmIdx) || rmIdx < 0 || rmIdx >= current.models.length) {
+        throw new Error("indeks anggota tidak valid");
+      }
+      payload.models = current.models.filter((_, idx) => idx !== rmIdx);
+    }
     updateCombo(name, payload);
   } catch (err) {
     return backWithError(c, err.message);

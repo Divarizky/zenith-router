@@ -684,3 +684,85 @@ test("GET /dashboard/providers?tab=combos - renders master-detail split pane neo
   assert.ok(customHtml.includes("zenith-router/cadangan-custom"), "snippet mengarah ke combo custom terpilih");
 });
 
+test("POST /dashboard/combos/update - remove_index removes member at specified index and preserves strategy", async () => {
+  seed();
+  await post("/dashboard/combos/create", {
+    name: "rantai-tiga",
+    models: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo\nglm/glm-4-flash\nollama/gpt-oss:20b",
+  });
+  await post("/dashboard/combos/update", { name: "rantai-tiga", strategy: "round-robin" });
+  assert.strictEqual(getComboByName("rantai-tiga").strategy, "round-robin");
+
+  // DOM check: form .combo-remove-member uses remove_index and does not duplicate models
+  const html = await (await app.request("/dashboard/providers?tab=combos&selected=rantai-tiga")).text();
+  const removeForms = html.match(/<form[^>]*class="combo-remove-member"[^>]*>[\s\S]*?<\/form>/g) || [];
+  assert.strictEqual(removeForms.length, 3, "ada 3 form remove member untuk 3 model");
+  for (const [idx, formHtml] of removeForms.entries()) {
+    assert.ok(formHtml.includes('name="remove_index"'), "harus menggunakan name='remove_index'");
+    assert.ok(formHtml.includes(`value="${idx}"`), `remove_index harus bernilai ${idx}`);
+    assert.ok(!formHtml.includes('name="models"'), "tidak boleh menyisipkan input models duplikat O(N^2)");
+  }
+
+  // Remove member at index 1 (glm/glm-4-flash)
+  const res = await post("/dashboard/combos/update", { name: "rantai-tiga", remove_index: "1" });
+  assert.strictEqual(res.status, 302);
+  assert.match(res.headers.get("location"), /updated=1/);
+
+  const updated = getComboByName("rantai-tiga");
+  assert.deepStrictEqual(updated.models, [
+    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "ollama/gpt-oss:20b",
+  ]);
+  assert.strictEqual(updated.strategy, "round-robin", "strategi round-robin harus dipertahankan");
+
+  // Indeks anggota di luar jangkauan ditolak
+  const badIdx = await post("/dashboard/combos/update", { name: "rantai-tiga", remove_index: "99" });
+  assert.strictEqual(badIdx.status, 302);
+  assert.match(badIdx.headers.get("location"), /error=1/);
+  assert.match(decodeURIComponent(badIdx.headers.get("location")), /indeks anggota tidak valid/);
+
+  // Combo tidak ada ditolak
+  const missing = await post("/dashboard/combos/update", { name: "combo-gaib", remove_index: "0" });
+  assert.strictEqual(missing.status, 302);
+  assert.match(missing.headers.get("location"), /error=1/);
+  assert.match(decodeURIComponent(missing.headers.get("location")), /tidak ada/);
+});
+
+test("GET /dashboard/combos - client integration copy button renders data-copy-text and safe onclick", async () => {
+  await createChain("antai-salin");
+  const html = await (await app.request("/dashboard/providers?tab=combos&selected=antai-salin")).text();
+
+  const copyBtn = html.match(/<button[^>]*class="[^"]*btn-copy-combo[^"]*"[^>]*>[\s\S]*?<\/button>/)?.[0] || "";
+  assert.ok(copyBtn, "tombol btn-copy-combo harus ditemukan");
+  assert.ok(copyBtn.includes('data-copy-text="zenith-router/antai-salin"'), "harus ada data-copy-text dengan format zenith-router/<name>");
+  assert.ok(copyBtn.includes('onclick="copyCombo(this)"'), "onclick harus memanggil copyCombo(this) tanpa argumen string tambahan");
+  assert.ok(!copyBtn.includes("copyCombo(this, '"), "tidak boleh ada interpolasi string JS mentah di onclick");
+
+  // Verifikasi eksekusi copyCombo pada VM dengan data-copy-text
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const copyScript = scripts.find((s) => s.includes("function copyCombo"));
+  assert.ok(copyScript, "skrip inline dengan copyCombo harus ada");
+
+  let copiedText = null;
+  const mockBtn = {
+    textContent: "Salin",
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+    getAttribute: (attr) => (attr === "data-copy-text" ? "zenith-router/antai-salin" : null),
+  };
+  const sandbox = {
+    navigator: {
+      clipboard: {
+        writeText: (val) => {
+          copiedText = val;
+        },
+      },
+    },
+    setTimeout: () => {},
+  };
+  vm.runInNewContext(`${copyScript}\ncopyCombo(mockBtn);`, { ...sandbox, mockBtn });
+  assert.strictEqual(copiedText, "zenith-router/antai-salin", "copyCombo menyalin isi data-copy-text ke clipboard");
+});
+

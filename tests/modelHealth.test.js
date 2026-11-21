@@ -6,6 +6,10 @@ import {
   classifyTestResult,
   testModelHealth,
 } from "../src/services/modelHealth.js";
+import {
+  INTERNAL_PROBE_HEADER,
+  INTERNAL_PROBE_TOKEN,
+} from "../src/security.js";
 
 test("QUOTA_LATENCY_SENTINEL bernilai 999998", () => {
   assert.equal(QUOTA_LATENCY_SENTINEL, 999998);
@@ -276,4 +280,84 @@ test("testModelHealth - menyertakan API key aktif saat auth gateway aktif dan Au
   assert.ok(capturedAuth, "Header Authorization harus terpasang");
   assert.ok(capturedAuth.startsWith("Bearer "), "Harus berupa Bearer token");
   assert.ok(capturedAuth.includes(created.key_prefix), "Bearer token harus memuat prefix key");
+});
+
+test("testModelHealth - mengirim header x-zenith-no-failover dan INTERNAL_PROBE_TOKEN", async () => {
+  let capturedHeaders = null;
+  const mockFetch = async (_url, options) => {
+    capturedHeaders = options.headers;
+    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+  };
+
+  await testModelHealth("openai/gpt-4o", { fetch: mockFetch });
+  assert.equal(capturedHeaders["x-zenith-no-failover"], "1");
+  assert.equal(capturedHeaders[INTERNAL_PROBE_HEADER], INTERNAL_PROBE_TOKEN);
+});
+
+test("testModelHealth - mengembalikan transportError: true saat ECONNREFUSED dan false saat timeout", async () => {
+  const connErrFetch = async () => {
+    const err = new Error("Connection refused");
+    err.code = "ECONNREFUSED";
+    throw err;
+  };
+  const connRes = await testModelHealth("openai/gpt-4o", { fetch: connErrFetch });
+  assert.equal(connRes.transportError, true);
+  assert.equal(connRes.ok, false);
+
+  const timeoutFetch = async () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    throw err;
+  };
+  const timeoutRes = await testModelHealth("openai/gpt-4o", { fetch: timeoutFetch });
+  assert.equal(timeoutRes.transportError, false);
+  assert.equal(timeoutRes.httpStatus, 408);
+  assert.equal(timeoutRes.ok, false);
+});
+
+test("gatewayAuth / v1 - loopback dengan INTERNAL_PROBE_TOKEN lolos auth meski require_api_key aktif", async () => {
+  const { app } = await import("../src/index.js");
+  const { initDb } = await import("../src/db/index.js");
+  const { setSetting } = await import("../src/services/settings.js");
+  initDb(":memory:");
+  setSetting("require_api_key", "true");
+
+  const body = JSON.stringify({
+    model: "dummy/model",
+    messages: [{ role: "user", content: "ping" }],
+  });
+
+  // 1. Tanpa API key dan tanpa probe token -> harus 401
+  const resNoAuth = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  assert.equal(resNoAuth.status, 401, "Permintaan tanpa token/key harus ditolak 401");
+
+  // 2. Dengan probe token sah dari loopback (remote undefined) tanpa API key -> lolos gatewayAuth (bukan 401)
+  const resProbe = await app.request("/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [INTERNAL_PROBE_HEADER]: INTERNAL_PROBE_TOKEN,
+    },
+    body,
+  });
+  assert.notEqual(resProbe.status, 401, "Internal probe dari loopback harus lolos auth gateway");
+
+  // 3. Dengan probe token sah tetapi dari NON-loopback (remote IP eksternal) -> harus tetap 401
+  const resRemoteProbe = await app.request(
+    "/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [INTERNAL_PROBE_HEADER]: INTERNAL_PROBE_TOKEN,
+      },
+      body,
+    },
+    { incoming: { socket: { remoteAddress: "192.168.1.100" } } }
+  );
+  assert.equal(resRemoteProbe.status, 401, "Internal probe dari non-loopback harus ditolak 401");
 });

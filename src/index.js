@@ -417,14 +417,24 @@ app.get("/api/console-logs/stream", async (c) => {
 // Start server ONLY when executed directly as entrypoint (not when imported in tests)
 export function startServer() {
   initConsoleLogCapture();
-  if (!startModelSyncScheduler()) startOpencodeCatalogRefresh();
+  const hostname = getBindHost();
+  const server = serve({
+    fetch: app.fetch,
+    port: PORT,
+    hostname,
+  });
+
+  const syncTimer = startModelSyncScheduler();
+  if (!syncTimer) {
+    startOpencodeCatalogRefresh();
+    try {
+      syncManagedCombos().catch(() => {});
+    } catch {}
+  }
   startQuotaSyncScheduler();
   startTokenRefreshScheduler();
   startOpencodeBridgeService().catch(() => {});
-  try {
-    syncManagedCombos().catch(() => {});
-  } catch {}
-  const hostname = getBindHost();
+
   const displayHost = hostname.includes(":") ? `[${hostname}]` : hostname;
   const base = `http://${displayHost}:${PORT}`;
   const dim = "\x1b[2m";
@@ -444,11 +454,7 @@ export function startServer() {
       "[zenith] Bound to a non-loopback address: Zenith Router API keys are required on /v1 and the dashboard stays localhost-only."
     );
   }
-  return serve({
-    fetch: app.fetch,
-    port: PORT,
-    hostname,
-  });
+  return server;
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

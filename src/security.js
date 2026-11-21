@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { cors } from "hono/cors";
 import { getSetting } from "./services/settings.js";
 import { extractClientApiKey, verifyApiKey } from "./services/apiKeys.js";
@@ -10,6 +11,9 @@ import {
   isLoginRequired,
 } from "./services/dashboardAuth.js";
 import { renderDashboardLoginPage } from "./ui/pages/login.js";
+
+export const INTERNAL_PROBE_HEADER = "x-zenith-internal-probe";
+export const INTERNAL_PROBE_TOKEN = randomBytes(32).toString("base64url");
 
 const DASHBOARD_AUTH_EXEMPT_PATHS = new Set(["/dashboard/login", "/dashboard/logout"]);
 
@@ -218,17 +222,26 @@ export async function gatewayAuth(c, next) {
     return next();
   }
 
+  const remote = c.env?.incoming?.socket?.remoteAddress;
+  const isLocal = !remote || isLoopbackAddress(remote);
+  const probeHeader = c.req.header(INTERNAL_PROBE_HEADER);
+  const isInternalProbe = Boolean(isLocal && probeHeader && probeHeader === INTERNAL_PROBE_TOKEN);
+
   const key = extractClientApiKey(c.req.raw.headers);
   if (key) {
     const verified = verifyApiKey(key);
     if (verified) {
       c.set("apiKeyId", verified.id);
       c.set("apiKeyName", verified.name);
-    } else if (isApiKeyRequired()) {
+    } else if (isApiKeyRequired() && !isInternalProbe) {
       return gatewayError(c, 401, "authentication_error", "Invalid Zenith Router API key");
     }
-  } else if (isApiKeyRequired()) {
+  } else if (isApiKeyRequired() && !isInternalProbe) {
     return gatewayError(c, 401, "authentication_error", "Missing Zenith Router API key");
+  }
+
+  if (isInternalProbe) {
+    c.set("isInternalProbe", true);
   }
 
   await next();

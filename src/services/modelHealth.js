@@ -9,7 +9,11 @@
  * - dead: model mengembalikan HTTP 404, deprecated, atau 401 token invalid/unauthorized.
  */
 
-import { isApiKeyRequired } from "../security.js";
+import {
+  isApiKeyRequired,
+  INTERNAL_PROBE_HEADER,
+  INTERNAL_PROBE_TOKEN,
+} from "../security.js";
 import { listApiKeys } from "./apiKeys.js";
 
 /**
@@ -132,6 +136,8 @@ export async function testModelHealth(fullModelId, options = {}) {
 
   const headers = {
     "Content-Type": "application/json",
+    "x-zenith-no-failover": "1",
+    [INTERNAL_PROBE_HEADER]: INTERNAL_PROBE_TOKEN,
     ...(options.headers || {}),
   };
   if (options.apiKey) {
@@ -232,6 +238,7 @@ export async function testModelHealth(fullModelId, options = {}) {
       httpStatus: isTimeout ? 408 : null,
       error: errorMsg,
       rawLatencyMs,
+      transportError: !isTimeout,
     };
   }
 }

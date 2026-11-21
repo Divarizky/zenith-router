@@ -8,6 +8,8 @@ import {
   syncManagedCombos,
   saveCombo,
   isFreeModel,
+  sortFastTierModels,
+  normalizeCandidateMeta,
 } from "../src/services/managedCombos.js";
 import { getComboByName, listCombos } from "../src/services/combos.js";
 import { QUOTA_LATENCY_SENTINEL } from "../src/services/modelHealth.js";
@@ -336,6 +338,7 @@ test("syncManagedCombos - probe mendegradasi model smart yang gagal ke urutan ba
   // Di dalam top-N, model dead harus berada setelah model sehat.
   assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-1"));
   assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-2"));
+  assert.ok(smart.indexOf("probe-dead-1") > smart.indexOf("probe-ok-3"));
 });
 
 test("combo terkelola terisi dari katalog nyata: klaim tools per provider lolos gate", async () => {
@@ -392,4 +395,182 @@ test("probeSmartTier - mempertahankan urutan ranking kualitas meski model pering
 
   assert.ok(idxA < idxB, "model ranking 1 (probe-a) harus tetap sebelum ranking 2 (probe-b) meski probe lebih lambat");
   assert.ok(idxB < idxC, "model ranking 2 (probe-b) harus tetap sebelum ranking 3 (probe-c)");
+});
+
+test("passesAgenticGate meloloskan model dengan capabilities.contextWindow 128000 meskipun max_tokens 8192", () => {
+  const model = {
+    id: "model-large-ctx-small-max",
+    max_tokens: 8192,
+    capabilities: {
+      contextWindow: 128000,
+      tools: true,
+    },
+  };
+  assert.equal(passesAgenticGate(model), true);
+});
+
+test("syncManagedCombos mempertahankan strategy round-robin dan enabled 0 pada combo yang sudah ada di DB saat sync ulang", async () => {
+  const { initDb } = await import("../src/db/index.js");
+  initDb(":memory:");
+
+  // Inisialisasi combo dengan custom strategy dan enabled: 0
+  saveCombo("zenith-smart", ["llm7/default"], { strategy: "round-robin", enabled: 0 });
+  const before = getComboByName("zenith-smart");
+  assert.equal(before.strategy, "round-robin");
+  assert.equal(before.enabled, 0);
+
+  const candidates = [
+    { id: "llm7/model-1", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "llm7/model-2", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "llm7/model-3", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+  ];
+
+  await syncManagedCombos({ candidates, probe: false });
+
+  const after = getComboByName("zenith-smart");
+  assert.equal(after.strategy, "round-robin", "strategy round-robin wajib dipertahankan");
+  assert.equal(after.enabled, 0, "status enabled 0 wajib dipertahankan");
+});
+
+test("syncManagedCombos (auto-candidates) menyaring keluar model :free statis dari provider noAuth: false tanpa koneksi/import/sync", async () => {
+  const { initDb, addConnection } = await import("../src/db/index.js");
+  initDb(":memory:");
+
+  // Tanpa koneksi aktif, model statis :free dari xkiro (category: apikey, noAuth: false/undefined) harus tersaring keluar
+  const resWithoutConn = await syncManagedCombos({ probe: false });
+  const freeModelsWithout = resWithoutConn.combos["zenith-free"].models;
+  const hasXkiroWithout = freeModelsWithout.some((m) => m.startsWith("xkr/") || m.includes("qwen3-coder-plus:free"));
+  assert.equal(hasXkiroWithout, false, "model static :free xkiro harus tersaring keluar saat belum ada koneksi aktif");
+
+  // Ketika koneksi aktif xkiro ditambahkan, model tersebut diizinkan masuk
+  addConnection({
+    provider: "xkiro",
+    name: "test-xkiro",
+    credentials: { apiKey: "test-key" },
+  });
+  const resWithConn = await syncManagedCombos({ probe: false });
+  const freeModelsWith = resWithConn.combos["zenith-free"].models;
+  const hasXkiroWith = freeModelsWith.some((m) => m.startsWith("xkr/") || m.includes("qwen3-coder-plus:free"));
+  assert.equal(hasXkiroWith, true, "model :free xkiro harus masuk setelah koneksi aktif ditambahkan");
+});
+
+test("probeSmartTier (via syncManagedCombos) memindahkan model probe 429 ke zenith-cooldown, mendegradasi ke bawah zenith-free, dan tidak mendegradasi saat ECONNREFUSED", async () => {
+  const candidates = [
+    { id: "probe-refused", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-quota-429", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-normal-ok", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+    { id: "probe-tail", owned_by: "llm7", contextLength: 200000, capabilities: { reasoning: true, tools: true } },
+  ];
+
+  const fetch = async (_url, init) => {
+    const { model } = JSON.parse(init.body);
+    if (model === "probe-refused") {
+      const err = new Error("connect ECONNREFUSED 127.0.0.1:20120");
+      err.code = "ECONNREFUSED";
+      throw err;
+    }
+    if (model === "probe-quota-429") {
+      return new Response(JSON.stringify({ error: { message: "rate limit exceeded" } }), { status: 429 });
+    }
+    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+  };
+
+  const result = await syncManagedCombos({
+    candidates,
+    probe: true,
+    probeOptions: { testOptions: { fetch } },
+  });
+
+  const smart = result.assembled["zenith-smart"];
+  const free = result.assembled["zenith-free"];
+  const cooldown = result.assembled["zenith-cooldown"];
+
+  // 1. probe-refused: transport failure tidak mendegradasi model (dianggap healthy)
+  assert.ok(smart.indexOf("probe-refused") < smart.indexOf("probe-quota-429"), "probe-refused tetap sehat dan di atas quota");
+
+  // 2. probe-quota-429: masuk ke zenith-cooldown
+  assert.ok(cooldown.includes("probe-quota-429"), "model 429 harus dipindahkan ke zenith-cooldown");
+  assert.equal(cooldown.includes("probe-refused"), false, "model refused tidak boleh masuk cooldown");
+
+  // 3. probe-quota-429 diturunkan ke paling bawah zenith-free
+  assert.ok(free.includes("probe-quota-429"), "model quota tetap ada di free");
+  assert.equal(free[free.length - 1], "probe-quota-429", "model degraded harus berada di paling bawah zenith-free");
+
+  // 4. Periksa return properties probeSmartTier
+  assert.ok(Array.isArray(result.assembled["zenith-free"]));
+  assert.ok(Array.isArray(result.assembled.zenithFree));
+  assert.ok(Array.isArray(result.assembled["zenith-smart"]));
+  assert.ok(Array.isArray(result.assembled.zenithSmart));
+  assert.ok(Array.isArray(result.assembled["zenith-cooldown"]));
+  assert.ok(Array.isArray(result.assembled.zenithCooldown));
+});
+
+test("sortFastTierModels - memprioritaskan latensi rendah dan varian flash/mini, mempertahankan urutan saat tidak ada sinyal", () => {
+  // 1. Prioritaskan latensi rendah dan arsitektur flash/mini
+  const pool = [
+    "provider/standard-slow-model",
+    "provider/gpt-4o-mini",
+    "provider/gemini-2.5-flash",
+  ];
+  const latencyMap = {
+    "provider/standard-slow-model": 1200,
+    "provider/gpt-4o-mini": 450,
+    "provider/gemini-2.5-flash": 150,
+  };
+
+  const sorted = sortFastTierModels(pool, { latencyMap });
+  // gemini-2.5-flash (150ms + flash) dan gpt-4o-mini (450ms + mini) harus di atas standard-slow-model (1200ms)
+  assert.equal(sorted[0], "provider/gemini-2.5-flash");
+  assert.equal(sorted[1], "provider/gpt-4o-mini");
+  assert.equal(sorted[2], "provider/standard-slow-model");
+
+  // 2. Pertahankan urutan asli ketika tidak ada sinyal pembeda kecepatan
+  const noSignalPool = [
+    "model-alpha",
+    "model-beta",
+    "model-gamma",
+  ];
+  const unchanged = sortFastTierModels(noSignalPool, { latencyMap: {} });
+  assert.deepEqual(unchanged, noSignalPool);
+
+  // 3. Edge cases: null, undefined, array kosong atau single item
+  assert.deepEqual(sortFastTierModels([]), []);
+  assert.deepEqual(sortFastTierModels(["single-model"]), ["single-model"]);
+  assert.deepEqual(sortFastTierModels(null), []);
+});
+
+test("assembleManagedCombos - zenith-fast memprioritaskan model berlatensi rendah dan flash/mini", () => {
+  const candidates = [
+    { id: "free/slow-coder", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "free/gemini-flash", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+    { id: "free/gpt-mini", owned_by: "llm7", contextLength: 128000, capabilities: { tools: true } },
+  ];
+  const latencyMap = {
+    "free/slow-coder": 1500,
+    "free/gemini-flash": 180,
+    "free/gpt-mini": 400,
+  };
+
+  const result = assembleManagedCombos({ candidates, latencyMap });
+  const fast = result["zenith-fast"];
+
+  assert.ok(fast.length >= 3);
+  assert.equal(fast[0], "free/gemini-flash");
+  assert.equal(fast[1], "free/gpt-mini");
+  assert.equal(fast[2], "free/slow-coder");
+});
+
+test("normalizeCandidateMeta - normalisasi contextWindow fallback order dan field polimorfik", () => {
+  // Test fallback: contextLength > context_length > contextWindow > capabilities.contextWindow > max_tokens
+  const metaWithCaps = {
+    id: "test-model",
+    max_tokens: 4096,
+    capabilities: { contextWindow: 128000, tools: true, vision: true, reasoning: true },
+  };
+  const norm = normalizeCandidateMeta("test-model", metaWithCaps);
+  assert.equal(norm.contextWindow, 128000);
+  assert.equal(norm.toolsVerified, true);
+  assert.equal(norm.toolsRejected, false);
+  assert.equal(norm.vision, true);
+  assert.equal(norm.reasoning, true);
 });

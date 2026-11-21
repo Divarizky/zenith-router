@@ -1,6 +1,7 @@
-import { getAvailableModels, getProvider, resolveModel } from "../providers/index.js";
+import { getAvailableModels, getProvider } from "../providers/index.js";
 import { resolveCapabilities } from "../providers/capabilities.js";
 import {
+  calculateCodingScore,
   isSmartTierModel,
   isThinkingVariant,
   sortModelsByCodingQuality,
@@ -8,6 +9,8 @@ import {
 import { resolveLiveScores } from "./benchmarkSync.js";
 import { isParkedLatency, QUOTA_LATENCY_SENTINEL, testModelHealth } from "./modelHealth.js";
 import { saveCombo } from "./combos.js";
+import { getDb, getConnections } from "../db/index.js";
+import { listSyncedModels } from "./modelOverrides.js";
 
 /**
  * Floor minimum panjang context token untuk model agentic koding.
@@ -21,6 +24,107 @@ function toId(m) {
   return m?.id || m?.model_id || m?.model || m?.name || "";
 }
 
+function resolveCandidateProvider(modelMeta) {
+  const id = toId(modelMeta);
+  const ownerRaw =
+    (typeof modelMeta === "object" && modelMeta !== null && modelMeta.owned_by) ||
+    (typeof id === "string" && id.includes("/") ? id.slice(0, id.indexOf("/")) : "");
+  const provider = ownerRaw ? getProvider(String(ownerRaw)) : null;
+  return { id, ownerRaw, provider };
+}
+
+function getModelMeta(id, candidate, metaMap) {
+  let fromMap = null;
+  if (metaMap instanceof Map && metaMap.has(id)) fromMap = metaMap.get(id);
+  else if (metaMap && metaMap[id] !== undefined) fromMap = metaMap[id];
+
+  if (typeof candidate === "object" && candidate !== null) {
+    return { ...candidate, ...(fromMap || {}) };
+  }
+  return fromMap || { id };
+}
+
+/**
+ * Normalisasi metadata model secara terpusat untuk agentic gate, capabilities vision/reasoning,
+ * dan context window dengan urutan fallback konsisten.
+ */
+export function normalizeCandidateMeta(id, candidate, metaMap = null) {
+  const modelId = id || toId(candidate);
+  const meta = getModelMeta(modelId, candidate, metaMap);
+
+  let toolsRejected = false;
+  let toolsVerified = false;
+  if (typeof meta === "object" && meta !== null) {
+    if (
+      meta.toolsUnsupported === true ||
+      meta.supportsTools === false ||
+      meta.tools === false ||
+      meta.capabilities?.tools === false ||
+      meta.capabilities?.toolsUnsupported === true
+    ) {
+      toolsRejected = true;
+    } else if (
+      meta.supportsTools === true ||
+      meta.tools === true ||
+      meta.capabilities?.tools === true
+    ) {
+      toolsVerified = true;
+    }
+  }
+
+  let ctx = null;
+  if (typeof meta === "object" && meta !== null) {
+    ctx =
+      meta.contextLength ??
+      meta.context_length ??
+      meta.contextWindow ??
+      meta.context_window ??
+      meta.context ??
+      meta.capabilities?.contextWindow;
+  }
+  if ((ctx === null || ctx === undefined) && modelId) {
+    const caps = resolveCapabilities(modelId);
+    if (caps && Number.isFinite(caps.contextWindow)) {
+      ctx = caps.contextWindow;
+    }
+  }
+  if ((ctx === null || ctx === undefined) && typeof meta === "object" && meta !== null) {
+    ctx = meta.max_tokens;
+  }
+
+  const contextWindow =
+    ctx !== null && ctx !== undefined && Number.isFinite(Number(ctx)) ? Number(ctx) : null;
+
+  const vision = Boolean(
+    meta &&
+      typeof meta === "object" &&
+      (meta.capabilities?.vision === true ||
+        meta.supportsImages === true ||
+        meta.supports_images === true ||
+        meta.vision === true ||
+        meta.multimodal === true)
+  );
+
+  const reasoning = Boolean(
+    meta &&
+      typeof meta === "object" &&
+      (meta.capabilities?.reasoning === true ||
+        meta.supports_thinking === 1 ||
+        meta.supports_thinking === true ||
+        meta.reasoning === true)
+  );
+
+  return {
+    ...meta,
+    id: modelId,
+    toolsRejected,
+    toolsVerified,
+    contextWindow,
+    vision,
+    reasoning,
+  };
+}
+
 /**
  * Menentukan apakah kandidat model termasuk model gratis.
  * Model dianggap gratis bila:
@@ -28,14 +132,9 @@ function toId(m) {
  * 2. Provider pemiliknya (`owned_by`, atau prefix sebelum `/` pada ID) berkategori `free` atau `noAuth: true`.
  */
 export function isFreeModel(modelMeta) {
-  const id = toId(modelMeta);
+  const { id, provider } = resolveCandidateProvider(modelMeta);
   if (!id) return false;
   if (id.toLowerCase().endsWith(":free")) return true;
-
-  const ownerRaw =
-    (typeof modelMeta === "object" && modelMeta !== null && modelMeta.owned_by) ||
-    (id.includes("/") ? id.slice(0, id.indexOf("/")) : "");
-  const provider = getProvider(String(ownerRaw));
   if (!provider) return false;
   return provider.category === "free" || provider.noAuth === true;
 }
@@ -47,12 +146,8 @@ export function isFreeModel(modelMeta) {
 export const MANAGED_COMBO_EXCLUDED_PROVIDERS = Object.freeze(["kiro"]);
 
 export function isExcludedFromManagedCombos(modelMeta) {
-  const id = toId(modelMeta);
+  const { id, provider } = resolveCandidateProvider(modelMeta);
   if (!id) return false;
-  const ownerRaw =
-    (typeof modelMeta === "object" && modelMeta !== null && modelMeta.owned_by) ||
-    (id.includes("/") ? id.slice(0, id.indexOf("/")) : "");
-  const provider = getProvider(String(ownerRaw));
   return Boolean(provider && MANAGED_COMBO_EXCLUDED_PROVIDERS.includes(provider.id));
 }
 
@@ -65,50 +160,18 @@ export function isExcludedFromManagedCombos(modelMeta) {
 export function passesAgenticGate(modelMeta) {
   if (!modelMeta) return false;
 
-  const id = toId(modelMeta);
+  const norm =
+    typeof modelMeta === "object" &&
+    modelMeta !== null &&
+    modelMeta.toolsRejected !== undefined &&
+    modelMeta.toolsVerified !== undefined
+      ? modelMeta
+      : normalizeCandidateMeta(toId(modelMeta), modelMeta);
 
-  // 1. Evaluasi Tool Support — fail-closed.
-  //    Sinyal eksplisit "tidak support" menolak; tanpa sinyal positif apa pun
-  //    (flag tools/stored caps/pattern table), model juga ditolak karena
-  //    kegagalan tools di upstream langsung merusak client agentic.
-  let toolsVerified = false;
-  if (typeof modelMeta === "object") {
-    if (modelMeta.toolsUnsupported === true) return false;
-    if (modelMeta.supportsTools === false) return false;
-    if (modelMeta.tools === false) return false;
-    if (modelMeta.capabilities?.tools === false || modelMeta.capabilities?.toolsUnsupported === true) {
-      return false;
-    }
-    if (modelMeta.supportsTools === true) toolsVerified = true;
-    if (modelMeta.tools === true) toolsVerified = true;
-    if (modelMeta.capabilities?.tools === true) toolsVerified = true;
-  }
-  if (!toolsVerified) return false;
+  if (norm.toolsRejected || !norm.toolsVerified) return false;
 
-  // 2. Evaluasi Context Length
-  let ctx = null;
-  if (typeof modelMeta === "object") {
-    ctx =
-      modelMeta.contextLength ??
-      modelMeta.context_length ??
-      modelMeta.contextWindow ??
-      modelMeta.context_window ??
-      modelMeta.max_tokens ??
-      modelMeta.context ??
-      modelMeta.capabilities?.contextWindow;
-  }
-
-  // Jika context belum ditemukan di object atau modelMeta berupa string, cek pattern capabilities
-  if ((ctx === null || ctx === undefined) && id) {
-    const caps = resolveCapabilities(id);
-    if (caps && Number.isFinite(caps.contextWindow)) {
-      ctx = caps.contextWindow;
-    }
-  }
-
-  if (ctx !== null && ctx !== undefined) {
-    const num = Number(ctx);
-    if (Number.isFinite(num) && num < AGENTIC_MIN_CONTEXT) {
+  if (norm.contextWindow !== null && norm.contextWindow !== undefined) {
+    if (norm.contextWindow < AGENTIC_MIN_CONTEXT) {
       return false;
     }
   }
@@ -135,19 +198,9 @@ export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap =
     const id = toId(m);
     if (!id) continue;
 
-    let meta = typeof m === "object" && m !== null ? m : null;
-    if (!meta && metaMap) {
-      meta = metaMap instanceof Map ? metaMap.get(id) : metaMap[id];
-    }
-
-    const hasReasoningCap =
-      meta?.capabilities?.reasoning === true ||
-      meta?.supports_thinking === 1 ||
-      meta?.supports_thinking === true ||
-      meta?.reasoning === true;
-
+    const norm = normalizeCandidateMeta(id, m, metaMap);
     const isReasoning =
-      hasReasoningCap ||
+      norm.reasoning ||
       isThinkingVariant(id) ||
       isSmartTierModel(id, benchmarks, liveScores);
 
@@ -162,18 +215,22 @@ export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap =
 
   // Fallback aman: minimal 3 model per tier dari urutan pool aktif teratas
   if (smart.length < 3) {
+    const smartSet = new Set(smart);
     for (const id of rankedIds) {
-      if (!smart.includes(id)) {
+      if (!smartSet.has(id)) {
         smart.push(id);
+        smartSet.add(id);
         if (smart.length >= 3) break;
       }
     }
   }
 
   if (fast.length < 3) {
+    const fastSet = new Set(fast);
     for (const id of rankedIds) {
-      if (!fast.includes(id)) {
+      if (!fastSet.has(id)) {
         fast.push(id);
+        fastSet.add(id);
         if (fast.length >= 3) break;
       }
     }
@@ -187,11 +244,11 @@ export function deriveTierLists(rankedActiveModels, benchmarks = null, metaMap =
  * capabilities dari registry/DB, field supportsImages, atau flag vision eksplisit.
  */
 function isVisionCapable(meta) {
-  if (!meta || typeof meta !== "object") return false;
-  if (meta.capabilities?.vision === true) return true;
-  if (meta.supportsImages === true || meta.supports_images === true) return true;
-  if (meta.vision === true || meta.multimodal === true) return true;
-  return false;
+  if (!meta) return false;
+  if (typeof meta === "object" && meta.vision !== undefined) {
+    return Boolean(meta.vision);
+  }
+  return Boolean(normalizeCandidateMeta(toId(meta), meta).vision);
 }
 
 function getModelLatency(id, candidate, latencyMap) {
@@ -202,17 +259,6 @@ function getModelLatency(id, candidate, latencyMap) {
     if (typeof candidate.latency === "number") return candidate.latency;
   }
   return 0;
-}
-
-function getModelMeta(id, candidate, metaMap) {
-  let fromMap = null;
-  if (metaMap instanceof Map && metaMap.has(id)) fromMap = metaMap.get(id);
-  else if (metaMap && metaMap[id] !== undefined) fromMap = metaMap[id];
-
-  if (typeof candidate === "object" && candidate !== null) {
-    return { ...candidate, ...(fromMap || {}) };
-  }
-  return fromMap || { id };
 }
 
 function isModelInCooldown(id, candidate, latency, signals) {
@@ -244,12 +290,95 @@ function isModelInCooldown(id, candidate, latency, signals) {
   return false;
 }
 
+const FAST_ARCH_REGEX = /(?:flash|mini|nano|lite|instant|small|haiku)/i;
+const SMALL_PARAM_REGEX = /(?:^|[^\w])([1-9]|1[0-4])b(?:[^\w]|$)/i;
+
 /**
- * Menyusun 4 set combo terkelola dari kandidat model, status latensi, dan sinyal kesehatan:
+ * Mengurutkan model fast tier (zenith-fast) dengan memprioritaskan latensi rendah,
+ * rasio kegagalan minimal, dan arsitektur respons instan (flash/mini/nano).
+ *
+ * @param {string[]} fastIds - Daftar ID model fast tier
+ * @param {object} [options]
+ * @param {object|Map} [options.latencyMap]
+ * @param {object|Map} [options.failureRateMap]
+ * @param {Array|object} [options.benchmarks]
+ * @param {object} [options.liveScores]
+ * @returns {string[]}
+ */
+export function sortFastTierModels(
+  fastIds,
+  { latencyMap = {}, failureRateMap = {}, benchmarks = null, liveScores = null } = {}
+) {
+  if (!Array.isArray(fastIds) || fastIds.length <= 1) {
+    return [...(fastIds || [])];
+  }
+
+  const items = fastIds.map((id, idx) => {
+    const latRaw = latencyMap instanceof Map ? latencyMap.get(id) : latencyMap?.[id];
+    const lat = typeof latRaw === "number" && Number.isFinite(latRaw) && latRaw > 0 ? latRaw : 0;
+
+    const failRaw = failureRateMap instanceof Map ? failureRateMap.get(id) : failureRateMap?.[id];
+    let failRate = 0;
+    if (typeof failRaw === "number" && Number.isFinite(failRaw) && failRaw > 0) {
+      failRate = failRaw > 1 ? failRaw / 100 : failRaw;
+    }
+
+    const hasFastArch = FAST_ARCH_REGEX.test(id);
+    return { id, idx, lat, failRate, hasFastArch };
+  });
+
+  const hasLatencySignal = items.some((item) => item.lat > 0);
+  const hasFailureSignal = items.some((item) => item.failRate > 0);
+  const fastArchCount = items.filter((item) => item.hasFastArch).length;
+  const hasArchSignal = fastArchCount > 0 && fastArchCount < items.length;
+
+  if (!hasLatencySignal && !hasFailureSignal && !hasArchSignal) {
+    return [...fastIds];
+  }
+
+  const scored = items.map((item) => {
+    const baseCodingScore = calculateCodingScore(item.id, {
+      latencyMs: 0,
+      failureRate: 0,
+      benchmarks,
+      liveScores,
+    });
+
+    let fastScore = baseCodingScore;
+    if (item.hasFastArch) {
+      fastScore += 8;
+    }
+    if (SMALL_PARAM_REGEX.test(item.id)) {
+      fastScore += 4;
+    }
+    if (item.lat > 0) {
+      fastScore -= item.lat * 0.015;
+      if (item.lat <= 500) {
+        fastScore += 5;
+      }
+    }
+    fastScore -= item.failRate * 60;
+
+    return { ...item, fastScore };
+  });
+
+  scored.sort((a, b) => {
+    if (b.fastScore !== a.fastScore) {
+      return b.fastScore - a.fastScore;
+    }
+    return a.idx - b.idx;
+  });
+
+  return scored.map((item) => item.id);
+}
+
+/**
+ * Menyusun 5 set combo terkelola dari kandidat model, status latensi, dan sinyal kesehatan:
  * 1. zenith-free: Seluruh model gratis aktif lolos agentic gate, terurut kualitas koding.
  * 2. zenith-smart: Model tier atas (coding score >= 68 / thinking) untuk tugas arsitektur.
  * 3. zenith-fast: Model instan non-thinking untuk autocomplete dan edit cepat.
  * 4. zenith-cooldown: Model yang terkena kuota / rate limit (429 / sentinel 999998).
+ * 5. zenith-vision: Model gratis aktif yang mendukung input gambar (vision) terurut kualitas koding.
  */
 export function assembleManagedCombos({
   candidates = [],
@@ -262,8 +391,14 @@ export function assembleManagedCombos({
 
   // Seluruh super-combo hanya boleh berisi model gratis.
   for (const c of candidates) {
-    const id = toId(c);
-    if (!id || !isFreeModel(c) || isExcludedFromManagedCombos(c)) continue;
+    const { id, provider } = resolveCandidateProvider(c);
+    if (!id) continue;
+    const isFree =
+      id.toLowerCase().endsWith(":free") ||
+      Boolean(provider && (provider.category === "free" || provider.noAuth === true));
+    if (!isFree) continue;
+    if (provider && MANAGED_COMBO_EXCLUDED_PROVIDERS.includes(provider.id)) continue;
+
     const latency = getModelLatency(id, c, latencyMap);
     if (isModelInCooldown(id, c, latency, signals)) {
       cooldownCandidates.push(c);
@@ -276,7 +411,7 @@ export function assembleManagedCombos({
   const passedAgentic = [];
   for (const c of activeCandidates) {
     const id = toId(c);
-    const meta = getModelMeta(id, c, metaMap);
+    const meta = normalizeCandidateMeta(id, c, metaMap);
     if (passesAgenticGate(meta)) {
       passedAgentic.push(c);
     }
@@ -299,7 +434,7 @@ export function assembleManagedCombos({
       sortedActive
         .filter((m) => {
           const id = toId(m);
-          return isVisionCapable(getModelMeta(id, m, metaMap));
+          return isVisionCapable(normalizeCandidateMeta(id, m, metaMap));
         })
         .map(toId)
         .filter(Boolean),
@@ -307,12 +442,19 @@ export function assembleManagedCombos({
   ];
 
   // Pisahkan ke tier smart dan fast
-  const { smart: zenithSmart, fast: zenithFast } = deriveTierLists(
+  const { smart: zenithSmart, fast: rawFast } = deriveTierLists(
     sortedActive,
     signals?.benchmarks,
     metaMap,
     signals?.liveScores,
   );
+
+  const zenithFast = sortFastTierModels(rawFast, {
+    latencyMap,
+    failureRateMap: signals?.failureRateMap,
+    benchmarks: signals?.benchmarks,
+    liveScores: signals?.liveScores,
+  });
 
   // Urutkan juga model cooldown
   const sortedCooldown = sortModelsByCodingQuality(cooldownCandidates, {
@@ -360,6 +502,64 @@ export async function syncManagedCombos(options = {}) {
     }
   }
 
+  if (autoCandidates && candidates.length > 0) {
+    let activeProviders = new Set();
+    try {
+      for (const conn of getConnections()) {
+        if (conn && (conn.is_active === 1 || conn.is_active === true)) {
+          const p = getProvider(conn.provider);
+          if (p) {
+            activeProviders.add(p.id);
+            const aliases = Array.isArray(p.alias) ? p.alias : [p.alias || p.id];
+            for (const a of aliases) activeProviders.add(String(a).toLowerCase());
+          } else if (conn.provider) {
+            activeProviders.add(String(conn.provider).toLowerCase());
+          }
+        }
+      }
+    } catch {
+      activeProviders = new Set();
+    }
+
+    let syncedProviders = new Set();
+    try {
+      const synced = listSyncedModels();
+      for (const s of synced) {
+        if (s?.provider) {
+          syncedProviders.add(s.provider);
+          const p = getProvider(s.provider);
+          if (p) {
+            syncedProviders.add(p.id);
+            const aliases = Array.isArray(p.alias) ? p.alias : [p.alias || p.id];
+            for (const a of aliases) syncedProviders.add(String(a).toLowerCase());
+          } else {
+            syncedProviders.add(String(s.provider).toLowerCase());
+          }
+        }
+      }
+    } catch {
+      syncedProviders = new Set();
+    }
+
+    candidates = candidates.filter((c) => {
+      const { ownerRaw, provider } = resolveCandidateProvider(c);
+      if (!provider) return true;
+
+      const isAccountProvider = !provider.noAuth && provider.category !== "free";
+      if (!isAccountProvider) return true;
+
+      const hasActiveConn =
+        activeProviders.has(provider.id) ||
+        activeProviders.has(String(ownerRaw).toLowerCase());
+      const isImported = Boolean(c && typeof c === "object" && c.imported === true);
+      const hasSynced =
+        syncedProviders.has(provider.id) ||
+        syncedProviders.has(String(ownerRaw).toLowerCase());
+
+      return hasActiveConn || isImported || hasSynced;
+    });
+  }
+
   let signals = options.signals;
   if (!signals?.liveScores) {
     try {
@@ -388,25 +588,43 @@ export async function syncManagedCombos(options = {}) {
     probed = await probeSmartTier(assembled, options.probeOptions || {});
   }
 
-  const strategy = options.strategy || "fallback";
+  const db = getDb();
+  let inTransaction = false;
+  try {
+    db.exec("BEGIN");
+    inTransaction = true;
 
-  const savedFree = saveCombo("zenith-free", probed["zenith-free"], { strategy, enabled: 1 });
-  const savedSmart = saveCombo("zenith-smart", probed["zenith-smart"], { strategy, enabled: 1 });
-  const savedFast = saveCombo("zenith-fast", probed["zenith-fast"], { strategy, enabled: 1 });
-  const savedCooldown = saveCombo("zenith-cooldown", probed["zenith-cooldown"], { strategy, enabled: 1 });
-  const savedVision = saveCombo("zenith-vision", probed["zenith-vision"], { strategy, enabled: 1 });
+    const comboOptions = { strategy: options.strategy, enabled: options.enabled };
+    const savedFree = saveCombo("zenith-free", probed["zenith-free"], comboOptions);
+    const savedSmart = saveCombo("zenith-smart", probed["zenith-smart"], comboOptions);
+    const savedFast = saveCombo("zenith-fast", probed["zenith-fast"], comboOptions);
+    const savedCooldown = saveCombo("zenith-cooldown", probed["zenith-cooldown"], comboOptions);
+    const savedVision = saveCombo("zenith-vision", probed["zenith-vision"], comboOptions);
 
-  return {
-    ok: true,
-    combos: {
-      "zenith-free": savedFree,
-      "zenith-smart": savedSmart,
-      "zenith-fast": savedFast,
-      "zenith-cooldown": savedCooldown,
-      "zenith-vision": savedVision,
-    },
-    assembled: probed,
-  };
+    db.exec("COMMIT");
+    inTransaction = false;
+
+    return {
+      ok: true,
+      combos: {
+        "zenith-free": savedFree,
+        "zenith-smart": savedSmart,
+        "zenith-fast": savedFast,
+        "zenith-cooldown": savedCooldown,
+        "zenith-vision": savedVision,
+      },
+      assembled: probed,
+    };
+  } catch (err) {
+    if (inTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Rollback gagal jika koneksi/transaksi sudah terputus
+      }
+    }
+    throw err;
+  }
 }
 
 /**
@@ -423,8 +641,8 @@ const PROBE_TOP_N = 3;
 const PROBE_TIMEOUT_MS = 8000;
 
 async function probeSmartTier(assembled, options = {}) {
-  const smart = [...(assembled["zenith-smart"] || [])];
-  if (smart.length <= 1) return assembled;
+  const smart = [...(assembled["zenith-smart"] || assembled.zenithSmart || [])];
+  if (smart.length === 0) return assembled;
 
   const topN = smart.slice(0, PROBE_TOP_N);
   const rest = smart.slice(PROBE_TOP_N);
@@ -436,23 +654,50 @@ async function probeSmartTier(assembled, options = {}) {
           timeoutMs: options.timeoutMs ?? PROBE_TIMEOUT_MS,
           ...(options.testOptions || {}),
         });
-        const isHealthy = result.ok || result.status === "active";
-        return { id, isHealthy };
+        const isTransportError =
+          result.transportError === true ||
+          (result.httpStatus === null &&
+            /connection refused|econnrefused|fetch failed/i.test(result.error || ""));
+        const isHealthy = isTransportError ? true : Boolean(result.ok || result.status === "active");
+        const isQuota = result.status === "quota" || result.httpStatus === 429;
+        return { id, isHealthy, isQuota, status: result.status, result };
       } catch {
         // Probe gagal total: jangan buang modelnya, pertahankan posisi.
-        return { id, isHealthy: true };
+        return { id, isHealthy: true, isQuota: false, status: "active" };
       }
     })
   );
 
   const healthy = probeResults.filter((r) => r.isHealthy).map((r) => r.id);
   const degraded = probeResults.filter((r) => !r.isHealthy).map((r) => r.id);
+  const degradedSet = new Set(degraded);
 
-  const reordered = [...healthy, ...degraded, ...rest];
+  const reorderedSmart = [...healthy, ...rest, ...degraded];
+
+  const free = [...(assembled["zenith-free"] || assembled.zenithFree || [])];
+  const freeHealthy = free.filter((id) => !degradedSet.has(id));
+  const freeDegraded = free.filter((id) => degradedSet.has(id));
+  const reorderedFree = [...freeHealthy, ...freeDegraded];
+
+  const cooldown = [...(assembled["zenith-cooldown"] || assembled.zenithCooldown || [])];
+  const quotaProbeIds = probeResults
+    .filter((r) => r.isQuota || r.status === "quota")
+    .map((r) => r.id);
+
+  for (const id of quotaProbeIds) {
+    if (!cooldown.includes(id)) {
+      cooldown.push(id);
+    }
+  }
+
   return {
     ...assembled,
-    "zenith-smart": reordered,
-    zenithSmart: reordered,
+    "zenith-free": reorderedFree,
+    zenithFree: reorderedFree,
+    "zenith-smart": reorderedSmart,
+    zenithSmart: reorderedSmart,
+    "zenith-cooldown": cooldown,
+    zenithCooldown: cooldown,
   };
 }
 

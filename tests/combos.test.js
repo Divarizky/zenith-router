@@ -12,7 +12,15 @@ import {
   getActiveComboByName,
   listCombos,
   canonicalizeMember,
+  saveCombo,
 } from "../src/services/combos.js";
+import { buildSyncedCapabilitiesLookup, memberCapabilities } from "../src/providers/index.js";
+import {
+  disableModel,
+  enableModel,
+  isModelDisabled,
+  listSyncedModels,
+} from "../src/services/modelOverrides.js";
 
 initDb(":memory:");
 
@@ -323,4 +331,54 @@ test("combos - rename validates the new name like a create does", () => {
   assert.throws(() => renameCombo("lama-tiga", ""), /hanya boleh/);
   assert.throws(() => renameCombo("combo-hilang", "nama-baru"), /tidak ada/);
   assert.ok(getComboByName("lama-tiga"), "rename gagal tidak menghapus combo");
+});
+
+test("combos - saveCombo preserves existing strategy and enabled state when omitted, and overrides when explicit", () => {
+  initDb(":memory:");
+
+  const initial = saveCombo("zenith-test", ["glm/glm-4-flash"]);
+  assert.strictEqual(initial.strategy, "fallback");
+  assert.strictEqual(initial.enabled, 1);
+
+  const overridden = saveCombo("zenith-test", ["glm/glm-4-flash"], { strategy: "round-robin", enabled: 0 });
+  assert.strictEqual(overridden.strategy, "round-robin");
+  assert.strictEqual(overridden.enabled, 0);
+
+  const preserved = saveCombo("zenith-test", ["glm/glm-4-flash", "ollama/gpt-oss:20b"]);
+  assert.strictEqual(preserved.models.length, 2);
+  assert.deepStrictEqual(preserved.models, ["glm/glm-4-flash", "ollama/gpt-oss:20b"]);
+  assert.strictEqual(preserved.strategy, "round-robin");
+  assert.strictEqual(preserved.enabled, 0);
+
+  const restored = saveCombo("zenith-test", ["glm/glm-4-flash"], { strategy: "fallback", enabled: 1 });
+  assert.strictEqual(restored.strategy, "fallback");
+  assert.strictEqual(restored.enabled, 1);
+});
+
+test("combos - modelOverrides cache invalidates automatically on total_changes and buildSyncedCapabilitiesLookup resolves memberCapabilities", () => {
+  initDb(":memory:");
+
+  assert.strictEqual(isModelDisabled("glm", "glm-4-flash"), false);
+  disableModel("glm", "glm-4-flash");
+  assert.strictEqual(isModelDisabled("glm", "glm-4-flash"), true);
+  enableModel("glm", "glm-4-flash");
+  assert.strictEqual(isModelDisabled("glm", "glm-4-flash"), false);
+
+  const initialSynced = listSyncedModels("llm7");
+  assert.strictEqual(Array.isArray(initialSynced), true);
+  assert.strictEqual(initialSynced.length, 0);
+
+  getDb()
+    .prepare(
+      `INSERT INTO synced_models (provider, model_id, name, capabilities, synced_at) VALUES ('llm7', 'custom-sync-vision', 'Custom Vision', '{"vision":true,"reasoning":true}', 1000)`
+    )
+    .run();
+
+  const synced = listSyncedModels("llm7");
+  assert.ok(synced.some((m) => m.model_id === "custom-sync-vision"));
+
+  const lookup = buildSyncedCapabilitiesLookup();
+  const caps = memberCapabilities("llm7/custom-sync-vision", lookup);
+  assert.strictEqual(caps?.vision, true);
+  assert.strictEqual(caps?.reasoning, true);
 });

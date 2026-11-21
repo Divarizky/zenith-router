@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { proxyFetch } from "./proxy.js";
 import { getSetting } from "../services/settings.js";
+import { readErrorText } from "../utils/errorBody.js";
 
 // Verbatim from upstream FREEBUFF_ROOT_AGENT_ID_BY_MODEL
 // (CodebuffAI/freebuff common/src/constants/free-agents.ts).
@@ -193,7 +194,7 @@ export class FreebuffExecutor extends BaseExecutor {
         const data = await sessionRes.json();
         instanceId = data.instanceId || "";
       } else {
-        const errText = await sessionRes.text();
+        const errText = await readErrorText(sessionRes);
         const status = sessionRes.status;
 
         // Detect quota exceeded / rate limit
@@ -329,7 +330,7 @@ export class FreebuffExecutor extends BaseExecutor {
     // Check for quota exceeded in chat completion response
     if (response.status === 429 || response.status === 402) {
       try {
-        const errBody = await response.clone().text();
+        const errBody = await readErrorText(response);
         if (errBody.toLowerCase().includes("quota") || errBody.toLowerCase().includes("rate limit") || errBody.toLowerCase().includes("exceeded")) {
           const now = new Date();
           const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));

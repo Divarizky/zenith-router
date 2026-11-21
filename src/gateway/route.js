@@ -2,6 +2,7 @@ import { resolveModel, memberCapabilities, buildSyncedCapabilitiesLookup } from 
 import { getActiveComboByName } from "../services/combos.js";
 import { captureLine } from "../services/logger.js";
 import { executeWithFallback } from "../services/fallback.js";
+import { readErrorText } from "../utils/errorBody.js";
 import { getSetting } from "../services/settings.js";
 import { prepareUpstreamRequest } from "./prepare.js";
 import { FORMATS } from "../translator/formats.js";
@@ -165,10 +166,10 @@ export async function shouldAdvanceToNextMember(attempt) {
   try {
     const res = attempt.response;
     let text = null;
-    if (typeof res?.clone === "function") {
-      text = await res.clone().text();
-    } else if (typeof res?.text === "function") {
-      text = await res.text();
+    if (typeof res?.clone === "function" || typeof res?.text === "function") {
+      // Pass the original response: readErrorBody caches per object, so this shares
+      // the read already done by the executor or fallback instead of starting another.
+      text = await readErrorText(res);
     } else if (typeof res?.body === "string") {
       text = res.body;
     }
@@ -223,6 +224,7 @@ async function runPreparedMember(prepared, provider, targetModel, endpoint) {
     resolveUrl,
     sessionKey: endpoint.sessionKey,
     sessionSource: endpoint.sessionSource,
+    sessionApiKeyId: endpoint.sessionApiKeyId,
     sessionPromptCacheKey: endpoint.sessionPromptCacheKey,
     effort,
     adaptiveThinking,
@@ -263,7 +265,7 @@ async function attemptMember(provider, targetModel, endpoint) {
 
 async function lastErrorMessage(failure) {
   try {
-    const text = await failure?.response?.clone().text();
+    const text = await readErrorText(failure?.response);
     if (!text) return null;
     try {
       const parsed = JSON.parse(text);

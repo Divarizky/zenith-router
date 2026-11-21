@@ -69,6 +69,14 @@ test("cooldown extension - a shorter deadline never shortens an active lock", ()
   assert.strictEqual(getConnectionById(a.id).cooldown_until, base + 3_600_000);
 });
 
+test("cooldown extension - a longer deadline extends an active account-wide lock (issue #1)", () => {
+  const a = glmPair();
+  const base = Date.now();
+  setConnectionCooldown(a.id, base + 60_000);
+  setConnectionCooldown(a.id, base + 3_600_000);
+  assert.strictEqual(getConnectionById(a.id).cooldown_until, base + 3_600_000, "deadline yang lebih panjang harus menang");
+});
+
 // Mencegah: sync yang gagal mencap updated_at baru, sehingga akun basi tidak pernah
 // jatuh tempo untuk probe selama scheduler terus berjalan. Memakai jalur produksi
 // (fetchLiveQuota), bukan setCustomQuotaFetcher yang tidak dipakai di src/.

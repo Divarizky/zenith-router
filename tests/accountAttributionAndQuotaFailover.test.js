@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { app } from "../src/index.js";
-import { initDb, addConnection, getDb, getConnections, getModelLockUntil, MODEL_LOCK_MAX_MS } from "../src/db/index.js";
+import { initDb, addConnection, getDb, getConnections, getModelLockUntil, MODEL_LOCK_MAX_MS, QUOTA_LOCK_MAX_MS } from "../src/db/index.js";
 import { setCustomExecutor } from "../src/executors/base.js";
 import { extractQuotaCooldownMs } from "../src/services/fallback.js";
 import { getRecentUsage, getUsageStats, recordUsage } from "../src/services/usage.js";
@@ -164,10 +164,10 @@ test("quota failover - account 1 exhausted 429 locks for full duration and immed
 
     const lockUntil = getModelLockUntil(conn1.id, MODEL_ID);
     assert.ok(lockUntil, "lock per model harus ada setelah kegagalan kedua");
-    // Upstream meminta 497880s (~138 jam). Lock dibatasi ke MODEL_LOCK_MAX_MS
-    // supaya durasi upstream yang salah tidak mengunci model berhari-hari.
-    assert.ok(lockUntil <= Date.now() + MODEL_LOCK_MAX_MS, "lock tidak melebihi batas 60 menit");
-    assert.ok(lockUntil > Date.now() + MODEL_LOCK_MAX_MS - 10_000, "lock tetap diberi batas penuh");
+    // Upstream meminta 497880s (~138 jam). Reset kuota otoritatif kini diikuti sampai
+    // QUOTA_LOCK_MAX_MS (30 hari), bukan dipotong ke 1 jam. Durasi di atas 30 hari tetap dibatasi.
+    assert.ok(lockUntil > Date.now() + MODEL_LOCK_MAX_MS, "reset kuota melewati cap transient 1 jam");
+    assert.ok(lockUntil <= Date.now() + QUOTA_LOCK_MAX_MS, "lock tidak melebihi 30 hari");
 
     // Next immediate request must directly use account 2 without attempting account 1
     attemptedAccounts.length = 0;

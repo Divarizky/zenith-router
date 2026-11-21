@@ -22,6 +22,7 @@ import {
 import { ensureOpencodeBridge } from "../services/opencodeBridge.js";
 import { DEFAULT_BRIDGE_URL } from "../bridge/opencode-bridge.js";
 import { parseRetryAfterMs } from "../services/fallback.js";
+import { readErrorText } from "../utils/errorBody.js";
 import { dispatchProxyFailureSignal } from "../services/proxyPools.js";
 
 export const OPENCODE_UA = "opencode/latest/2.2.5/cli";
@@ -225,10 +226,14 @@ export function opencodeSessionHeaders(session) {
   return Object.fromEntries(SESSION_HEADER_KEYS.map((key) => [key, session]));
 }
 
-/** Read a copy of a response body without consuming the original. */
+/**
+ * Bounded, shared read of a non-2xx response body. Cached per response object,
+ * so the failover path that reads the same response later gets the same result
+ * without a second read or a second deadline.
+ */
 async function peekResponseText(res) {
   try {
-    return await res.clone().text();
+    return await readErrorText(res);
   } catch {
     return "";
   }
@@ -610,8 +615,7 @@ export class OpencodeExecutor extends BaseExecutor {
     // A bridge override has no second lane to fall back to.
     if (res.status === 400 && model && !getOpencodeBaseUrlOverride()) {
       try {
-        const cloned = res.clone();
-        const errText = await cloned.text();
+        const errText = await readErrorText(res);
         let errJson;
         try {
           errJson = JSON.parse(errText);

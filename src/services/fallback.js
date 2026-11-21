@@ -1,10 +1,12 @@
 import {
+  getConnectionById,
   getConnections,
   getModelLockUntil,
   setConnectionCooldown,
   updateConnectionLastUsed,
   getAntigravityModelsByConnection,
   getAntigravityAccountModels,
+  MODEL_LOCK_MAX_MS,
 } from "../db/index.js";
 import { getProvider, getProviderModels, resolveProviderRuntime } from "../providers/index.js";
 import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
@@ -17,7 +19,9 @@ import { applyClaudeOAuthCloaking, isClaudeOAuthToken } from "./claudeCloaking.j
 import { applyClaudePromptCache } from "./claudePromptCache.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { captureLine } from "./logger.js";
-import { acquireAccountSlot, applyReactiveJitter } from "./trafficGuard.js";
+import { readErrorText } from "../utils/errorBody.js";
+import { sessionPins, PIN_SCOPE_CLIENT } from "./sessionPin.js";
+import { acquireAccountSlot, applyReactiveJitter, effectiveAccountSlotCap, getConnectionTraffic } from "./trafficGuard.js";
 import {
   resolveConnectionProxy,
   requireResolvedProxy,
@@ -374,7 +378,19 @@ function attachMidstreamRotateObserver(res, proxyEntry, modelId = "") {
 }
 
 function applyRateLimitCooldown(connection, provider, res, errText, modelId, defaultMs, { skipVirtualCooldown = false } = {}) {
-  const until = Date.now() + extractQuotaCooldownMs(res, errText, defaultMs);
+  const hint = extractRetryHint(res, errText);
+  const waitMs = hint ? hint.ms : defaultMs;
+  const until = Date.now() + waitMs;
+  // Only a 429 can be a quota window (daily, weekly, free budget). An authoritative reset
+  // longer than the transient cap keeps its full duration up to 30 days. Any other status,
+  // including 5xx with a large Retry-After, is transient and stays within the one-hour cap.
+  const isQuotaStatus = res.status === 429;
+  const lockClass = isQuotaStatus && hint?.authoritative && waitMs > MODEL_LOCK_MAX_MS ? "quota" : "transient";
+  // Only a 429 reset may shorten a model lock (opt-in flag, see setConnectionCooldown).
+  const authoritative = isQuotaStatus && Boolean(hint?.authoritative);
+  // A non-429 failure (5xx, transport) is transient: its deadline never exceeds the one-hour cap,
+  // even on the account-wide path where no model id is available to pick the lock class.
+  const transientUntil = !isQuotaStatus ? Math.min(until, Date.now() + MODEL_LOCK_MAX_MS) : until;
   if (!connection?.id) {
     if (skipVirtualCooldown) return;
     // Virtual / anonymous connection: apply virtual cooldown at model/provider level (5-15 min, default extracted)
@@ -383,11 +399,11 @@ function applyRateLimitCooldown(connection, provider, res, errText, modelId, def
     return;
   }
   if (res.status === 429 && res.headers?.get?.("x-ratelimit-scope") === "free") {
-    for (const id of freeTierModelIds(provider, modelId)) setConnectionCooldown(connection.id, until, id);
+    for (const id of freeTierModelIds(provider, modelId)) setConnectionCooldown(connection.id, until, id, { lockClass: "quota", authoritative });
     syncProviderQuota(connection, { quiet: true }).catch(() => {});
     return;
   }
-  setConnectionCooldown(connection.id, until, modelId);
+  setConnectionCooldown(connection.id, transientUntil, modelId, { lockClass, authoritative });
 }
 
 // The executor's 502 for a failed upstream fetch, see src/executors/base.js.
@@ -417,65 +433,83 @@ export function parseRetryAfterMs(value, nowMs = Date.now()) {
   return diffMs > 0 ? diffMs : null;
 }
 
-/**
- * Parses Google/Antigravity and standard rate limit reset indications.
- * Antigravity reports quota exhaustion with details containing:
- * - RetryInfo: { retryDelay: "497880.916563646s" }
- * - ErrorInfo: { metadata: { quotaResetTimeStamp: "2026-10-24T22:06:11Z", quotaResetDelay: "..." } }
- */
-export function extractQuotaCooldownMs(res, bodyText, defaultDurationMs = 60000) {
-  const retryAfter = parseRetryAfterMs(res?.headers?.get?.("retry-after"));
-  if (retryAfter !== null) return retryAfter;
+function secondsToMs(value) {
+  const sec = typeof value === "string" ? parseFloat(value) : Number(value);
+  return Number.isFinite(sec) && sec > 0 ? Math.ceil(sec * 1000) : null;
+}
 
-  if (!bodyText || typeof bodyText !== "string") return defaultDurationMs;
-
-  try {
-    const payload = JSON.parse(bodyText);
-
-    // Direct retry_after field (e.g. Nous Research: { "status": 429, "retry_after": 8 })
-    const directRetryAfter = payload?.retry_after ?? payload?.error?.retry_after;
-    if (directRetryAfter !== undefined && directRetryAfter !== null) {
-      const sec = typeof directRetryAfter === "string" ? parseFloat(directRetryAfter) : Number(directRetryAfter);
-      if (Number.isFinite(sec) && sec > 0) {
-        return Math.ceil(sec * 1000);
-      }
-    }
-
-    const errorObj = payload?.error || payload;
-    const details = Array.isArray(errorObj?.details) ? errorObj.details : [];
-
-    for (const item of details) {
-      // 1. Google RetryInfo: retryDelay format "123.456s" or numeric
-      if (item?.retryDelay) {
-        const sec = typeof item.retryDelay === "string" ? parseFloat(item.retryDelay) : Number(item.retryDelay);
-        if (Number.isFinite(sec) && sec > 0) {
-          return Math.ceil(sec * 1000);
-        }
-      }
-
-      // 2. Google ErrorInfo metadata
-      const meta = item?.metadata;
-      if (meta && typeof meta === "object") {
-        if (meta.quotaResetTimeStamp) {
-          const resetTime = new Date(meta.quotaResetTimeStamp).getTime();
-          const diffMs = resetTime - Date.now();
-          if (Number.isFinite(diffMs) && diffMs > 0) {
-            return diffMs;
-          }
-        }
-        if (meta.quotaResetDelay) {
-          const sec = typeof meta.quotaResetDelay === "string" ? parseFloat(meta.quotaResetDelay) : Number(meta.quotaResetDelay);
-          if (Number.isFinite(sec) && sec > 0) {
-            return Math.ceil(sec * 1000);
-          }
-        }
-      }
-    }
-  } catch {
-    // If not JSON, ignore and fallback to default
+// reset_at may be epoch seconds, epoch milliseconds, or an ISO-8601 timestamp.
+// Epoch seconds are below 1e11 until the year 5138, so smaller values are seconds.
+function resetAtToMs(value, nowMs) {
+  let target = null;
+  if (typeof value === "number" || (typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()))) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    target = n < 1e11 ? n * 1000 : n;
+  } else if (typeof value === "string") {
+    target = Date.parse(value);
   }
+  if (!Number.isFinite(target)) return null;
+  const diff = target - nowMs;
+  return diff > 0 ? diff : null;
+}
 
-  return defaultDurationMs;
+/**
+ * Reads the reset hint from an upstream rate-limit response. Order: Retry-After header,
+ * then a structured reset_at (epoch or ISO), then retry_after (seconds) in the body, then
+ * Google RetryInfo / ErrorInfo details. The first hint found wins.
+ *
+ * `authoritative` is true only when the upstream named an absolute reset (reset_at or a
+ * Google quota reset timestamp) or sent a Retry-After. A bare default is not authoritative,
+ * so it can never shorten an existing lock.
+ */
+export function extractRetryHint(res, bodyText, nowMs = Date.now()) {
+  const retryAfter = parseRetryAfterMs(res?.headers?.get?.("retry-after"), nowMs);
+  if (retryAfter !== null) return { ms: retryAfter, authoritative: true, source: "retry-after" };
+
+  if (!bodyText || typeof bodyText !== "string") return null;
+
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  const errorObj = payload?.error && typeof payload.error === "object" ? payload.error : payload;
+
+  const structuredReset = resetAtToMs(payload?.reset_at ?? errorObj?.reset_at, nowMs);
+  if (structuredReset !== null) return { ms: structuredReset, authoritative: true, source: "reset_at" };
+
+  const directRetryAfter = secondsToMs(payload?.retry_after ?? errorObj?.retry_after);
+  if (directRetryAfter !== null) return { ms: directRetryAfter, authoritative: true, source: "retry_after" };
+
+  const details = Array.isArray(errorObj?.details) ? errorObj.details : [];
+  for (const item of details) {
+    // 1. Google RetryInfo: retryDelay format "123.456s" or numeric
+    const retryDelay = secondsToMs(item?.retryDelay);
+    if (retryDelay !== null) return { ms: retryDelay, authoritative: true, source: "google-retry-info" };
+
+    // 2. Google ErrorInfo metadata
+    const meta = item?.metadata;
+    if (meta && typeof meta === "object") {
+      if (meta.quotaResetTimeStamp) {
+        const diffMs = resetAtToMs(String(meta.quotaResetTimeStamp), nowMs);
+        if (diffMs !== null) return { ms: diffMs, authoritative: true, source: "google-quota-reset" };
+      }
+      const resetDelay = secondsToMs(meta.quotaResetDelay);
+      if (resetDelay !== null) return { ms: resetDelay, authoritative: true, source: "google-quota-delay" };
+    }
+  }
+  return null;
+}
+
+/**
+ * Numeric duration helper kept for existing callers: returns the hinted wait in ms, or the
+ * default when upstream stated nothing usable. Behaviour matches the pre-#4 contract.
+ */
+export function extractQuotaCooldownMs(res, bodyText, defaultDurationMs = 60000, nowMs = Date.now()) {
+  const hint = extractRetryHint(res, bodyText, nowMs);
+  return hint ? hint.ms : defaultDurationMs;
 }
 
 export function buildErrorResponse(res, bodyText, targetFormat) {
@@ -526,6 +560,54 @@ export function buildErrorResponse(res, bodyText, targetFormat) {
 }
 
 /**
+ * The account a client session is pinned to, when that account is still in the
+ * eligible list and has not been tried in this request. Eligibility (cooldown,
+ * model lock, quota, serving the model) was already decided by listAvailableConnections,
+ * so a pin never bypasses a parked account.
+ */
+function isAccountFull(connection) {
+  return getConnectionTraffic(connection.id).inFlight >= effectiveAccountSlotCap(connection);
+}
+
+/**
+ * When the session's pinned account is full, a sibling that still has a free slot is
+ * preferred over the ordinary order, which would queue behind the full account first.
+ * Returns null when every eligible sibling is full too; the caller then keeps the
+ * ordinary order and the existing queue/timeout behaviour applies.
+ */
+function pickIdleSibling(available, triedIds, pin) {
+  if (!pin) return null;
+  return available.find((c) => c.id && !triedIds.includes(c.id) && !isAccountFull(c)) || null;
+}
+
+function pinnedAccountIsFull(available, pin) {
+  const pinnedId = sessionPins.get(pin.providerId, pin.sessionKey, pin.model, pin.scope);
+  const match = available.find((c) => c.id === pinnedId);
+  return Boolean(match) && isAccountFull(match);
+}
+
+function pickPinnedConnection(available, triedIds, pin) {
+  if (!pin) return null;
+  const pinnedId = sessionPins.get(pin.providerId, pin.sessionKey, pin.model, pin.scope);
+  if (pinnedId === null || pinnedId === undefined) return null;
+  // A deleted account is not in `available`, so its stale pin falls through here and
+  // expires with the TTL. The db layer cannot import services, so no delete hook is needed.
+  const match = available.find((c) => c.id === pinnedId);
+  // Lazy invalidation: a pin that points at a deleted account is dropped on first use.
+  // A cooled-down account still exists and keeps its pin until the TTL.
+  if (!match && pinnedId !== null && getConnectionById(pinnedId) === null) {
+    sessionPins.drop(pin.providerId, pin.sessionKey, pin.scope);
+    return null;
+  }
+  if (!match || triedIds.includes(match.id)) return null;
+  // A full account (max_concurrent slots taken) is skipped: the session moves to a sibling
+  // instead of queueing behind another conversation. The slot itself is still taken later.
+  if (isAccountFull(match)) return null;
+  updateConnectionLastUsed(match.id);
+  return match;
+}
+
+/**
  * Try one or more connections for the provider.
  * Returns { ok: true, upstreamRes, connection } or { ok: false, response }.
  */
@@ -541,6 +623,7 @@ export async function executeWithFallback({
   targetModel = "",
   sessionKey = null,
   sessionSource = null,
+  sessionApiKeyId = null,
   sessionPromptCacheKey = false,
   effort = undefined,
   adaptiveThinking = false,
@@ -618,6 +701,14 @@ export async function executeWithFallback({
 
   const triedIds = [];
   const available = listAvailableConnections(provider.id, { model: modelId, effort });
+  // Pin only a real client session. A gateway API key is shared by a team, so pinning
+  // it would stick unrelated clients to one account (issue #5 acceptance criteria).
+  // A failover-free probe never pins: it must measure the account it was asked about, not the session's.
+  const pinnable = Boolean(sessionKey) && !noFailover && sessionSource !== "apikey" && !String(sessionKey).startsWith("apikey:");
+  // Local namespace only: the gateway key id separates the pins of two keys that send the same
+  // x-session-id. It is never sent upstream and never reaches the executor.
+  const pinScope = sessionApiKeyId ? `${PIN_SCOPE_CLIENT}:${sessionApiKeyId}` : PIN_SCOPE_CLIENT;
+  const pin = pinnable ? { providerId: provider.id, sessionKey, model: modelId, scope: pinScope } : null;
   // provider tanpa akun atau provider noAuth dilayani koneksi virtual / rotasi pool.
   // Saat strategi rotasi aktif dan ada proxy aktif, satu request mencoba sampai
   // tiga proxy berbeda; proxy yang gagal dilewati ke berikutnya dalam request
@@ -652,7 +743,10 @@ export async function executeWithFallback({
       // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
       connection = available[0] || { id: null, provider: provider.id, auth_type: "none", is_active: 1 };
     } else {
-      connection = getNextConnection(provider.id, triedIds, modelId, effort);
+      const pinned = pickPinnedConnection(available, triedIds, pin);
+      // A pin that points at an eligible but full account hands the turn to an idle sibling.
+      const pinnedFull = !pinned && pin ? pinnedAccountIsFull(available, pin) : false;
+      connection = pinned || (pinnedFull ? pickIdleSibling(available, triedIds, pin) : null) || getNextConnection(provider.id, triedIds, modelId, effort);
       if (!connection) break;
       triedIds.push(connection.id);
     }
@@ -719,6 +813,7 @@ export async function executeWithFallback({
     // Success: this connection can serve the request
     if (res.ok) {
       clearStrikes(connection, modelId);
+      if (pinnable && connection?.id) sessionPins.set(provider.id, sessionKey, connection.id, modelId, pinScope);
       const observedRes =
         stream && provider.id === "opencode" && (proxyEntry?.rotate_url || extractWarpNode(proxyEntry))
           ? attachMidstreamRotateObserver(res, proxyEntry, modelId || targetModel)
@@ -735,7 +830,7 @@ export async function executeWithFallback({
     }
 
     // Capture response for error relaying
-    const errText = await res.text();
+    const errText = await readErrorText(res);
     lastFailureResponse = buildErrorResponse(res, errText, targetFormat);
 
     // The client hung up mid-attempt: nothing is waiting for this answer, so it is
@@ -893,12 +988,17 @@ export async function executeWithFallback({
           throw err;
         }
 
-        if (res.ok) return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
+        if (res.ok) {
+          // Same pin rule as the main path: the session follows the account that served it,
+          // including an account that only answered after an OAuth refresh.
+          if (pinnable && connection?.id) sessionPins.set(provider.id, sessionKey, connection.id, modelId, pinScope);
+          return { ok: true, upstreamRes: attachSlotRelease(res, releaseSlot), connection };
+        }
         if (releaseSlot) {
           releaseSlot();
           releaseSlot = null;
         }
-        const retryErrText = await res.text();
+        const retryErrText = await readErrorText(res);
         lastFailureResponse = buildErrorResponse(res, retryErrText, targetFormat);
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };

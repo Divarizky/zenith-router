@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { buildZcodeLLMHeaders, buildZcodeSystemBlocks } from "../services/zcodeIdentity.js";
 import { FORMATS, translateRequest, translateResponse, createTransformStream } from "../translator/index.js";
+import { readErrorText } from "../utils/errorBody.js";
 
 export const ZCODE_PLAN_URL = "https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages";
 
@@ -207,7 +208,9 @@ export class ZcodePlanExecutor extends BaseExecutor {
     // dulu, lalu dikembalikan sebagai buffer agar bisa diproses di bawah.
     for (let attempt = 1; attempt < MODEL_CONCURRENCY_MAX_ATTEMPTS; attempt++) {
       if (res.ok && !(wantsStream && (res.headers.get("content-type") || "").includes("application/json"))) break;
-      const text = await res.text();
+      // Non-2xx dibaca dengan batas (error path). Respons 200 JSON tetap dibaca utuh
+      // agar body sukses tidak terpotong oleh batas error.
+      const text = res.ok ? await res.text() : await readErrorText(res);
       const data = parseJson(text);
       if (zcodeErrorCode(data) !== MODEL_CONCURRENCY_CODE) {
         res = new Response(text, { status: res.status, headers: res.headers });
@@ -225,11 +228,11 @@ export class ZcodePlanExecutor extends BaseExecutor {
     // Untuk request stream, body JSON bukan SSE: diperlakukan sebagai error.
     // Untuk non-stream, JSON 200 yang tanpa kode error tetap respons sukses.
     if (!res.ok) {
-      const text = await res.text();
+      const text = await readErrorText(res);
       return mapZcodeError(res, text);
     }
     if (wantsStream && upstreamType.includes("application/json")) {
-      const text = await res.text();
+      const text = await readErrorText(res);
       return mapZcodeError(res, text);
     }
 

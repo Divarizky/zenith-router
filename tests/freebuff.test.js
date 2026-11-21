@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { FreebuffExecutor } from "../src/executors/freebuff.js";
+import { FreebuffExecutor, resetFreebuffSessionCache } from "../src/executors/freebuff.js";
 
 test("FreebuffExecutor - returns 401 if no Authorization header", async () => {
   const executor = new FreebuffExecutor();
@@ -100,4 +100,40 @@ test("decodeCredentialBlob - UTF-8 and UTF-16LE blobs decode to the same token",
   const token = "example-not-real-token";
   assert.strictEqual(decodeCredentialBlob(Buffer.from(token, "utf8")), token);
   assert.strictEqual(decodeCredentialBlob(Buffer.from(token, "utf16le")), token);
+});
+
+// A non-2xx session response whose body stalls after its first bytes. The bounded read must
+// return within the 5 s deadline instead of waiting for the stream to close.
+test("FreebuffExecutor - a stalled non-2xx session body is read within the bounded deadline", async () => {
+  // A session cached by an earlier test would skip the session call entirely.
+  resetFreebuffSessionCache();
+  const encoder = new TextEncoder();
+  const stalled = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(JSON.stringify({ error: "server error" })));
+    },
+  });
+  const executor = new FreebuffExecutor({
+    fetchFn: async (url) => {
+      if (url.endsWith("/freebuff/session")) return new Response(stalled, { status: 500 });
+      throw new Error("chat must not run after a failed session");
+    },
+  });
+  // A live timer keeps the event loop busy while the executor runs, so a hung read
+  // surfaces as a deadline failure instead of an empty-loop cancellation.
+  const guard = new Promise((resolve) => setTimeout(() => resolve("HUNG"), 12000));
+  const started = Date.now();
+  const outcome = await Promise.race([
+    executor.execute({
+      url: "https://www.codebuff.com/api/v1/chat/completions",
+      method: "POST",
+      headers: { authorization: "Bearer key-1" },
+      body: JSON.stringify({ model: "deepseek/deepseek-v4-flash", messages: [{ role: "user", content: "Hi" }] }),
+    }),
+    guard,
+  ]);
+  const elapsed = Date.now() - started;
+  assert.notStrictEqual(outcome, "HUNG", "the executor must not wait for the stalled session body");
+  assert.ok(elapsed < 8000, `session error read ran ${elapsed} ms; the bounded deadline is 5 s`);
+  assert.strictEqual(outcome.status, 500, "the upstream status is preserved");
 });

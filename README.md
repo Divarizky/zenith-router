@@ -207,6 +207,14 @@ Yang sudah dibuktikan adalah payload: effort yang dikenal sampai ke `reasoning.e
 * Mencegah kebocoran rahasia sensitif (Private Keys, API Keys, AWS Credentials, Bearer Tokens, format PII).
 * Mode operasi fleksibel: `off`, `mask` (sensor nilai rahasia dengan placeholder), atau `block` (menolak request yang memuat kredensial). Dikonfigurasi di **Settings → DLP**.
 
+### Pin Akun per Sesi & Cooldown dari Reset Upstream
+* **Pin akun per sesi:** Percakapan dengan header `x-session-id` (atau kunci sesi dari body) tetap di akun yang terakhir sukses melayani, sehingga cache prompt upstream tetap hangat antar turn. Pin tidak dibuat untuk kunci API gateway (`apikey`) dan tidak dipakai oleh probe `x-zenith-no-failover`.
+* **Masa berlaku pin:** 15 menit sejak pemakaian terakhir, bisa diubah lewat setting `session_pin_ttl_minutes` (menit, 1 sampai 1440; kosong atau tidak valid memakai 15). Batas 256 sesi dengan penggusuran least-recently-used. Restart proses menghapus seluruh pin.
+* **Pin dilewati** bila akunnya cooldown, terkunci untuk model itu, atau slot `max_concurrent`-nya penuh. Pin ke akun yang sudah dihapus dibersihkan saat pertama kali dipakai. Sesi pindah ke akun saudara yang masih punya slot.
+* **Cooldown dari reset upstream:** urutan sumber durasi adalah `Retry-After`, lalu `reset_at` (epoch detik/milidetik atau ISO-8601), lalu `retry_after` di body JSON, lalu `RetryInfo` gaya Google.
+* **Batas cooldown:** lock model sementara maksimal 1 jam; jendela kuota (quota-window) yang ditandai upstream maksimal 30 hari. Lock akun selalu maksimal 30 hari.
+* **Tanpa pemendekan secara default:** cooldown baru tidak memperpendek lock yang sudah aktif. Set `ZENITH_COOLDOWN_SHORTEN_ON_RESET=1` untuk membiarkan reset otoritatif memperpendek lock **model** (lock akun tidak pernah diperpendek).
+
 ### Zero-Overhead Token Saver
 * **RTK (Repetitive Token Killer):** Algoritma pemadatan prompt cerdas untuk memangkas duplikasi dan histori berulang tanpa mengurangi akurasi model.
 * **Mode Caveman:** Pemadatan agresif untuk prompt yang sangat panjang guna menghemat kuota dan mempercepat respon upstream.
@@ -280,6 +288,7 @@ Zenith Router dapat dikonfigurasi melalui environment variables (atau berkas `.e
 | `ZENITH_UPGRADE_SKIP_PIN` | *kosong* | Set `1` untuk melewati verifikasi hash release-manifest saat upgrade |
 | `ZENITH_UPSTREAM_HEADERS_TIMEOUT_MS` | `300000` | Batas maksimum (ms) menunggu header pertama dari upstream (5 menit) |
 | `ZENITH_UPSTREAM_IDLE_TIMEOUT_MS` | `120000` | Batas jeda stream upstream sebelum dianggap terputus (2 menit) |
+| `ZENITH_COOLDOWN_SHORTEN_ON_RESET` | *nonaktif* | Set `1` agar reset otoritatif dari upstream boleh memperpendek lock **model** yang sudah aktif. Default tidak memperpendek; lock akun tidak pernah diperpendek |
 | `ZENITH_MODEL_SYNC_INTERVAL_HOURS` | `6` | Interval sinkronisasi katalog model gratis (set `0` untuk mematikan) |
 | `ZENITH_QUOTA_SYNC_INTERVAL_MINUTES` | `15` | Interval refresh kuota background (set `0` untuk mematikan) |
 | `ZENITH_BROWSER_PATH` | *otomatis* | Path eksekutabel Chrome/Edge untuk fitur login otomatis DeepSeek |

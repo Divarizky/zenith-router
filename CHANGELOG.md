@@ -4,6 +4,16 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
 
 ### Fitur
 
+- **Pin Akun per Sesi (Session Account Affinity)**:
+  - Satu percakapan (header `x-session-id` atau kunci sesi klien) dipin ke akun yang terakhir sukses melayani, agar cache prompt upstream tetap hangat antar turn. Pin hanya dibuat untuk akun nyata (koneksi dengan id).
+  - Pin tidak dibuat untuk sumber kunci `apikey` (kunci API gateway), dan tidak dibaca maupun ditulis oleh probe `x-zenith-no-failover` (misalnya uji kesehatan model).
+  - Pin disimpan di memori proses dengan masa berlaku 15 menit sejak pemakaian terakhir, batas 256 sesi, dan penggusuran least-recently-used. Masa berlaku bisa diubah lewat setting `session_pin_ttl_minutes` (1 sampai 1440 menit). Batas 256 sesi berupa konstanta kode. Restart proses menghapus seluruh pin.
+  - Pin dilewati (sesi pindah ke akun saudara) bila akunnya sedang cooldown, atau terkunci untuk model tersebut, atau slot konkurensinya (`max_concurrent`) penuh. Pin ke akun yang sudah dihapus dibersihkan saat pertama kali dipakai. Sesi tidak ikut mengantre di akun yang penuh bila ada saudara yang masih punya slot.
+- **Cooldown Akun dari Reset Upstream**:
+  - Durasi cooldown diambil dengan urutan: header `Retry-After`, lalu `reset_at` (epoch dalam detik atau milidetik, atau string ISO-8601), lalu `retry_after` pada body JSON, lalu detail `RetryInfo` gaya Google. Waktu reset yang sudah lewat diabaikan.
+  - Batas lock model: 1 jam untuk penyebab sementara (transient), dan 30 hari untuk jendela kuota (quota-window) yang ditandai otoritatif oleh upstream. Lock akun (`cooldown_until`) selalu dibatasi 30 hari, sehingga nilai epoch yang tidak masuk akal tidak memarkir akun selamanya.
+  - Header `x-ratelimit-scope: free` pada 429 memarkir seluruh model gratis milik akun itu sampai waktu reset, sejauh model tersebut dikenal katalog.
+  - Variabel baru `ZENITH_COOLDOWN_SHORTEN_ON_RESET` (default nonaktif; hanya nilai `1` yang mengaktifkan). Saat aktif, reset otoritatif boleh memperpendek lock **model**. Lock akun tidak pernah diperpendek.
 - **Level thinking pada `/v1/models`**:
   - `capabilities.thinking_levels` terbit untuk model `cc/` (Claude OAuth), `cx/` (Codex ladder `gpt-6*`/`gpt-5.6*`), dan `ag/` (level dari varian akun yang ditemukan). Translator dan katalog Codex memakai satu sumber effort (`src/providers/codexTiers.js`). Dispatch meneruskan effort yang dikenal tanpa filter per model. Effort yang dikenal sudah dibuktikan sampai payload; penerimaan upstream belum diuji.
   - `thinking_levels` top-level tetap ada sebagai alias untuk Pi, identik dengan `capabilities.thinking_levels`.
@@ -59,6 +69,13 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
 
 ### Perbaikan
 
+- **Pembacaan Error Body Upstream Terbatas**:
+  - Body error upstream dibaca maksimal 64 KiB dan 5 detik total. Melebihi batas, pembacaan dihentikan dan body diberi penanda `[zenith: error body truncated]`. Klasifikasi error, fallback, dan mode `noFailover` tetap berfungsi dengan body terpotong.
+  - Slot koneksi juga dilepas pada jalur error executor, dan combo flow tidak lagi memiliki dua batas baca yang bertumpuk.
+  - Executor OpenCode (probe protokol 400 dan gerbang 429/403) dan zcodePlan (status non-2xx) memakai pembacaan yang sama. Respons sukses tidak dibatasi.
+- **Cooldown Akun Hanya Diperpanjang**:
+  - Lock akun yang sudah aktif tidak lagi dipersingkat oleh cooldown baru yang lebih pendek (regresi issue #1, ditutup dengan tes).
+  - Kegagalan 5xx tetap dianggap sementara: `Retry-After` yang panjang tidak memperpanjang lock di atas 1 jam, dan 5xx tidak pernah memakai batas jendela kuota.
 - **OpenCode Bridge & Tunneling**:
   - Penerusan proxy langsung ke opsi fetch bawaan Bun pada bridge worker alih-alih dispatcher undici untuk mencegah kebocoran IP host.
   - Penanganan event exit pada worker Bun dengan pembersihan state dan auto-respawn otomatis saat worker berhenti.

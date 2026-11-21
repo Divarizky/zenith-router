@@ -169,6 +169,7 @@ export async function relayClientRequest(c, spec) {
       baseUrlFor: spec.baseUrlFor,
       sessionKey: session.key,
       sessionSource: session.source,
+      sessionApiKeyId: c.get("apiKeyId") ?? null,
       sessionPromptCacheKey: session.promptCacheKey === true,
     });
 

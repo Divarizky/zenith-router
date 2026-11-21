@@ -147,6 +147,9 @@ function restoreLine(line, nameMap) {
  */
 export async function restoreResponsesToolNames(res, nameMap) {
   if (!res || !res.body) return res;
+  // Only a successful payload is normalized. An error body is passed through untouched, so the
+  // caller reads it once through the bounded error reader instead of an unbounded res.text() here.
+  if (!res.ok) return res;
   const hasAliases = Boolean(nameMap && nameMap.size > 0);
   const headers = new Headers(res.headers);
   const contentType = headers.get("content-type") || "";

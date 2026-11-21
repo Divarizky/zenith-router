@@ -63,6 +63,17 @@ function isTestRun() {
 // upstream duration cannot keep a model blocked for hours.
 export const MODEL_LOCK_MAX_MS = 60 * 60 * 1000;
 
+// A quota window (daily or weekly reset, free-tier budget, structured reset from
+// upstream) is real and can last days. Capping it at one hour would route traffic
+// back to an account whose budget is still spent. 30 days bounds a bogus value,
+// such as an epoch-like 1e13, without throwing.
+export const QUOTA_LOCK_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Opt-in (ZENITH_COOLDOWN_SHORTEN_ON_RESET=1): authoritative upstream reset may shorten a model lock. */
+export function shortenOnResetEnabled() {
+  return process.env.ZENITH_COOLDOWN_SHORTEN_ON_RESET === "1";
+}
+
 function defaultDbPath() {
   if (process.env.ZENITH_DB_PATH) return process.env.ZENITH_DB_PATH;
   if (isTestRun()) return ":memory:";
@@ -665,15 +676,26 @@ export function moveConnection(id, direction) {
  * Neither kind of lock is ever shortened: a shorter deadline over an active lock
  * would unpark an account a previous failure had already ruled unusable.
  */
-export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null) {
+export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null, { lockClass = "transient", authoritative = false } = {}) {
   const db = getDb();
+  const now = Date.now();
+  const requested = Number(cooldownUntilTimestamp);
+  // The account-wide lock is capped too: an epoch-like value would otherwise park it for decades.
+  const accountCap = now + QUOTA_LOCK_MAX_MS;
   if (model) {
-    db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ? AND locked_until <= ?`).run(
-      Number(id),
-      Date.now()
-    );
-    const now = Date.now();
-    const capped = Math.min(Number(cooldownUntilTimestamp), now + MODEL_LOCK_MAX_MS);
+    db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ? AND locked_until <= ?`).run(Number(id), now);
+    const cap = lockClass === "quota" ? QUOTA_LOCK_MAX_MS : MODEL_LOCK_MAX_MS;
+    const capped = Math.min(requested, now + cap);
+    if (authoritative && shortenOnResetEnabled()) {
+      // Opt-in only: an authoritative reset may bring the deadline forward. Default stays no-shorten.
+      db.prepare(
+        `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(connection_id, model) DO UPDATE SET
+           locked_until = excluded.locked_until,
+           locked_at = excluded.locked_at`
+      ).run(Number(id), String(model), capped, now);
+      return true;
+    }
     db.prepare(
       `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(connection_id, model) DO UPDATE SET
@@ -682,9 +704,10 @@ export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null) 
     ).run(Number(id), String(model), capped, now);
     return true;
   }
+  const capped = Math.min(requested, accountCap);
   db.prepare(
     `UPDATE connections SET cooldown_until = MAX(COALESCE(cooldown_until, 0), ?) WHERE id = ?`
-  ).run(Number(cooldownUntilTimestamp), Number(id));
+  ).run(capped, Number(id));
   return true;
 }
 

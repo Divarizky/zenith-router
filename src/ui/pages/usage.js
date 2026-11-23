@@ -76,9 +76,10 @@ function buildTopologyData(stats) {
 }
 
 /**
- * Router-centered topology pane: router core in
- * the middle, provider cards on an ellipse, electric particle edges for
- * in-flight providers, orange for last used, dim for idle.
+ * 360° Radial Router Topology (Deconstructivist Editorial / Swiss Punk Neo-brutalism):
+ * Central Zenith Transit Gateway hub at the center with upstream providers arranged in a 360°
+ * radial ellipse, linked with curved telemetry patch cables, live signal flow animations,
+ * tactile industrial cargo tags [REF.xx], and analog VU meters.
  */
 function renderTopologyPane(topology) {
   const dataJson = escapeHtml(JSON.stringify(topology));
@@ -166,7 +167,7 @@ function renderTopologyPane(topology) {
       .q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
       .q-updated { font-size: var(--text-xs); color: var(--text-subtle); }
 
-      /* Neobrutalist Eurorack Patchbay & Voltage Step Pulse Animations (Opsi 2) */
+      /* Deconstructivist Radial 360 & Signal Wave Animations */
       @keyframes dashFlow {
         to { stroke-dashoffset: -32; }
       }
@@ -189,9 +190,6 @@ function renderTopologyPane(topology) {
       @keyframes router-led-strobe {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.2; }
-      }
-      @keyframes pcb-pulse-dash {
-        to { stroke-dashoffset: -28; }
       }
       @keyframes vu-pulse {
         0%, 100% { opacity: 0.35; }
@@ -249,73 +247,15 @@ function renderTopologyPane(topology) {
         return (words.slice(0, 2).map(function (w) { return w[0]; }).join("") || "?").toUpperCase();
       }
 
-      // Distribusi nodes: Authenticated (Cluster Atas) vs Keyless/Local (Cluster Bawah)
-      var authedNodes = [];
-      var keylessNodes = [];
-      nodes.forEach(function (n) {
-        if (n.noAuth || !n.accounts) keylessNodes.push(n);
-        else authedNodes.push(n);
-      });
-      if (authedNodes.length === 0 && keylessNodes.length > 0) {
-        var half = Math.ceil(keylessNodes.length / 2);
-        authedNodes = keylessNodes.slice(0, half);
-        keylessNodes = keylessNodes.slice(half);
-      } else if (keylessNodes.length === 0 && authedNodes.length > 2) {
-        var split = Math.ceil(authedNodes.length / 2);
-        keylessNodes = authedNodes.slice(split);
-        authedNodes = authedNodes.slice(0, split);
-      }
-
-      // Geometri Eurorack Modular Patchbay
-      var MAX_PER_ROW = 4;
-      var CARD_W = 208, CARD_H = 78, CARD_GAP_X = 16, CARD_GAP_Y = 16;
-      var CLUSTER_PAD_X = 20, CLUSTER_PAD_Y = 18, CLUSTER_HEAD_H = 34;
-
-      function chunkIntoRows(list, max) {
-        var rows = [];
-        for (var i = 0; i < list.length; i += max) {
-          rows.push(list.slice(i, i + max));
-        }
-        return rows.length ? rows : [[]];
-      }
-
-      var authedRows = chunkIntoRows(authedNodes, MAX_PER_ROW);
-      var keylessRows = chunkIntoRows(keylessNodes, MAX_PER_ROW);
-
-      var maxRowCards = 1;
-      authedRows.concat(keylessRows).forEach(function (r) {
-        if (r.length > maxRowCards) maxRowCards = r.length;
-      });
-      maxRowCards = Math.max(maxRowCards, 2);
-
-      var clusterInnerW = maxRowCards * CARD_W + (maxRowCards - 1) * CARD_GAP_X;
-      var clusterBoxW = clusterInnerW + CLUSTER_PAD_X * 2;
-
-      var ROUTER_W = Math.min(clusterBoxW, Math.max(420, clusterBoxW * 0.75));
-      var ROUTER_H = 84;
-
-      var W = Math.max(960, clusterBoxW + 64);
-      var clusterX = (W - clusterBoxW) / 2;
-      var routerX = (W - ROUTER_W) / 2;
-
-      var authedInnerH = authedRows.length * CARD_H + (authedRows.length - 1) * CARD_GAP_Y;
-      var authedClusterH = CLUSTER_HEAD_H + CLUSTER_PAD_Y + authedInnerH + CLUSTER_PAD_Y;
-
-      var keylessInnerH = keylessRows.length * CARD_H + (keylessRows.length - 1) * CARD_GAP_Y;
-      var keylessClusterH = CLUSTER_HEAD_H + CLUSTER_PAD_Y + keylessInnerH + CLUSTER_PAD_Y;
-
-      var PADDING_Y = 32;
-      var WIRE_ZONE_H = 68; // Zona bebas lengkungan kabel patch
-
-      var Y_AUTHED_CLUSTER = PADDING_Y;
-      var Y_ROUTER = Y_AUTHED_CLUSTER + authedClusterH + WIRE_ZONE_H;
-      var Y_KEYLESS_CLUSTER = Y_ROUTER + ROUTER_H + WIRE_ZONE_H;
-      var H = Y_KEYLESS_CLUSTER + keylessClusterH + PADDING_Y;
+      // 360° Radial Hub-and-Spoke Geometry (ala 9Router + Swiss Punk / Deconstructivist)
+      var W = 960;
+      var H = 560;
+      var centerX = W / 2;
+      var centerY = H / 2;
 
       svg.setAttribute("viewBox", "0 0 " + W + " " + H);
       var NS = "http://www.w3.org/2000/svg";
 
-      // Palet warna Neo-brutalism kontras tinggi (sesuai preview HTML)
       var PALETTE = ["#f472b6", "#86efac", "#93c5fd", "#fb923c", "#fde047", "#c084fc", "#67e8f9", "#fca5a5"];
       function colorFor(id, i) {
         var h = 0;
@@ -327,7 +267,7 @@ function renderTopologyPane(topology) {
       var tracesG = document.createElementNS(NS, "g");
       var nodesG = document.createElementNS(NS, "g");
 
-      // Filter SVG Glow untuk kompatibilitas test & visual neo-glow
+      // Filter SVG Glow untuk compatibilitas test & active glow
       nodes.forEach(function (n, idx) {
         var filterId = "topo-glow-" + idx;
         var glowFilter = document.createElementNS(NS, "filter");
@@ -336,215 +276,214 @@ function renderTopologyPane(topology) {
         defs.appendChild(glowFilter);
       });
 
-      // Dot-matrix grid background modular studio
+      // Dot-matrix blueprint grid
       var pattern = document.createElementNS(NS, "pattern");
       pattern.setAttribute("id", "patchbay-grid");
-      pattern.setAttribute("width", "20");
-      pattern.setAttribute("height", "20");
+      pattern.setAttribute("width", "24");
+      pattern.setAttribute("height", "24");
       pattern.setAttribute("patternUnits", "userSpaceOnUse");
-      pattern.innerHTML = '<circle cx="2" cy="2" r="1.3" fill="var(--line)" opacity="0.22"/>';
+      pattern.innerHTML = '<circle cx="3" cy="3" r="1.3" fill="var(--line)" opacity="0.22"/>';
       defs.appendChild(pattern);
 
       svg.appendChild(defs);
+
+      // Background rect
       var bgRect = document.createElementNS(NS, "rect");
       bgRect.setAttribute("width", W);
       bgRect.setAttribute("height", H);
       bgRect.setAttribute("fill", "url(#patchbay-grid)");
       svg.appendChild(bgRect);
 
+      // Corner industrial registration marks (+)
+      function addCropMark(x, y, label) {
+        var g = document.createElementNS(NS, "g");
+        g.setAttribute("transform", "translate(" + x + "," + y + ")");
+        g.innerHTML =
+          '<line x1="-8" y1="0" x2="8" y2="0" stroke="var(--line)" stroke-width="1.5" opacity="0.45"/>' +
+          '<line x1="0" y1="-8" x2="0" y2="8" stroke="var(--line)" stroke-width="1.5" opacity="0.45"/>' +
+          '<text x="12" y="4" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)" opacity="0.6">' + esc(label) + '</text>';
+        svg.appendChild(g);
+      }
+      addCropMark(20, 20, "00:00 [TL]");
+      addCropMark(W - 70, 20, "10:00 [TR]");
+      addCropMark(20, H - 20, "00:99 [BL]");
+      addCropMark(W - 70, H - 20, "10:99 [BR]");
+
       svg.appendChild(tracesG);
       svg.appendChild(nodesG);
 
-      // Render Rack Enclosure Cluster Box (Modular Rack dengan sekrup di 4 sudut)
-      function renderRackCluster(x, y, w, h, title, sub) {
-        var g = document.createElementNS(NS, "g");
-        g.innerHTML =
-          '<rect x="' + (x + 4) + '" y="' + (y + 4) + '" width="' + w + '" height="' + h + '" fill="var(--text)" rx="0"/>' +
-          '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2.5" rx="0"/>' +
-          '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + CLUSTER_HEAD_H + '" fill="var(--surface-2)" stroke="var(--text)" stroke-width="2" rx="0"/>' +
-          '<rect x="' + (x + 10) + '" y="' + (y + 8) + '" width="8" height="18" fill="var(--line)"/>' +
-          '<text x="' + (x + 26) + '" y="' + (y + 21) + '" font-size="11" font-weight="900" letter-spacing="0.08em" fill="var(--text)">' + esc(title) + '</text>' +
-          '<text x="' + (x + w - 36) + '" y="' + (y + 21) + '" text-anchor="end" font-size="9.5" font-family="monospace" font-weight="bold" fill="var(--text-subtle)">' + esc(sub) + '</text>' +
-          // 4 Sekrup Rack Modular [+]
-          '<circle cx="' + (x + 12) + '" cy="' + (y + 12) + '" r="3" fill="var(--text)"/>' +
-          '<circle cx="' + (x + w - 12) + '" cy="' + (y + 12) + '" r="3" fill="var(--text)"/>' +
-          '<circle cx="' + (x + 12) + '" cy="' + (y + h - 12) + '" r="3" fill="var(--text)"/>' +
-          '<circle cx="' + (x + w - 12) + '" cy="' + (y + h - 12) + '" r="3" fill="var(--text)"/>';
-        return g;
-      }
+      // Central Zenith Gateway Hub (Master Matrix) di Titik Pusat (centerX, centerY)
+      var ROUTER_W = 216;
+      var ROUTER_H = 82;
+      var routerX = centerX - ROUTER_W / 2;
+      var routerY = centerY - ROUTER_H / 2;
 
-      nodesG.appendChild(renderRackCluster(clusterX, Y_AUTHED_CLUSTER, clusterBoxW, authedClusterH, "AUTHENTICATED PROVIDERS", "[CREDENTIALS POOL]"));
-      nodesG.appendChild(renderRackCluster(clusterX, Y_KEYLESS_CLUSTER, clusterBoxW, keylessClusterH, "KEYLESS & LOCAL BRIDGES", "[KEYLESS & IPC]"));
-
-      // Render Zenith Router Core (Master Patch Matrix) di Tengah
       var router = document.createElementNS(NS, "g");
       router.setAttribute("class", "topo-router");
       router.innerHTML =
-        '<rect x="' + (routerX + 4) + '" y="' + (Y_ROUTER + 4) + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--text)" rx="0"/>' +
+        '<rect x="' + (routerX + 4) + '" y="' + (routerY + 4) + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--shadow-ink)" rx="0"/>' +
         '<g class="topo-router-core">' +
-          '<rect x="' + routerX + '" y="' + Y_ROUTER + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="3" rx="0"/>' +
-          '<rect class="topo-router-strip" x="' + routerX + '" y="' + Y_ROUTER + '" width="8" height="' + ROUTER_H + '" fill="var(--success)"/>' +
-          '<image x="' + (routerX + 22) + '" y="' + (Y_ROUTER + 22) + '" width="40" height="40" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
-          '<text x="' + (routerX + 74) + '" y="' + (Y_ROUTER + 36) + '" font-size="13" font-weight="900" letter-spacing="0.04em" fill="var(--text)">ZENITH ROUTER &middot; MASTER MATRIX</text>' +
-          '<text x="' + (routerX + 74) + '" y="' + (Y_ROUTER + 56) + '" font-size="10.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">HOST: 127.0.0.1:20128 &middot; CV DISPATCH</text>' +
-          '<rect class="topo-router-badge-bg" x="' + (routerX + ROUTER_W - 116) + '" y="' + (Y_ROUTER + 28) + '" width="96" height="26" fill="var(--text)" rx="0"/>' +
-          '<text class="topo-router-badge-txt" x="' + (routerX + ROUTER_W - 68) + '" y="' + (Y_ROUTER + 45) + '" text-anchor="middle" font-size="10.5" font-weight="900" font-family="monospace" fill="var(--surface)">IDLE</text>' +
+          '<rect x="' + routerX + '" y="' + routerY + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2.5" rx="0"/>' +
+          '<rect class="topo-router-strip" x="' + routerX + '" y="' + routerY + '" width="6" height="' + ROUTER_H + '" fill="var(--success)"/>' +
+          // Lakban Neon Lime Virtual: GATEWAY CORE // 20120
+          '<g transform="translate(' + (routerX + ROUTER_W - 128) + ',' + (routerY - 10) + ') rotate(2)">' +
+            '<rect width="134" height="20" fill="var(--accent-lime, #ccff00)" stroke="var(--text)" stroke-width="1.2" rx="0"/>' +
+            '<text x="67" y="14" text-anchor="middle" font-size="9" font-family="monospace" font-weight="900" fill="#0a0a0a">&ldquo;GATEWAY CORE // 20120&rdquo;</text>' +
+          '</g>' +
+          // Logo & Brand
+          '<image x="' + (routerX + 16) + '" y="' + (routerY + 20) + '" width="38" height="38" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
+          '<text x="' + (routerX + 62) + '" y="' + (routerY + 36) + '" font-size="13" font-weight="900" letter-spacing="0.04em" fill="var(--text)">&ldquo;ZENITH&rdquo;</text>' +
+          '<text x="' + (routerX + 62) + '" y="' + (routerY + 52) + '" font-size="9" font-family="monospace" font-weight="700" fill="var(--text-subtle)">CENTRAL TRANSIT GATEWAY</text>' +
+          // Status Badge di Hub
+          '<rect class="topo-router-badge-bg" x="' + (routerX + 62) + '" y="' + (routerY + 58) + '" width="72" height="16" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1" rx="0"/>' +
+          '<text class="topo-router-badge-txt" x="' + (routerX + 98) + '" y="' + (routerY + 69) + '" text-anchor="middle" font-size="8.5" font-weight="900" font-family="monospace" fill="var(--text-muted)">IDLE</text>' +
         '</g>';
       nodesG.appendChild(router);
       var routerBadgeBg = router.querySelector(".topo-router-badge-bg");
       var routerBadgeTxt = router.querySelector(".topo-router-badge-txt");
 
-      // Layout Kartu Provider & Catenary Patch Cables (Neon Pulse Signal Wave)
-      var currentGlobal = 0;
+      // 360° Radial Provider Satellites
+      var totalNodes = nodes.length;
+      var radiusX = Math.min(365, (W - 250) / 2);
+      var radiusY = Math.min(215, (H - 150) / 2);
+      var CARD_W = 168;
+      var CARD_H = 62;
 
-      function layoutCluster(rows, clusterY, isTopCluster) {
-        var startCardY = clusterY + CLUSTER_HEAD_H + CLUSTER_PAD_Y;
+      for (var i = 0; i < totalNodes; i++) {
+        var n = nodes[i];
+        var color = colorFor(n.id, i);
+        var key = String(n.id).toLowerCase();
 
-        rows.forEach(function (rowList, rIdx) {
-          if (!rowList || rowList.length === 0) return;
-          var rowCount = rowList.length;
-          var rowContentW = rowCount * CARD_W + (rowCount - 1) * CARD_GAP_X;
-          var rowStartX = clusterX + (clusterBoxW - rowContentW) / 2;
-          var yCard = startCardY + rIdx * (CARD_H + CARD_GAP_Y);
+        // Sudut 360° melingkar ala 9Router: merata dari atas berputar searah jarum jam
+        var angle = (i * (2 * Math.PI / totalNodes)) - (Math.PI / 2);
+        var satCenterX = centerX + radiusX * Math.cos(angle);
+        var satCenterY = centerY + radiusY * Math.sin(angle);
 
-          rowList.forEach(function (n, cIdx) {
-            var i = currentGlobal++;
-            var xCard = rowStartX + cIdx * (CARD_W + CARD_GAP_X);
-            var color = colorFor(n.id, i);
-            var key = String(n.id).toLowerCase();
+        var cardX = Math.max(10, Math.min(W - CARD_W - 10, satCenterX - CARD_W / 2));
+        var cardY = Math.max(10, Math.min(H - CARD_H - 10, satCenterY - CARD_H / 2));
 
-            // Titik Soket Jack Input di Kartu Provider
-            var cardPinX = xCard + CARD_W - 24;
-            var cardPinY = isTopCluster ? (yCard + CARD_H) : yCard;
+        // Titik keluar dari Router Hub
+        var hubEdgeX = centerX + Math.cos(angle) * (ROUTER_W * 0.44);
+        var hubEdgeY = centerY + Math.sin(angle) * (ROUTER_H * 0.44);
 
-            // Titik Soket Jack Output di Zenith Master Matrix
-            var totalInCluster = isTopCluster ? authedNodes.length : keylessNodes.length;
-            var clusterIdx = isTopCluster ? i : (i - authedNodes.length);
-            var pinSpan = ROUTER_W - 88;
-            var routerPinX = routerX + 44 + (totalInCluster <= 1 ? (pinSpan / 2) : (clusterIdx * (pinSpan / (totalInCluster - 1))));
-            var routerPinY = isTopCluster ? Y_ROUTER : (Y_ROUTER + ROUTER_H);
+        // Titik masuk ke Card Provider (sisi yang menghadap ke hub)
+        var cardEdgeX = cardX + CARD_W / 2;
+        var cardEdgeY = cardY + CARD_H / 2;
+        if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
+          cardEdgeX = Math.cos(angle) > 0 ? cardX : (cardX + CARD_W);
+        } else {
+          cardEdgeY = Math.sin(angle) > 0 ? cardY : (cardY + CARD_H);
+        }
 
-            // Catenary Curve Bezier (Lengkungan fisik kabel audio anti-overlap)
-            var dx = cardPinX - routerPinX;
-            var sag = 28 + rIdx * 42 + Math.abs(dx) * 0.08;
-            var c1x = routerPinX + dx * 0.25;
-            var c1y = isTopCluster ? (routerPinY - sag) : (routerPinY + sag);
-            var c2x = routerPinX + dx * 0.75;
-            var c2y = isTopCluster ? (cardPinY + 22) : (cardPinY - 22);
+        // Catenary / Bezier Curve anti-kaku
+        var midX = (hubEdgeX + cardEdgeX) / 2;
+        var midY = (hubEdgeY + cardEdgeY) / 2;
+        var sag = 18 * Math.sin(angle);
+        var cp1x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.4;
+        var cp1y = hubEdgeY + (cardEdgeY - hubEdgeY) * 0.2 + sag;
+        var cp2x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.7;
+        var cp2y = cardEdgeY - (cardEdgeY - hubEdgeY) * 0.2 + sag;
 
-            var d = "M " + routerPinX + " " + routerPinY +
-                    " C " + c1x + " " + c1y + ", " + c2x + " " + c2y + ", " + cardPinX + " " + cardPinY;
+        var d = "M " + hubEdgeX + " " + hubEdgeY +
+                " C " + cp1x + " " + cp1y + ", " + cp2x + " " + cp2y + ", " + cardEdgeX + " " + cardEdgeY;
 
-            // 3-Layer Patch Cable: Shadow (8px) -> Neon Color (4.5px) -> Traveling Signal Wave (2px)
-            var traceG = document.createElementNS(NS, "g");
-            traceG.innerHTML =
-              '<path class="patch-cable-shadow" d="' + d + '" stroke="var(--text)" stroke-width="8" fill="none" stroke-linecap="round"/>' +
-              '<path class="patch-cable-base" d="' + d + '" stroke="' + color + '" stroke-width="4.5" fill="none" stroke-linecap="round"/>' +
-              '<path class="patch-cable-active wire-active" d="' + d + '" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" style="display:none;"/>' +
-              // Soket Jack Konsentris di Router Core [■/●]
-              '<g class="router-jack" transform="translate(' + routerPinX + ',' + routerPinY + ')">' +
-                '<circle r="7.5" fill="var(--text)"/>' +
-                '<circle r="5" fill="var(--surface)" stroke="var(--text)" stroke-width="1.2"/>' +
-                '<circle class="router-jack-ring" r="3" fill="' + color + '"/>' +
-              '</g>';
-            tracesG.appendChild(traceG);
+        // Trace Wire Group: Shadow -> Base Cable -> Active Cable -> Traveling Packet
+        var traceG = document.createElementNS(NS, "g");
+        traceG.innerHTML =
+          '<path class="patch-cable-shadow" d="' + d + '" stroke="var(--shadow-ink)" stroke-width="5" fill="none" stroke-linecap="round"/>' +
+          '<path class="patch-cable-base" d="' + d + '" stroke="var(--line)" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3 3"/>' +
+          '<path class="patch-cable-active wire-active" d="' + d + '" stroke="' + color + '" stroke-width="3.5" fill="none" stroke-linecap="round" style="display:none;"/>' +
+          '<g class="patch-cable-packet" style="display:none;">' +
+            '<rect width="8" height="8" x="-4" y="-4" fill="#86efac" stroke="var(--text)" stroke-width="1.2">' +
+              '<animateMotion path="' + d + '" dur="1s" repeatCount="indefinite"/>' +
+            '</rect>' +
+          '</g>' +
+          // Jack Ring di Router Hub
+          '<g class="router-jack" transform="translate(' + hubEdgeX + ',' + hubEdgeY + ')">' +
+            '<circle r="5" fill="var(--text)"/>' +
+            '<circle class="router-jack-ring" r="2.5" fill="var(--surface-3)"/>' +
+          '</g>';
+        tracesG.appendChild(traceG);
 
-            var cableBase = traceG.querySelector(".patch-cable-base");
-            var cableActive = traceG.querySelector(".patch-cable-active");
-            var routerJackRing = traceG.querySelector(".router-jack-ring");
+        var cableBase = traceG.querySelector(".patch-cable-base");
+        var cableActive = traceG.querySelector(".patch-cable-active");
+        var cablePacket = traceG.querySelector(".patch-cable-packet");
+        var routerJackRing = traceG.querySelector(".router-jack-ring");
 
-            // Kartu Provider Node (Neobrutalism Modular Rack)
-            var g = document.createElementNS(NS, "g");
-            g.setAttribute("class", "topo-node");
-            g.setAttribute("transform", "translate(" + xCard + "," + yCard + ")");
+        // Provider Card Node (Deconstructivist Editorial)
+        var g = document.createElementNS(NS, "g");
+        g.setAttribute("class", "topo-node");
+        g.setAttribute("transform", "translate(" + cardX + "," + cardY + ")");
 
-            var iconClipId = "chip-icon-" + i;
-            var iconClip = document.createElementNS(NS, "clipPath");
-            iconClip.setAttribute("id", iconClipId);
-            iconClip.innerHTML = '<rect x="8" y="10" width="26" height="26" rx="0"/>';
-            defs.appendChild(iconClip);
+        var iconClipId = "chip-icon-" + i;
+        var iconClip = document.createElementNS(NS, "clipPath");
+        iconClip.setAttribute("id", iconClipId);
+        iconClip.innerHTML = '<rect x="8" y="16" width="20" height="20" rx="0"/>';
+        defs.appendChild(iconClip);
 
-            var titleClipId = "title-clip-" + i;
-            var titleClip = document.createElementNS(NS, "clipPath");
-            titleClip.setAttribute("id", titleClipId);
-            titleClip.innerHTML = '<rect x="38" y="6" width="118" height="22" rx="0"/>';
-            defs.appendChild(titleClip);
+        var sub = n.noAuth && !n.accounts ? "NO-AUTH" : n.accounts + " AKUN";
+        var tokenStr = fmt(n.tokens) + " TKN";
+        var refCode = "REF." + String(i + 1).padStart(2, "0");
 
-            var sub = n.noAuth && !n.accounts ? "NO-AUTH READY" : n.accounts + " Akun &middot; " + fmt(n.requests) + " Req";
-            var tokenStr = fmt(n.tokens) + " TOKENS";
+        g.innerHTML =
+          '<rect class="topo-node-shadow" x="3" y="3" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--shadow-ink)" rx="0"/>' +
+          '<g class="topo-node-chip">' +
+            '<rect class="topo-chip-body" x="0" y="0" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2" rx="0"/>' +
+            '<rect x="0" y="0" width="5" height="' + CARD_H + '" fill="' + color + '"/>' +
+            // Header Mikro [REF.01] & Sub
+            '<text x="10" y="12" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">[' + esc(refCode) + ']</text>' +
+            '<text x="' + (CARD_W - 10) + '" y="12" text-anchor="end" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">' + esc(sub) + '</text>' +
+            // Ikon + Nama Provider bertanda kutip
+            (n.icon
+              ? '<rect x="8" y="16" width="20" height="20" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
+                '<image href="' + esc(n.icon) + '" x="8" y="16" width="20" height="20" preserveAspectRatio="xMidYMid meet" clip-path="url(#' + iconClipId + ')"/>'
+              : '<rect x="8" y="16" width="20" height="20" fill="' + color + '"/>' +
+                '<text x="18" y="30" text-anchor="middle" font-size="10" font-weight="900" fill="var(--text)">' + esc(initials(n.name)) + '</text>') +
+            '<text class="topo-chip-title" x="34" y="30" font-size="10.5" font-weight="900" fill="var(--text)">&ldquo;' + esc(n.name.toUpperCase()) + '&rdquo;</text>' +
+            // Divider Line
+            '<line x1="0" y1="41" x2="' + CARD_W + '" y2="41" stroke="var(--line)" stroke-width="1"/>' +
+            // Footer: Token Count + Status Badge
+            '<text x="10" y="54" font-size="8.5" font-family="monospace" font-weight="bold" fill="var(--text-muted)">' + esc(tokenStr) + '</text>' +
+            '<g class="topo-badge-live" style="display:none">' +
+              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="#86efac" stroke="var(--text)" stroke-width="1.2"/>' +
+              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LIVE</text>' +
+            '</g>' +
+            '<g class="topo-badge-last" style="display:none">' +
+              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="#fde047" stroke="var(--text)" stroke-width="1.2"/>' +
+              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LAST</text>' +
+            '</g>' +
+            '<g class="topo-badge-idle">' +
+              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
+              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="var(--text-muted)">IDLE</text>' +
+            '</g>' +
+            // Analog VU-Meter 4-bar
+            '<g class="vu-meter" transform="translate(' + (CARD_W - 32) + ', 22)">' +
+              '<rect class="vu-bar" x="0" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect class="vu-bar" x="5" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect class="vu-bar" x="10" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect class="vu-bar" x="15" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+            '</g>' +
+          '</g>';
+        nodesG.appendChild(g);
 
-            g.innerHTML =
-              '<rect class="topo-node-shadow" x="3" y="3" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--text)" rx="0"/>' +
-              '<g class="topo-node-chip">' +
-                '<rect class="topo-chip-body" x="0" y="0" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2.5" rx="0"/>' +
-                '<rect x="0" y="0" width="6" height="' + CARD_H + '" fill="' + color + '"/>' +
-                // Baris 1: Ikon + Nama Provider + Analog VU-Meter
-                (n.icon
-                  ? '<rect x="9" y="10" width="24" height="24" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
-                    '<image href="' + esc(n.icon) + '" x="9" y="10" width="24" height="24" preserveAspectRatio="xMidYMid meet" clip-path="url(#' + iconClipId + ')"/>'
-                  : '<rect x="9" y="10" width="24" height="24" fill="' + color + '"/>' +
-                    '<text x="21" y="26" text-anchor="middle" font-size="11" font-weight="900" fill="var(--text)">' + esc(initials(n.name)) + '</text>') +
-                '<g clip-path="url(#' + titleClipId + ')">' +
-                  '<text class="topo-chip-title" x="38" y="24" font-size="11.5" font-weight="900" fill="var(--text)">' + esc(n.name) + '</text>' +
-                '</g>' +
-                // Analog VU-Meter 4-bar
-                '<g class="vu-meter" transform="translate(158, 12)">' +
-                  '<rect class="vu-bar" x="0" y="0" width="4.5" height="10" fill="var(--line)" opacity="0.25"/>' +
-                  '<rect class="vu-bar" x="6.5" y="0" width="4.5" height="10" fill="var(--line)" opacity="0.25"/>' +
-                  '<rect class="vu-bar" x="13" y="0" width="4.5" height="10" fill="var(--line)" opacity="0.25"/>' +
-                  '<rect class="vu-bar" x="19.5" y="0" width="4.5" height="10" fill="var(--line)" opacity="0.25"/>' +
-                '</g>' +
-                // Baris 2: Subteks Akun & Requests
-                '<text x="38" y="40" font-size="9.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">' + esc(sub) + '</text>' +
-                // Divider Line Tajam
-                '<line x1="0" y1="49" x2="' + CARD_W + '" y2="49" stroke="var(--line)" stroke-width="1.2"/>' +
-                // Baris 3: Token Count di kiri, Badge Status di kanan
-                '<text x="10" y="66" font-size="9" font-family="monospace" font-weight="bold" fill="var(--text-muted)">' + esc(tokenStr) + '</text>' +
-                '<g class="topo-badge-live" style="display:none">' +
-                  '<rect x="' + (CARD_W - 54) + '" y="54" width="44" height="16" fill="#86efac" stroke="var(--text)" stroke-width="1.5"/>' +
-                  '<text x="' + (CARD_W - 32) + '" y="66" text-anchor="middle" font-size="8.5" font-family="monospace" font-weight="900" fill="var(--text)">LIVE</text>' +
-                '</g>' +
-                '<g class="topo-badge-last" style="display:none">' +
-                  '<rect x="' + (CARD_W - 54) + '" y="54" width="44" height="16" fill="#fde047" stroke="var(--text)" stroke-width="1.5"/>' +
-                  '<text x="' + (CARD_W - 32) + '" y="66" text-anchor="middle" font-size="8.5" font-family="monospace" font-weight="900" fill="var(--text)">LAST</text>' +
-                '</g>' +
-                '<g class="topo-badge-idle">' +
-                  '<rect x="' + (CARD_W - 54) + '" y="54" width="44" height="16" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
-                  '<text x="' + (CARD_W - 32) + '" y="66" text-anchor="middle" font-size="8.5" font-family="monospace" font-weight="bold" fill="var(--text-muted)">IDLE</text>' +
-                '</g>' +
-                // Soket Jack Input di Kartu Provider
-                '<g transform="translate(' + (CARD_W - 24) + ',' + (isTopCluster ? CARD_H : 0) + ')">' +
-                  '<circle r="7" fill="var(--text)"/>' +
-                  '<circle r="4.5" fill="var(--surface)" stroke="var(--text)" stroke-width="1"/>' +
-                  '<circle class="provider-jack-ring" r="2.5" fill="' + color + '"/>' +
-                '</g>' +
-              '</g>';
-            nodesG.appendChild(g);
+        var vuBars = g.querySelectorAll(".vu-bar");
 
-            var vuBars = g.querySelectorAll(".vu-bar");
-            var providerJackRing = g.querySelector(".provider-jack-ring");
-
-            refs.push({
-              key: key,
-              color: color,
-              g: g,
-              chip: g.querySelector(".topo-node-chip"),
-              body: g.querySelector(".topo-chip-body"),
-              badgeLive: g.querySelector(".topo-badge-live"),
-              badgeLast: g.querySelector(".topo-badge-last"),
-              badgeIdle: g.querySelector(".topo-badge-idle"),
-              cableBase: cableBase,
-              cableActive: cableActive,
-              routerJackRing: routerJackRing,
-              providerJackRing: providerJackRing,
-              vuBars: vuBars,
-            });
-          });
+        refs.push({
+          key: key,
+          color: color,
+          g: g,
+          chip: g.querySelector(".topo-node-chip"),
+          body: g.querySelector(".topo-chip-body"),
+          badgeLive: g.querySelector(".topo-badge-live"),
+          badgeLast: g.querySelector(".topo-badge-last"),
+          badgeIdle: g.querySelector(".topo-badge-idle"),
+          cableBase: cableBase,
+          cableActive: cableActive,
+          cablePacket: cablePacket,
+          routerJackRing: routerJackRing,
+          vuBars: vuBars,
         });
       }
-
-      layoutCluster(authedRows, Y_AUTHED_CLUSTER, true);
-      layoutCluster(keylessRows, Y_KEYLESS_CLUSTER, false);
 
       function computeActive() {
         var now = Date.now();
@@ -567,9 +506,8 @@ function renderTopologyPane(topology) {
           var cls = isActive ? "topo-node is-active" : "topo-node";
           if (r.g.getAttribute("class") !== cls) r.g.setAttribute("class", cls);
 
-          // Card Border & Neon Voltage Glow saat aktif (Opsi 2)
           r.body.style.stroke = isActive ? r.color : (isLast ? "#fde047" : "var(--text)");
-          r.body.setAttribute("stroke-width", isActive ? "3" : (isLast ? "2.5" : "2"));
+          r.body.setAttribute("stroke-width", isActive ? "2.5" : (isLast ? "2.5" : "2"));
           if (isActive) {
             r.chip.style.setProperty("--glow-color", r.color);
           } else {
@@ -580,19 +518,16 @@ function renderTopologyPane(topology) {
           r.badgeLast.style.display = isLast ? "" : "none";
           r.badgeIdle.style.display = isIdle ? "" : "none";
 
-          // Kabel Patch: Neon Pulse Signal Wave & Glowing
           r.cableActive.style.display = isActive ? "" : "none";
-          r.cableBase.setAttribute("stroke", isActive ? r.color : (isLast ? "#fde047" : "var(--surface-3)"));
-          r.cableBase.setAttribute("stroke-width", isActive ? "5" : (isLast ? "4" : "3"));
-          r.cableBase.setAttribute("stroke-dasharray", isIdle ? "4 4" : "none");
-          r.cableBase.style.filter = isActive ? "drop-shadow(0 0 8px " + r.color + ")" : "none";
+          if (r.cablePacket) r.cablePacket.style.display = isActive ? "" : "none";
+          r.cableBase.setAttribute("stroke", isActive ? r.color : (isLast ? "#fde047" : "var(--line)"));
+          r.cableBase.setAttribute("stroke-width", isActive ? "3" : (isLast ? "2.5" : "1.8"));
+          r.cableBase.setAttribute("stroke-dasharray", isIdle ? "3 3" : "none");
+          r.cableBase.style.filter = isActive ? "drop-shadow(0 0 6px " + r.color + ")" : "none";
 
-          // Soket Jack Pins Glow
-          var ringColor = isActive ? r.color : (isLast ? "#fde047" : "var(--text-subtle)");
+          var ringColor = isActive ? r.color : (isLast ? "#fde047" : "var(--surface-3)");
           if (r.routerJackRing) r.routerJackRing.setAttribute("fill", ringColor);
-          if (r.providerJackRing) r.providerJackRing.setAttribute("fill", ringColor);
 
-          // Analog VU-Meter Bars Glow
           r.vuBars.forEach(function (bar, bIdx) {
             if (isActive) {
               bar.setAttribute("fill", "#86efac");
@@ -611,11 +546,13 @@ function renderTopologyPane(topology) {
         if (router.getAttribute("class") !== routerCls) router.setAttribute("class", routerCls);
         if (powering) {
           routerBadgeBg.setAttribute("fill", "#86efac");
+          routerBadgeBg.setAttribute("stroke", "var(--text)");
           routerBadgeTxt.setAttribute("fill", "var(--text)");
           routerBadgeTxt.textContent = activeCount + " RUNNING";
         } else {
-          routerBadgeBg.setAttribute("fill", "var(--text)");
-          routerBadgeTxt.setAttribute("fill", "var(--surface)");
+          routerBadgeBg.setAttribute("fill", "var(--surface-2)");
+          routerBadgeBg.setAttribute("stroke", "var(--line)");
+          routerBadgeTxt.setAttribute("fill", "var(--text-muted)");
           routerBadgeTxt.textContent = "IDLE";
         }
       }

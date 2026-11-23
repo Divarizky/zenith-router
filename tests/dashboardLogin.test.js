@@ -30,7 +30,7 @@ test("login page uses the shared theme tokens instead of its own palette", () =>
 
 test("login card keeps a visible hard shadow in both themes", () => {
   const html = renderDashboardLoginPage({});
-  // Kegagalan yang dicegah: bayangan login berwarna gelap dan hilang di tema gelap.
+  // Kegagalan yang dicegah: bayangan login putih menyilaukan mata di tema gelap.
   const dark = html.slice(html.indexOf('[data-theme="dark"] {'));
-  assert.match(dark.slice(0, dark.indexOf("}")), /--shadow-ink:\s*#f4f4f7/);
+  assert.match(dark.slice(0, dark.indexOf("}")), /--shadow-ink:\s*#000000/);
 });

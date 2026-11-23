@@ -48,43 +48,51 @@ export const THEME_TOKENS_CSS = `
   --bg-hover: #f0f0f0;
 }
 
-/* ===== Tema gelap =====
-   Token dibalik: latar gelap, teks terang, garis & bayangan keras terang.
-   Aksen pastel sengaja tetap terang, jadi teks di atasnya tetap hitam. */
+/* ===== Tema gelap (Obsidian Neo-Brutalism) =====
+   Bayangan tetap hitam pekat untuk kedalaman taktil fisik tanpa silau putih.
+   Border menggunakan slate terukur agar mata tidak cepat lelah saat sesi panjang.
+   Aksen pastel sengaja tetap terang, teks di atas aksen tetap hitam. */
 [data-theme="dark"] {
-  --bg: #101013;
-  --surface: #17171b;
-  --surface-2: #202027;
-  --surface-3: #2b2b34;
-  --border: #ffffff;
-  --border-subtle: #9a9aa6;
-  --text: #f4f4f7;
+  --bg: #0c0d10;
+  --surface: #15161a;
+  --surface-2: #1e2026;
+  --surface-3: #282a33;
+  --border: #71717a;
+  --border-subtle: #383842;
+  --text: #f4f4f6;
   --text-muted: #cfcfd6;
   --text-subtle: #9a9aa6;
-  --accent-soft: rgba(37, 99, 235, 0.28);
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-soft: rgba(59, 130, 246, 0.18);
   --accent-lime: #ccff00;
   --accent-lime-hover: #bbf400;
+  --accent-pink: #ffb3d9;
+  --accent-pink-hover: #fa92c7;
   --accent-pink-soft: rgba(255, 179, 217, 0.18);
   --success: #34d399;
   --warning: #facc15;
   --danger: #ef4444;
   --danger-hover: #dc2626;
   --info: #38bdf8;
-  --shadow-ink: #f4f4f7;
-  --line: #f4f4f7;
-  --logo-tile: #ffffff;
-  --logo-tile-line: #f4f4f7;
-  --focus-ring: #f4f4f7;
-  --traffic: #7dd3fc;
-  --traffic-soft: rgba(125, 211, 252, 0.35);
-  --traffic-core: #e0f2fe;
-  --grid-line: rgba(244, 244, 247, 0.06);
-  --outline-green: #4ade80;
-  --link: #7dd3fc;
-  --link-hover: #bae6fd;
+  --shadow-ink: #000000;
+  --line: #71717a;
+  --logo-tile: #15161a;
+  --logo-tile-line: #71717a;
+  --focus-ring: #ccff00;
+  --traffic: #38bdf8;
+  --traffic-soft: rgba(56, 189, 248, 0.2);
+  --traffic-core: #0c0d10;
+  --hard: 4px 4px 0 var(--shadow-ink);
+  --hard-sm: 2px 2px 0 var(--shadow-ink);
+  --hard-lg: 6px 6px 0 var(--shadow-ink);
+  --grid-line: rgba(255, 255, 255, 0.04);
+  --outline-green: #22c55e;
+  --link: #38bdf8;
+  --link-hover: #7dd3fc;
   --icon-reasoning: #f472b6;
   --icon-vision: #38bdf8;
-  --bg-hover: #26262e;
+  --bg-hover: #1e2026;
 }
 `;
 

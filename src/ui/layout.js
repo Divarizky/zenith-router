@@ -81,6 +81,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     ${THEME_TOKENS_CSS}
     ${LAYOUT_TOKENS_CSS}
     [data-theme="dark"] .btn-pink,
+    [data-theme="dark"] .btn-lime,
     [data-theme="dark"] .btn-success,
     [data-theme="dark"] .btn-warning,
     [data-theme="dark"] .btn-danger,
@@ -941,6 +942,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .zr-confirm h3 { font-size: 1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.75rem; }
     .zr-confirm p { color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.5; }
     .zr-confirm .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
+
     /* ===== Bento HUD & Overview Asimetris ===== */
     .bento-split-grid {
       display: grid;

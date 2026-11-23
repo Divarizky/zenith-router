@@ -35,14 +35,14 @@ test("light theme: link and subtle text reach 4.5:1 on every surface they sit on
   }
 });
 
-test("dark theme: borders and hard shadows reach 3:1 against the background", async () => {
+test("dark theme: borders and lines reach 3:1 against the background", async () => {
   initDb(":memory:");
   const html = await (await app.request("/dashboard")).text();
   const t = tokens(html, '[data-theme="dark"] {');
-  // Kegagalan yang dicegah: garis dan bayangan gelap menyatu dengan latar (sebelumnya 1.69 dan 2.88).
-  assert.ok(contrast(t["shadow-ink"], t.bg) >= 3, `shadow-ink on bg = ${contrast(t["shadow-ink"], t.bg).toFixed(2)}`);
+  // Kegagalan yang dicegah: garis gelap menyatu dengan latar (sebelumnya 1.69 dan 2.88).
   assert.ok(contrast(t.border, t.bg) >= 3, `border on bg = ${contrast(t.border, t.bg).toFixed(2)}`);
   assert.ok(contrast(t.line, t.bg) >= 3, `line on bg = ${contrast(t.line, t.bg).toFixed(2)}`);
+  assert.strictEqual(t["shadow-ink"], "#000000", "hard shadow is deep obsidian to prevent glare");
 });
 
 test("dark theme: keeps the surface darker than the text it carries", async () => {

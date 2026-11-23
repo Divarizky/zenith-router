@@ -243,13 +243,21 @@ function renderTopologyPane(topology) {
           .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       }
       function initials(name) {
-        var words = String(name || "?").split(/\\s+/).filter(Boolean);
+        var words = String(name || "?").split(/\s+/).filter(Boolean);
         return (words.slice(0, 2).map(function (w) { return w[0]; }).join("") || "?").toUpperCase();
       }
+      function cleanName(raw) {
+        var s = String(raw || "");
+        s = s.replace(/\s*\([^)]*\)/g, "");
+        s = s.replace(/\s+Free\s+Tier/gi, "");
+        s = s.replace(/\s+AI\s+Endpoints/gi, "");
+        s = s.replace(/\s+Web\s+Chat/gi, "");
+        return s.trim() || raw;
+      }
 
-      // 360° Radial Hub-and-Spoke Geometry (ala 9Router + Swiss Punk / Deconstructivist)
-      var W = 960;
-      var H = 560;
+      // 360° Radial Hub-and-Spoke Geometry (Anti-Overlap Deconstructivist Matrix)
+      var W = 1000;
+      var H = 620;
       var centerX = W / 2;
       var centerY = H / 2;
 
@@ -305,18 +313,20 @@ function renderTopologyPane(topology) {
         svg.appendChild(g);
       }
       addCropMark(20, 20, "00:00 [TL]");
-      addCropMark(W - 70, 20, "10:00 [TR]");
+      addCropMark(W - 75, 20, "10:00 [TR]");
       addCropMark(20, H - 20, "00:99 [BL]");
-      addCropMark(W - 70, H - 20, "10:99 [BR]");
+      addCropMark(W - 75, H - 20, "10:99 [BR]");
 
       svg.appendChild(tracesG);
       svg.appendChild(nodesG);
 
       // Central Zenith Gateway Hub (Master Matrix) di Titik Pusat (centerX, centerY)
-      var ROUTER_W = 216;
-      var ROUTER_H = 82;
+      var ROUTER_W = 224;
+      var ROUTER_H = 84;
       var routerX = centerX - ROUTER_W / 2;
       var routerY = centerY - ROUTER_H / 2;
+      var rHW = ROUTER_W / 2;
+      var rHH = ROUTER_H / 2;
 
       var router = document.createElementNS(NS, "g");
       router.setAttribute("class", "topo-router");
@@ -325,18 +335,18 @@ function renderTopologyPane(topology) {
         '<g class="topo-router-core">' +
           '<rect x="' + routerX + '" y="' + routerY + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2.5" rx="0"/>' +
           '<rect class="topo-router-strip" x="' + routerX + '" y="' + routerY + '" width="6" height="' + ROUTER_H + '" fill="var(--success)"/>' +
-          // Lakban Neon Lime Virtual: GATEWAY CORE // 20120
-          '<g transform="translate(' + (routerX + ROUTER_W - 128) + ',' + (routerY - 10) + ') rotate(2)">' +
-            '<rect width="134" height="20" fill="var(--accent-lime, #ccff00)" stroke="var(--text)" stroke-width="1.2" rx="0"/>' +
-            '<text x="67" y="14" text-anchor="middle" font-size="9" font-family="monospace" font-weight="900" fill="#0a0a0a">&ldquo;GATEWAY CORE // 20120&rdquo;</text>' +
+          // Lakban Neon Lime Virtual di pojok kanan atas hub (bebas tabrakan dengan kabel node atas)
+          '<g transform="translate(' + (routerX + ROUTER_W - 100) + ',' + (routerY - 9) + ') rotate(1.5)">' +
+            '<rect width="96" height="18" fill="var(--accent-lime, #ccff00)" stroke="var(--text)" stroke-width="1.2" rx="0"/>' +
+            '<text x="48" y="13" text-anchor="middle" font-size="8.5" font-family="monospace" font-weight="900" fill="#0a0a0a">&ldquo;CORE // 20120&rdquo;</text>' +
           '</g>' +
           // Logo & Brand
-          '<image x="' + (routerX + 16) + '" y="' + (routerY + 20) + '" width="38" height="38" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
-          '<text x="' + (routerX + 62) + '" y="' + (routerY + 36) + '" font-size="13" font-weight="900" letter-spacing="0.04em" fill="var(--text)">&ldquo;ZENITH&rdquo;</text>' +
-          '<text x="' + (routerX + 62) + '" y="' + (routerY + 52) + '" font-size="9" font-family="monospace" font-weight="700" fill="var(--text-subtle)">CENTRAL TRANSIT GATEWAY</text>' +
+          '<image x="' + (routerX + 16) + '" y="' + (routerY + 22) + '" width="38" height="38" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
+          '<text x="' + (routerX + 62) + '" y="' + (routerY + 38) + '" font-size="13" font-weight="900" letter-spacing="0.04em" fill="var(--text)">&ldquo;ZENITH&rdquo;</text>' +
+          '<text x="' + (routerX + 62) + '" y="' + (routerY + 54) + '" font-size="9" font-family="monospace" font-weight="700" fill="var(--text-subtle)">TRANSIT GATEWAY CORE</text>' +
           // Status Badge di Hub
-          '<rect class="topo-router-badge-bg" x="' + (routerX + 62) + '" y="' + (routerY + 58) + '" width="72" height="16" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1" rx="0"/>' +
-          '<text class="topo-router-badge-txt" x="' + (routerX + 98) + '" y="' + (routerY + 69) + '" text-anchor="middle" font-size="8.5" font-weight="900" font-family="monospace" fill="var(--text-muted)">IDLE</text>' +
+          '<rect class="topo-router-badge-bg" x="' + (routerX + 62) + '" y="' + (routerY + 60) + '" width="72" height="15" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1" rx="0"/>' +
+          '<text class="topo-router-badge-txt" x="' + (routerX + 98) + '" y="' + (routerY + 71) + '" text-anchor="middle" font-size="8.5" font-weight="900" font-family="monospace" fill="var(--text-muted)">IDLE</text>' +
         '</g>';
       nodesG.appendChild(router);
       var routerBadgeBg = router.querySelector(".topo-router-badge-bg");
@@ -344,45 +354,65 @@ function renderTopologyPane(topology) {
 
       // 360° Radial Provider Satellites
       var totalNodes = nodes.length;
-      var radiusX = Math.min(365, (W - 250) / 2);
-      var radiusY = Math.min(215, (H - 150) / 2);
-      var CARD_W = 168;
+      var radiusX = totalNodes <= 6 ? 335 : 375;
+      var radiusY = totalNodes <= 6 ? 195 : 225;
+      var CARD_W = Math.max(148, Math.min(176, 215 - totalNodes * 4));
       var CARD_H = 62;
+      var cardHW = CARD_W / 2;
+      var cardHH = CARD_H / 2;
 
       for (var i = 0; i < totalNodes; i++) {
         var n = nodes[i];
         var color = colorFor(n.id, i);
         var key = String(n.id).toLowerCase();
 
-        // Sudut 360° melingkar ala 9Router: merata dari atas berputar searah jarum jam
+        // Sudut 360° radial merata dari atas berputar searah jarum jam
         var angle = (i * (2 * Math.PI / totalNodes)) - (Math.PI / 2);
         var satCenterX = centerX + radiusX * Math.cos(angle);
         var satCenterY = centerY + radiusY * Math.sin(angle);
 
-        var cardX = Math.max(10, Math.min(W - CARD_W - 10, satCenterX - CARD_W / 2));
-        var cardY = Math.max(10, Math.min(H - CARD_H - 10, satCenterY - CARD_H / 2));
+        var cardX = Math.max(10, Math.min(W - CARD_W - 10, satCenterX - cardHW));
+        var cardY = Math.max(10, Math.min(H - CARD_H - 10, satCenterY - cardHH));
 
-        // Titik keluar dari Router Hub
-        var hubEdgeX = centerX + Math.cos(angle) * (ROUTER_W * 0.44);
-        var hubEdgeY = centerY + Math.sin(angle) * (ROUTER_H * 0.44);
-
-        // Titik masuk ke Card Provider (sisi yang menghadap ke hub)
-        var cardEdgeX = cardX + CARD_W / 2;
-        var cardEdgeY = cardY + CARD_H / 2;
-        if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
-          cardEdgeX = Math.cos(angle) > 0 ? cardX : (cardX + CARD_W);
+        // Titik potong presisi pada perimeter Router Hub (outer border)
+        var dx = satCenterX - centerX;
+        var dy = satCenterY - centerY;
+        var hubEdgeX, hubEdgeY;
+        if (Math.abs(dx) * rHH > Math.abs(dy) * rHW) {
+          hubEdgeX = dx > 0 ? (centerX + rHW) : (centerX - rHW);
+          hubEdgeY = centerY + (dy / Math.abs(dx)) * rHW;
         } else {
-          cardEdgeY = Math.sin(angle) > 0 ? cardY : (cardY + CARD_H);
+          hubEdgeY = dy > 0 ? (centerY + rHH) : (centerY - rHH);
+          hubEdgeX = centerX + (dx / Math.abs(dy)) * rHH;
         }
 
-        // Catenary / Bezier Curve anti-kaku
-        var midX = (hubEdgeX + cardEdgeX) / 2;
-        var midY = (hubEdgeY + cardEdgeY) / 2;
-        var sag = 18 * Math.sin(angle);
-        var cp1x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.4;
-        var cp1y = hubEdgeY + (cardEdgeY - hubEdgeY) * 0.2 + sag;
-        var cp2x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.7;
-        var cp2y = cardEdgeY - (cardEdgeY - hubEdgeY) * 0.2 + sag;
+        // Titik potong presisi pada perimeter Card Provider (outer border)
+        var cdx = centerX - satCenterX;
+        var cdy = centerY - satCenterY;
+        var cardEdgeX, cardEdgeY;
+        if (Math.abs(cdx) * cardHH > Math.abs(cdy) * cardHW) {
+          cardEdgeX = cdx > 0 ? (cardX + CARD_W) : cardX;
+          cardEdgeY = cardY + cardHH + (cdy / Math.abs(cdx)) * cardHW;
+          cardEdgeY = Math.max(cardY + 8, Math.min(cardY + CARD_H - 8, cardEdgeY));
+        } else {
+          cardEdgeY = cdy > 0 ? (cardY + CARD_H) : cardY;
+          cardEdgeX = cardX + cardHW + (cdx / Math.abs(cdy)) * cardHH;
+          cardEdgeX = Math.max(cardX + 8, Math.min(cardX + CARD_W - 8, cardEdgeX));
+        }
+
+        // Bezier S-Curve organic anti-overlap (9Router dynamic curve)
+        var cp1x, cp1y, cp2x, cp2y;
+        if (Math.abs(cardEdgeX - hubEdgeX) > Math.abs(cardEdgeY - hubEdgeY)) {
+          cp1x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.45;
+          cp1y = hubEdgeY;
+          cp2x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.55;
+          cp2y = cardEdgeY;
+        } else {
+          cp1x = hubEdgeX;
+          cp1y = hubEdgeY + (cardEdgeY - hubEdgeY) * 0.45;
+          cp2x = cardEdgeX;
+          cp2y = hubEdgeY + (cardEdgeY - hubEdgeY) * 0.55;
+        }
 
         var d = "M " + hubEdgeX + " " + hubEdgeY +
                 " C " + cp1x + " " + cp1y + ", " + cp2x + " " + cp2y + ", " + cardEdgeX + " " + cardEdgeY;
@@ -390,27 +420,36 @@ function renderTopologyPane(topology) {
         // Trace Wire Group: Shadow -> Base Cable -> Active Cable -> Traveling Packet
         var traceG = document.createElementNS(NS, "g");
         traceG.innerHTML =
-          '<path class="patch-cable-shadow" d="' + d + '" stroke="var(--shadow-ink)" stroke-width="5" fill="none" stroke-linecap="round"/>' +
+          '<path class="patch-cable-shadow" d="' + d + '" stroke="var(--shadow-ink)" stroke-width="4.5" fill="none" stroke-linecap="round"/>' +
           '<path class="patch-cable-base" d="' + d + '" stroke="var(--line)" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3 3"/>' +
           '<path class="patch-cable-active wire-active" d="' + d + '" stroke="' + color + '" stroke-width="3.5" fill="none" stroke-linecap="round" style="display:none;"/>' +
           '<g class="patch-cable-packet" style="display:none;">' +
             '<rect width="8" height="8" x="-4" y="-4" fill="#86efac" stroke="var(--text)" stroke-width="1.2">' +
               '<animateMotion path="' + d + '" dur="1s" repeatCount="indefinite"/>' +
             '</rect>' +
-          '</g>' +
-          // Jack Ring di Router Hub
-          '<g class="router-jack" transform="translate(' + hubEdgeX + ',' + hubEdgeY + ')">' +
-            '<circle r="5" fill="var(--text)"/>' +
-            '<circle class="router-jack-ring" r="2.5" fill="var(--surface-3)"/>' +
           '</g>';
         tracesG.appendChild(traceG);
 
         var cableBase = traceG.querySelector(".patch-cable-base");
         var cableActive = traceG.querySelector(".patch-cable-active");
         var cablePacket = traceG.querySelector(".patch-cable-packet");
-        var routerJackRing = traceG.querySelector(".router-jack-ring");
 
-        // Provider Card Node (Deconstructivist Editorial)
+        // Socket Jacks konsentris di perimeter Hub & Card (di dalam nodesG agar selalu di atas kabel)
+        var routerJack = document.createElementNS(NS, "g");
+        routerJack.innerHTML =
+          '<circle cx="' + hubEdgeX + '" cy="' + hubEdgeY + '" r="4.5" fill="var(--text)"/>' +
+          '<circle class="router-jack-ring" cx="' + hubEdgeX + '" cy="' + hubEdgeY + '" r="2.2" fill="var(--surface-3)"/>';
+        nodesG.appendChild(routerJack);
+        var routerJackRing = routerJack.querySelector(".router-jack-ring");
+
+        var providerJack = document.createElementNS(NS, "g");
+        providerJack.innerHTML =
+          '<circle cx="' + cardEdgeX + '" cy="' + cardEdgeY + '" r="4" fill="var(--text)"/>' +
+          '<circle class="provider-jack-ring" cx="' + cardEdgeX + '" cy="' + cardEdgeY + '" r="1.8" fill="var(--surface-3)"/>';
+        nodesG.appendChild(providerJack);
+        var providerJackRing = providerJack.querySelector(".provider-jack-ring");
+
+        // Provider Card Node (Deconstructivist Editorial dengan perlindungan overlap)
         var g = document.createElementNS(NS, "g");
         g.setAttribute("class", "topo-node");
         g.setAttribute("transform", "translate(" + cardX + "," + cardY + ")");
@@ -421,47 +460,58 @@ function renderTopologyPane(topology) {
         iconClip.innerHTML = '<rect x="8" y="16" width="20" height="20" rx="0"/>';
         defs.appendChild(iconClip);
 
+        // Title clip path untuk mencegah teks panjang menabrak VU-meter atau border
+        var titleClipId = "title-clip-" + i;
+        var titleClip = document.createElementNS(NS, "clipPath");
+        titleClip.setAttribute("id", titleClipId);
+        titleClip.innerHTML = '<rect x="34" y="16" width="' + (CARD_W - 74) + '" height="20" rx="0"/>';
+        defs.appendChild(titleClip);
+
         var sub = n.noAuth && !n.accounts ? "NO-AUTH" : n.accounts + " AKUN";
         var tokenStr = fmt(n.tokens) + " TKN";
         var refCode = "REF." + String(i + 1).padStart(2, "0");
+        var displayName = cleanName(n.name).toUpperCase();
 
         g.innerHTML =
           '<rect class="topo-node-shadow" x="3" y="3" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--shadow-ink)" rx="0"/>' +
           '<g class="topo-node-chip">' +
             '<rect class="topo-chip-body" x="0" y="0" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2" rx="0"/>' +
             '<rect x="0" y="0" width="5" height="' + CARD_H + '" fill="' + color + '"/>' +
-            // Header Mikro [REF.01] & Sub
+            // Header Mikro [REF.01] & Sub Akun
             '<text x="10" y="12" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">[' + esc(refCode) + ']</text>' +
             '<text x="' + (CARD_W - 10) + '" y="12" text-anchor="end" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">' + esc(sub) + '</text>' +
-            // Ikon + Nama Provider bertanda kutip
+            // Ikon Provider
             (n.icon
               ? '<rect x="8" y="16" width="20" height="20" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
                 '<image href="' + esc(n.icon) + '" x="8" y="16" width="20" height="20" preserveAspectRatio="xMidYMid meet" clip-path="url(#' + iconClipId + ')"/>'
               : '<rect x="8" y="16" width="20" height="20" fill="' + color + '"/>' +
                 '<text x="18" y="30" text-anchor="middle" font-size="10" font-weight="900" fill="var(--text)">' + esc(initials(n.name)) + '</text>') +
-            '<text class="topo-chip-title" x="34" y="30" font-size="10.5" font-weight="900" fill="var(--text)">&ldquo;' + esc(n.name.toUpperCase()) + '&rdquo;</text>' +
+            // Nama Provider bertanda kutip dengan clip-path pelindung overlap
+            '<g clip-path="url(#' + titleClipId + ')">' +
+              '<text class="topo-chip-title" x="34" y="30" font-size="10" font-weight="900" fill="var(--text)">&ldquo;' + esc(displayName) + '&rdquo;</text>' +
+            '</g>' +
+            // Analog VU-Meter 4-bar di pojok kanan atas kartu (posisi aman bebas benturan)
+            '<g class="vu-meter" transform="translate(' + (CARD_W - 34) + ', 22)">' +
+              '<rect class="vu-bar" x="0" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect class="vu-bar" x="5" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect class="vu-bar" x="10" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect class="vu-bar" x="15" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+            '</g>' +
             // Divider Line
             '<line x1="0" y1="41" x2="' + CARD_W + '" y2="41" stroke="var(--line)" stroke-width="1"/>' +
             // Footer: Token Count + Status Badge
             '<text x="10" y="54" font-size="8.5" font-family="monospace" font-weight="bold" fill="var(--text-muted)">' + esc(tokenStr) + '</text>' +
             '<g class="topo-badge-live" style="display:none">' +
-              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="#86efac" stroke="var(--text)" stroke-width="1.2"/>' +
-              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LIVE</text>' +
+              '<rect x="' + (CARD_W - 48) + '" y="44" width="40" height="13" fill="#86efac" stroke="var(--text)" stroke-width="1.2"/>' +
+              '<text x="' + (CARD_W - 28) + '" y="53.5" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LIVE</text>' +
             '</g>' +
             '<g class="topo-badge-last" style="display:none">' +
-              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="#fde047" stroke="var(--text)" stroke-width="1.2"/>' +
-              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LAST</text>' +
+              '<rect x="' + (CARD_W - 48) + '" y="44" width="40" height="13" fill="#fde047" stroke="var(--text)" stroke-width="1.2"/>' +
+              '<text x="' + (CARD_W - 28) + '" y="53.5" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LAST</text>' +
             '</g>' +
             '<g class="topo-badge-idle">' +
-              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
-              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="var(--text-muted)">IDLE</text>' +
-            '</g>' +
-            // Analog VU-Meter 4-bar
-            '<g class="vu-meter" transform="translate(' + (CARD_W - 32) + ', 22)">' +
-              '<rect class="vu-bar" x="0" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-              '<rect class="vu-bar" x="5" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-              '<rect class="vu-bar" x="10" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-              '<rect class="vu-bar" x="15" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
+              '<rect x="' + (CARD_W - 48) + '" y="44" width="40" height="13" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
+              '<text x="' + (CARD_W - 28) + '" y="53.5" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="var(--text-muted)">IDLE</text>' +
             '</g>' +
           '</g>';
         nodesG.appendChild(g);
@@ -481,6 +531,7 @@ function renderTopologyPane(topology) {
           cableActive: cableActive,
           cablePacket: cablePacket,
           routerJackRing: routerJackRing,
+          providerJackRing: providerJackRing,
           vuBars: vuBars,
         });
       }
@@ -527,6 +578,7 @@ function renderTopologyPane(topology) {
 
           var ringColor = isActive ? r.color : (isLast ? "#fde047" : "var(--surface-3)");
           if (r.routerJackRing) r.routerJackRing.setAttribute("fill", ringColor);
+          if (r.providerJackRing) r.providerJackRing.setAttribute("fill", ringColor);
 
           r.vuBars.forEach(function (bar, bIdx) {
             if (isActive) {

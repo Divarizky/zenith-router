@@ -53,6 +53,7 @@ import {
   handleAddProxy,
   handleImportProxies,
   handleTestProxy,
+  handleProbeProxyIp,
   handleUpdateProxy,
   handleDeleteProxy,
   handleToggleProxy,
@@ -293,6 +294,7 @@ app.get("/dashboard/proxy-pools", (c) => c.redirect("/dashboard/proxies"));
 app.post("/dashboard/proxies/add", (c) => handleAddProxy(c));
 app.post("/dashboard/proxies/import", (c) => handleImportProxies(c));
 app.post("/dashboard/proxies/test", (c) => handleTestProxy(c));
+app.post("/dashboard/proxies/probe-ip", (c) => handleProbeProxyIp(c));
 app.post("/dashboard/proxies/update", (c) => handleUpdateProxy(c));
 app.post("/dashboard/proxies/delete", (c) => handleDeleteProxy(c));
 app.post("/dashboard/proxies/toggle", (c) => handleToggleProxy(c));

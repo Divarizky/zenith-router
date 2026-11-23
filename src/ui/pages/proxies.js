@@ -9,6 +9,11 @@ import {
   toggleProxyPool,
   getProxyRotationStrategy,
 } from "../../services/proxyPools.js";
+import {
+  probePoolEgressIp,
+  getPoolEgressIp,
+  findDuplicateEgressIps,
+} from "../../services/proxyEgressProbe.js";
 import { getConnections } from "../../db/index.js";
 import { getAllProviders } from "../../providers/index.js";
 import { escapeHtml } from "../html.js";
@@ -21,7 +26,24 @@ function fmtTestTime(ms) {
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function renderProxyRow(pool, noAuthRotatingProviders = []) {
+function renderEgressIpLine(pool, duplicateIds = new Set()) {
+  const entry = getPoolEgressIp(pool.id);
+  if (!entry) {
+    return `<span style="color:var(--text-muted);">Exit IP: belum dicek</span>`;
+  }
+  if (!entry.ip) {
+    return `<span style="color:var(--danger);">Exit IP: gagal dicek${entry.error ? ` &middot; ${escapeHtml(String(entry.error))}` : ""}</span>`;
+  }
+  const stale = entry.stale
+    ? ` <span class="pill pill-warning" title="Config proxy atau probe berubah, atau hasil sudah lewat TTL">kedaluwarsa</span>`
+    : "";
+  const dup = !entry.stale && duplicateIds.has(Number(pool.id))
+    ? ` <span class="pill pill-warning" title="Pool lain memakai IP keluar yang sama. Ini diagnosis, bukan blokir.">IP duplikat</span>`
+    : "";
+  return `Exit IP: <code>${escapeHtml(entry.ip)}</code> &middot; dicek ${fmtTestTime(entry.checkedAt)}${stale}${dup}`;
+}
+
+function renderProxyRow(pool, noAuthRotatingProviders = [], duplicateIds = new Set()) {
   const isOk = Boolean(pool.last_test_ok);
   const hasTested = Boolean(pool.last_test_at);
 
@@ -128,6 +150,7 @@ function renderProxyRow(pool, noAuthRotatingProviders = []) {
           <div class="proxy-url-line" style="margin-bottom: 0.35rem;"><code>${escapeHtml(pool.maskedUrl)}</code></div>
           ${boundChips}
           <div class="proxy-meta-line" style="margin-top: 0.25rem;">${testDetail}</div>
+          <div class="proxy-meta-line" style="margin-top: 0.15rem;">${renderEgressIpLine(pool, duplicateIds)}</div>
         </div>
       </div>
 
@@ -139,6 +162,10 @@ function renderProxyRow(pool, noAuthRotatingProviders = []) {
             class="btn btn-sm ${pool.is_active ? "btn-secondary" : "btn-ghost"}"
             title="${pool.is_active ? "Nonaktifkan proxy" : "Aktifkan proxy"}"
           >${pool.is_active ? "Disable" : "Enable"}</button>
+        </form>
+        <form action="/dashboard/proxies/probe-ip" method="POST" style="margin: 0;">
+          <input type="hidden" name="id" value="${pool.id}" />
+          <button type="submit" class="btn btn-sm btn-ghost" title="Cek IP keluar lewat transport proxy ini">Cek IP</button>
         </form>
         <form action="/dashboard/proxies/test" method="POST" style="margin: 0;">
           <input type="hidden" name="id" value="${pool.id}" />
@@ -180,6 +207,10 @@ export function renderProxyContent(query = {}, lang = DEFAULT_LANGUAGE) {
           const cls = created === 0 && failed > 0 ? "notice-error" : "notice-ok";
           return `<div class="notice ${cls}"><span>Dibuat: ${created} · Dilewati: ${skipped} · Gagal: ${failed}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`;
         })()
+      : query.probed === "1"
+        ? query.ok === "1"
+          ? `<div class="notice notice-ok"><span>IP keluar tercatat. Lihat baris Exit IP di daftar.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
+          : `<div class="notice notice-error"><span>${escapeHtml(query.msg || "Cek IP keluar gagal.")}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
       : query.tested === "1"
         ? query.ok === "1"
           ? `<div class="notice notice-ok"><span>Tes proxy berhasil. Hasil tersimpan di daftar.</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
@@ -211,10 +242,13 @@ export function renderProxyContent(query = {}, lang = DEFAULT_LANGUAGE) {
   const noAuthProviders = getAllProviders().filter((p) => p.noAuth);
   const noAuthRotatingProviders = noAuthProviders.filter((p) => getProxyRotationStrategy(p.id) !== "off");
 
+  const duplicateIds = new Set(
+    findDuplicateEgressIps().flatMap((d) => d.poolIds.map(Number))
+  );
   const listBody =
     pools.length === 0
       ? emptyState
-      : `<div class="proxy-list">${pools.map((p) => renderProxyRow(p, noAuthRotatingProviders)).join("")}</div>`;
+      : `<div class="proxy-list">${pools.map((p) => renderProxyRow(p, noAuthRotatingProviders, duplicateIds)).join("")}</div>`;
 
   const rotationRows = noAuthProviders
     .map((p) => {
@@ -688,6 +722,22 @@ export async function handleTestProxy(c) {
   try {
     const result = await testProxyPool(Number(body.id));
     return c.redirect(`/dashboard/proxies?tested=1&ok=${result.ok ? 1 : 0}`);
+  } catch (err) {
+    return c.redirect(
+      `/dashboard/proxies?error=1&msg=${encodeURIComponent(err.message)}`
+    );
+  }
+}
+
+export async function handleProbeProxyIp(c) {
+  const body = await c.req.parseBody();
+  try {
+    const result = await probePoolEgressIp(Number(body.id));
+    const ok = Boolean(result.ip) && !result.error;
+    const msg = ok ? "" : result.error || "Probe IP gagal.";
+    return c.redirect(
+      `/dashboard/proxies?probed=1&ok=${ok ? 1 : 0}&msg=${encodeURIComponent(msg)}`
+    );
   } catch (err) {
     return c.redirect(
       `/dashboard/proxies?error=1&msg=${encodeURIComponent(err.message)}`

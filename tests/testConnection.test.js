@@ -28,13 +28,13 @@ test("testConnection - succeeds for provider with quota fetcher using mock", asy
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    if (String(url).includes("/user/quota")) {
+    if (String(url).includes("/api/monitor/usage/quota/limit")) {
       return new Response(JSON.stringify({ data: { limits: [{ percentage: 10, unit: 3 }] } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
-    return originalFetch(url);
+    throw new Error(`fetch tidak termock: ${url}`);
   };
 
   try {

@@ -186,7 +186,7 @@ test("testConnection nous - maps 403, 402, 404, 429 and 2xx to distinct outcomes
   assert.match(outcomes[403].error, /403.*(ditolak|akses)/);
   assert.match(outcomes[402].error, /402.*(kredit|pembayaran)/);
   assert.match(outcomes[404].error, /404.*tidak ditemukan/);
-  assert.equal(outcomes[429].ok, true);
-  assert.match(outcomes[429].details, /rate limit/);
+  assert.equal(outcomes[429].ok, false);
+  assert.match(outcomes[429].error, /API key valid.*rate limit/);
   assert.equal(new Set(Object.values(outcomes).map((o) => o.error || o.details)).size, 5);
 });

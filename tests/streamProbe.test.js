@@ -49,6 +49,27 @@ test("streamProbe - skips role-only initial chunk and catches following error", 
   assert.match(data.error.message, /Rate limit reached/);
 });
 
+test("streamProbe - detects non-JSON error event before content", async () => {
+  const res = await probeStreamError(sseResponse(["event: error\ndata: upstream unavailable\n\n"]));
+  assert.strictEqual(res.status, 502);
+  const data = await res.json();
+  assert.strictEqual(data.error.message, "upstream unavailable");
+});
+
+test("streamProbe - detects direct Nous fair-share payload and preserves retry_after", async () => {
+  const res = await probeStreamError(
+    sseResponse([
+      `data: {"status":429,"message":"You've reached this model's current fair-share rate limit.","reason":"rate_limited","retry_after":19}\n\n`,
+    ])
+  );
+  assert.strictEqual(res.status, 429);
+  assert.strictEqual(res.headers.get("retry-after"), "19");
+  assert.strictEqual(res.headers.get("x-zenith-error"), "rate_limited");
+  const data = await res.json();
+  assert.strictEqual(data.error.retry_after, 19);
+  assert.strictEqual(data.error.reason, "rate_limited");
+});
+
 test("streamProbe - detects error event carrying finish_reason error with empty delta", async () => {
   const enc = new TextEncoder();
   const sse = [

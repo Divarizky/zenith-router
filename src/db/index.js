@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS connection_model_locks (
   model TEXT NOT NULL,
   locked_until INTEGER NOT NULL,
   locked_at INTEGER,
+  reason TEXT,
   PRIMARY KEY (connection_id, model)
 );
 
@@ -337,6 +338,10 @@ function migrateSchema(db) {
     db.prepare(
       `UPDATE connection_model_locks SET locked_at = ?, locked_until = MIN(locked_until, ? + ?) WHERE locked_at IS NULL`
     ).run(now, now, MODEL_LOCK_MAX_MS);
+  }
+  const refreshedLockColumns = db.prepare("PRAGMA table_info(connection_model_locks)").all();
+  if (refreshedLockColumns.length && !refreshedLockColumns.some((col) => col.name === "reason")) {
+    db.exec("ALTER TABLE connection_model_locks ADD COLUMN reason TEXT");
   }
   const usageColumns = db.prepare("PRAGMA table_info(usage_history)").all();
   if (!usageColumns.some((col) => col.name === "api_key_id")) {
@@ -676,7 +681,12 @@ export function moveConnection(id, direction) {
  * Neither kind of lock is ever shortened: a shorter deadline over an active lock
  * would unpark an account a previous failure had already ruled unusable.
  */
-export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null, { lockClass = "transient", authoritative = false } = {}) {
+export function setConnectionCooldown(
+  id,
+  cooldownUntilTimestamp,
+  model = null,
+  { lockClass = "transient", authoritative = false, reason = null } = {}
+) {
   const db = getDb();
   const now = Date.now();
   const requested = Number(cooldownUntilTimestamp);
@@ -689,19 +699,21 @@ export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null, 
     if (authoritative && shortenOnResetEnabled()) {
       // Opt-in only: an authoritative reset may bring the deadline forward. Default stays no-shorten.
       db.prepare(
-        `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at, reason) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(connection_id, model) DO UPDATE SET
            locked_until = excluded.locked_until,
-           locked_at = excluded.locked_at`
-      ).run(Number(id), String(model), capped, now);
+           locked_at = excluded.locked_at,
+           reason = COALESCE(excluded.reason, connection_model_locks.reason)`
+      ).run(Number(id), String(model), capped, now, reason);
       return true;
     }
     db.prepare(
-      `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO connection_model_locks (connection_id, model, locked_until, locked_at, reason) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(connection_id, model) DO UPDATE SET
          locked_until = MAX(locked_until, excluded.locked_until),
-         locked_at = excluded.locked_at`
-    ).run(Number(id), String(model), capped, now);
+         locked_at = excluded.locked_at,
+         reason = COALESCE(excluded.reason, connection_model_locks.reason)`
+    ).run(Number(id), String(model), capped, now, reason);
     return true;
   }
   const capped = Math.min(requested, accountCap);
@@ -715,13 +727,13 @@ export function setConnectionCooldown(id, cooldownUntilTimestamp, model = null, 
  * Active per-model lock deadline for a connection, or null when the model is
  * not locked (never locked, lock expired, or unknown pair).
  */
-export function getModelLockUntil(connectionId, model) {
+export function getModelLockDetails(connectionId, model) {
   if (!connectionId || !model) return null;
   const db = getDb();
   const now = Date.now();
   const row = db
     .prepare(
-      `SELECT locked_until, locked_at FROM connection_model_locks
+      `SELECT locked_until, locked_at, reason FROM connection_model_locks
        WHERE connection_id = ? AND model = ? AND locked_until > ?`
     )
     .get(Number(connectionId), String(model), now);
@@ -733,7 +745,11 @@ export function getModelLockUntil(connectionId, model) {
     );
     return null;
   }
-  return Number(row.locked_until);
+  return { until: Number(row.locked_until), reason: row.reason || null, lockedAt: row.locked_at || null };
+}
+
+export function getModelLockUntil(connectionId, model) {
+  return getModelLockDetails(connectionId, model)?.until || null;
 }
 
 /**

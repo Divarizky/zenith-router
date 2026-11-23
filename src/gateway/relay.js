@@ -25,6 +25,7 @@ import { clientSession } from "./session.js";
 import { createTransformStream } from "../translator/index.js";
 import { recordUsage, createUsageTapStream } from "../services/usage.js";
 import { guardStream } from "../services/streamGuard.js";
+import { recordStreamRateLimitCooldown } from "../services/fallback.js";
 import { getSetting } from "../services/settings.js";
 import { dlpModeFrom, scanForSecrets, redactSecrets } from "../services/dlp.js";
 import { captureLine } from "../services/logger.js";
@@ -33,6 +34,20 @@ import { isLoopbackAddress } from "../security.js";
 
 // Header HTTP hanya boleh berisi ByteString (Latin1). Nama akun non-Latin1
 // di-percent-encode agar header tidak melempar error dan respons tetap terkirim.
+let relayRequestSeq = 0;
+
+function nextRequestId() {
+  relayRequestSeq += 1;
+  return `zenith-${relayRequestSeq}`;
+}
+
+function withRequestId(response, requestId) {
+  if (!response || !requestId) return response;
+  const headers = new Headers(response.headers);
+  headers.set("X-Zenith-Request-Id", requestId);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 function encodeAccountHeader(name) {
   const text = String(name);
   // ASCII printable tetap apa adanya (email tidak berubah); hanya karakter
@@ -116,6 +131,8 @@ export function wantsNoFailover(c) {
 }
 
 export async function relayClientRequest(c, spec) {
+  const requestId = nextRequestId();
+  c.header("X-Zenith-Request-Id", requestId);
   let body;
   try {
     body = await c.req.json();
@@ -171,6 +188,7 @@ export async function relayClientRequest(c, spec) {
       sessionSource: session.source,
       sessionApiKeyId: c.get("apiKeyId") ?? null,
       sessionPromptCacheKey: session.promptCacheKey === true,
+      requestId,
     });
 
     if (routed.notFound) {
@@ -194,7 +212,7 @@ export async function relayClientRequest(c, spec) {
           });
         });
       }
-      return routed.response;
+      return withRequestId(routed.response, requestId);
     }
 
     const { provider, targetModel, targetFormat, upstreamRes, connection, startTime, comboName, fallbackFrom, toolNames } = routed;
@@ -233,17 +251,18 @@ export async function relayClientRequest(c, spec) {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
+        "X-Zenith-Request-Id": requestId,
       };
       if (connection?.name) {
         streamHeaders["X-Zenith-Account"] = encodeAccountHeader(connection.name);
       }
-
       return guardStream(
         new Response(responseStream, { status: 200, headers: streamHeaders }),
         {
           signal: c.req.raw.signal,
           label: `${provider?.id || "upstream"} ${targetModel}`,
           format: spec.streamFormat,
+          onError: ({ event }) => recordStreamRateLimitCooldown(connection, provider, targetModel, event),
         }
       );
     }

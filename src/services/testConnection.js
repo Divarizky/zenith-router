@@ -201,7 +201,10 @@ async function probeNousChat(provider, connection) {
     case 404:
       return { ok: false, error: `HTTP 404: model ${model} tidak ditemukan.` };
     case 429:
-      return { ok: true, details: "Key valid, tetapi terkena rate limit (HTTP 429)." };
+      return {
+        ok: false,
+        error: `HTTP 429: API key valid, tetapi model uji '${model}' sedang terkena rate limit. Coba lagi setelah Retry-After.`,
+      };
     default:
       return { ok: false, error: `HTTP ${res.status}` };
   }

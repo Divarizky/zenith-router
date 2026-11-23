@@ -290,6 +290,10 @@ function identityOf({ provider, targetModel }) {
   return `${provider.id}:${targetModel}`;
 }
 
+function requestTag(endpoint) {
+  return endpoint?.requestId ? ` request_id=${endpoint.requestId}` : "";
+}
+
 /**
  * The members of one combo, attempted in order. Every attempt completes before
  * the next one starts, so a client in streaming mode still sees a clean
@@ -303,7 +307,7 @@ async function runComboMembers(combo, endpoint, attempted) {
     for (const member of members) {
       const resolved = resolveModel(member);
       if (!resolved?.provider) {
-        captureLine(`[COMBO] name=${combo.name} member="${member}" tidak bisa dipetakan, dilewati`);
+        captureLine(`[COMBO]${requestTag(endpoint)} name=${combo.name} member="${member}" tidak bisa dipetakan, dilewati`);
         continue;
       }
 
@@ -312,18 +316,18 @@ async function runComboMembers(combo, endpoint, attempted) {
       // Sudah dipanggil pada request ini (mis. target fallback menunjuk anggota
       // yang barusan gagal): mengulanginya hanya menambah cooldown.
       if (attempted.has(identity)) {
-        captureLine(`[COMBO] name=${combo.name} member="${member}" sudah dicoba, dilewati`);
+        captureLine(`[COMBO]${requestTag(endpoint)} name=${combo.name} member="${member}" sudah dicoba, dilewati`);
         continue;
       }
 
       captureLine(
-        `[ROUTE] combo=${combo.name} member="${member}" -> provider=${resolved.provider.id} (${resolved.targetModel})`
+        `[ROUTE]${requestTag(endpoint)} combo=${combo.name} member="${member}" -> provider=${resolved.provider.id} (${resolved.targetModel})`
       );
 
       // A client that walked away stops the chain outright: no member is called
       // after the abort, and no cooldown is written on its behalf.
       if (endpoint.signal?.aborted) {
-        captureLine(`[COMBO] name=${combo.name} klien berhenti, rantai dihentikan`);
+        captureLine(`[COMBO]${requestTag(endpoint)} name=${combo.name} klien berhenti, rantai dihentikan`);
         break;
       }
 
@@ -341,7 +345,7 @@ async function runComboMembers(combo, endpoint, attempted) {
       } catch (err) {
         if (endpoint.signal?.aborted) throw err;
         const message = `member "${member}" could not be reached: ${err.message}`;
-        captureLine(`[COMBO] Combo '${combo.name}': ${message}`);
+        captureLine(`[COMBO]${requestTag(endpoint)} Combo '${combo.name}': ${message}`);
         attempt = {
           ok: false,
           status: 503,
@@ -356,7 +360,7 @@ async function runComboMembers(combo, endpoint, attempted) {
       if (!(await shouldAdvanceToNextMember(attempt))) return attempt;
 
       captureLine(
-        `[COMBO] name=${combo.name} member="${member}" gagal dengan HTTP ${attempt.status}, pindah ke anggota berikutnya`
+        `[COMBO]${requestTag(endpoint)} name=${combo.name} member="${member}" gagal dengan HTTP ${attempt.status}, pindah ke anggota berikutnya`
       );
     }
 
@@ -385,7 +389,7 @@ async function runDefaultFallback({ endpoint, attempted, failure, origin, fallba
 
   const resolved = resolveTarget(fallbackId);
   if (!resolved) {
-    captureLine(`[FALLBACK] model="${origin}" gagal, target "${fallbackId}" tidak dikenal, dilewati`);
+    captureLine(`[FALLBACK]${requestTag(endpoint)} model="${origin}" gagal, target "${fallbackId}" tidak dikenal, dilewati`);
     return failure;
   }
 
@@ -393,7 +397,7 @@ async function runDefaultFallback({ endpoint, attempted, failure, origin, fallba
   // 503-nya memicu fallback. Memanggil upstream di sini hanya membakar kuota
   // target cadangan dan menulis cooldown untuk request yang tidak ada penunggunya.
   if (endpoint.signal?.aborted) {
-    captureLine(`[FALLBACK] klien berhenti, target "${fallbackId}" tidak dipanggil`);
+    captureLine(`[FALLBACK]${requestTag(endpoint)} klien berhenti, target "${fallbackId}" tidak dipanggil`);
     return failure;
   }
 
@@ -404,11 +408,11 @@ async function runDefaultFallback({ endpoint, attempted, failure, origin, fallba
       .map((member) => resolveModel(member))
       .some((r) => r?.provider && !attempted.has(identityOf(r)));
     if (isSelf || !hasFreshMember) {
-      captureLine(`[FALLBACK] combo "${fallbackId}" sudah dicoba seluruhnya, dilewati`);
+      captureLine(`[FALLBACK]${requestTag(endpoint)} combo "${fallbackId}" sudah dicoba seluruhnya, dilewati`);
       return failure;
     }
 
-    captureLine(`[FALLBACK] model="${origin}" gagal, beralih ke combo "${fallbackId}"`);
+    captureLine(`[FALLBACK]${requestTag(endpoint)} model="${origin}" gagal, beralih ke combo "${fallbackId}"`);
     const attempt = await runComboMembers(resolved.combo, endpoint, attempted);
     return attempt.ok ? { ...attempt, fallbackFrom: origin } : attempt;
   }
@@ -416,11 +420,11 @@ async function runDefaultFallback({ endpoint, attempted, failure, origin, fallba
   const { provider, targetModel } = resolved;
   const identity = identityOf({ provider, targetModel });
   if (attempted.has(identity)) {
-    captureLine(`[FALLBACK] target "${fallbackId}" sudah dicoba pada request ini, dilewati`);
+    captureLine(`[FALLBACK]${requestTag(endpoint)} target "${fallbackId}" sudah dicoba pada request ini, dilewati`);
     return failure;
   }
 
-  captureLine(`[FALLBACK] model="${origin}" gagal, beralih ke "${fallbackId}"`);
+  captureLine(`[FALLBACK]${requestTag(endpoint)} model="${origin}" gagal, beralih ke "${fallbackId}"`);
   const attempt = await attemptMember(provider, targetModel, endpoint);
   attempted.add(identity);
   return attempt.ok ? { ...attempt, fallbackFrom: origin } : attempt;
@@ -447,7 +451,7 @@ export async function routeRequest({ model, noFailover = false, ...endpoint }) {
 
   // Probing model murni: satu model langsung, tanpa combo dan tanpa fallback.
   if (noFailover && target.combo) {
-    captureLine(`[ROUTE] model=${model} no-failover: combo dilewati, tidak ada fallback`);
+    captureLine(`[ROUTE]${requestTag(endpoint)} model=${model} no-failover: combo dilewati, tidak ada fallback`);
     const member = target.combo.models.find((m) => resolveModel(m)?.provider);
     const resolved = member ? resolveModel(member) : null;
     if (!resolved) {
@@ -460,7 +464,7 @@ export async function routeRequest({ model, noFailover = false, ...endpoint }) {
   if (!target.combo) {
     const { provider, targetModel } = target;
     captureLine(
-      `[ROUTE] model=${model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(endpoint.body.stream)}`
+      `[ROUTE]${requestTag(endpoint)} model=${model} -> provider=${provider.id} (${targetModel}) stream=${Boolean(endpoint.body.stream)}`
     );
     const attempt = await attemptMember(provider, targetModel, endpoint);
     attempted.add(identityOf({ provider, targetModel }));

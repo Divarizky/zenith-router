@@ -61,6 +61,29 @@ test("guardStream - closes on reset, appends an error frame, logs to dashboard o
   );
 });
 
+test("guardStream - normalizes an error event after partial content and closes", async () => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"parsial"}}]}\n\n'));
+      controller.enqueue(
+        encoder.encode(
+          'event: error\ndata: {"status":429,"message":"fair-share rate limit","reason":"rate_limited","retry_after":17}\n\n'
+        )
+      );
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"tidak boleh"}}]}\n\n'));
+      controller.close();
+    },
+  });
+  const res = guardStream(new Response(stream, { headers: { "Content-Type": "text/event-stream" } }), {
+    format: "openai",
+  });
+  const text = await readAll(res);
+  assert.ok(text.includes('"content":"parsial"'));
+  assert.ok(!text.includes("tidak boleh"));
+  assert.ok(text.includes('"code":"rate_limited"'));
+  assert.ok(text.includes('"retry_after":17'));
+});
+
 test("guardStream - a client hang-up is not logged as an upstream reset", async () => {
   clearConsoleLogs();
   const controller = new AbortController();

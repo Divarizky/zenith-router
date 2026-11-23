@@ -20,12 +20,29 @@ function httpStatusFrom(value) {
 
 function errorObject(event) {
   if (event?.error && typeof event.error === "object") return event.error;
-  return {};
+  return event && typeof event === "object" ? event : {};
 }
 
 function errorMessage(event) {
   if (typeof event?.error === "string" && event.error) return event.error;
   return errorObject(event).message || event?.message || "Upstream stream returned an error";
+}
+
+function retryAfterSeconds(event) {
+  const value = errorObject(event).retry_after ?? event?.retry_after;
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : null;
+}
+
+function isDirectRateLimitPayload(event) {
+  if (event?.error && typeof event.error === "object") return false;
+  const error = errorObject(event);
+  return (
+    error.reason === "rate_limited" ||
+    error.status === 429 ||
+    event?.status === 429 ||
+    /fair.?share\s+rate\s+limit|rate.?limit/i.test(String(error.message || ""))
+  );
 }
 
 function isChoiceMeaningful(choice) {
@@ -45,6 +62,7 @@ export function isStreamErrorEvent(eventName, event) {
   if (eventName === "error") return true;
   if (!event || typeof event !== "object") return false;
   if (event.type === "error" || event.success === false) return true;
+  if (isDirectRateLimitPayload(event)) return true;
   if (event.error != null) {
     if (event.choices == null) return true;
     if (Array.isArray(event.choices)) {
@@ -85,7 +103,7 @@ export function streamErrorStatus(event) {
     httpStatusFrom(event?.code);
   if (explicit) return explicit;
 
-  const text = `${err.type || ""} ${err.code || ""} ${errorMessage(event)}`;
+  const text = `${err.type || ""} ${err.code || ""} ${err.reason || ""} ${event?.reason || ""} ${errorMessage(event)}`;
   if (/rate.?limit|quota|too many requests|exhausted|limit (reached|exceeded)|usage limit/i.test(text)) return 429;
   if (/authentication_error|unauthori[sz]ed|invalid.?api.?key/i.test(text)) return 401;
   return 502;
@@ -102,6 +120,16 @@ function inspectEvents(text) {
     try {
       event = JSON.parse(data);
     } catch {
+      if (eventName === "error") {
+        return {
+          error: {
+            status: 502,
+            payload: {
+              error: { message: data, type: "upstream_error", code: "upstream_stream_error" },
+            },
+          },
+        };
+      }
       return { error: null };
     }
     if (isStreamErrorEvent(eventName, event)) {
@@ -112,8 +140,14 @@ function inspectEvents(text) {
           payload: {
             error: {
               message: errorMessage(event),
-              type: err.type || "upstream_error",
-              code: typeof err.code === "string" ? err.code : "upstream_stream_error",
+              type: isDirectRateLimitPayload(event) ? "rate_limit_error" : err.type || "upstream_error",
+              code: isDirectRateLimitPayload(event)
+                ? "rate_limited"
+                : typeof err.code === "string"
+                  ? err.code
+                  : "upstream_stream_error",
+              ...(err.reason || event.reason ? { reason: err.reason || event.reason } : {}),
+              ...(retryAfterSeconds(event) ? { retry_after: retryAfterSeconds(event) } : {}),
             },
           },
         },
@@ -131,7 +165,10 @@ function inspectEvents(text) {
 
 function errorResponse(status, payload, retryAfter) {
   const headers = { "Content-Type": "application/json" };
+  const bodyRetryAfter = payload?.error?.retry_after;
   if (retryAfter) headers["Retry-After"] = retryAfter;
+  else if (bodyRetryAfter) headers["Retry-After"] = String(bodyRetryAfter);
+  if (status === 429) headers["X-Zenith-Error"] = "rate_limited";
   return new Response(JSON.stringify(payload), { status, headers });
 }
 

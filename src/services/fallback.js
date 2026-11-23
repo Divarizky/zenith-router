@@ -2,6 +2,7 @@ import {
   getConnectionById,
   getConnections,
   getModelLockUntil,
+  getModelLockDetails,
   setConnectionCooldown,
   updateConnectionLastUsed,
   getAntigravityModelsByConnection,
@@ -301,6 +302,26 @@ function isSoftRateLimitResponse(provider, res) {
   return res.status === 429 && provider?.softRateLimit === true;
 }
 
+function parsedErrorPayload(bodyText) {
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Nous fair-share throttles are authoritative model/account cooldowns, not
+ * short-lived serialized-turn contention. Retrying the same account after the
+ * local 2.5s throttle only repeats a several-minute upstream refusal.
+ */
+function isNousFairShareRateLimit(provider, res, bodyText) {
+  if (provider?.id !== "nous" || res?.status !== 429) return false;
+  const payload = parsedErrorPayload(bodyText);
+  const error = payload?.error && typeof payload.error === "object" ? payload.error : payload || {};
+  return error.reason === "rate_limited" || /fair.?share\s+rate\s+limit/i.test(String(error.message || ""));
+}
+
 // Only Cloud Code speaks this wording, so no other provider is affected by
 // mistaking its own 404 for a transient one. Antigravity is the only provider
 // that talks to Cloud Code.
@@ -421,11 +442,31 @@ function applyRateLimitCooldown(connection, provider, res, errText, modelId, def
     return;
   }
   if (res.status === 429 && res.headers?.get?.("x-ratelimit-scope") === "free") {
-    for (const id of freeTierModelIds(provider, modelId)) setConnectionCooldown(connection.id, until, id, { lockClass: "quota", authoritative });
+    for (const id of freeTierModelIds(provider, modelId)) {
+      setConnectionCooldown(connection.id, until, id, {
+        lockClass: "quota",
+        authoritative,
+        reason: provider?.id === "nous" && isNousFairShareRateLimit(provider, res, errText) ? "fair_share" : null,
+      });
+    }
     syncProviderQuota(connection, { quiet: true }).catch(() => {});
     return;
   }
-  setConnectionCooldown(connection.id, transientUntil, modelId, { lockClass, authoritative });
+  setConnectionCooldown(connection.id, transientUntil, modelId, {
+    lockClass,
+    authoritative,
+    reason: provider?.id === "nous" && isNousFairShareRateLimit(provider, res, errText) ? "fair_share" : null,
+  });
+}
+
+export function recordStreamRateLimitCooldown(connection, provider, modelId, event) {
+  if (!connection?.id || provider?.id !== "nous" || !event || typeof event !== "object") return false;
+  const bodyText = JSON.stringify(event);
+  const status = event.status === 429 || event.reason === "rate_limited" || event.error?.reason === "rate_limited" ? 429 : 502;
+  const res = new Response(bodyText, { status });
+  if (!isNousFairShareRateLimit(provider, res, bodyText)) return false;
+  applyRateLimitCooldown(connection, provider, res, bodyText, modelId, 60000);
+  return true;
 }
 
 // The executor's 502 for a failed upstream fetch, see src/executors/base.js.
@@ -534,7 +575,24 @@ export function extractQuotaCooldownMs(res, bodyText, defaultDurationMs = 60000,
   return hint ? hint.ms : defaultDurationMs;
 }
 
-export function buildErrorResponse(res, bodyText, targetFormat) {
+export function buildErrorResponse(res, bodyText, targetFormat, { provider = null, model = "" } = {}) {
+  if (isNousFairShareRateLimit(provider, res, bodyText)) {
+    const hint = extractRetryHint(res, bodyText);
+    const retryAfter = hint ? Math.max(1, Math.ceil(hint.ms / 1000)) : null;
+    const message = retryAfter
+      ? `Nous membatasi model '${model || "ini"}'. Coba lagi dalam ${retryAfter} detik.`
+      : `Nous membatasi model '${model || "ini"}'. Coba lagi nanti.`;
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Zenith-Error": "fair_share_rate_limited",
+    };
+    if (retryAfter) headers["Retry-After"] = String(retryAfter);
+    return new Response(
+      JSON.stringify(buildErrorPayload(targetFormat, "rate_limit_error", message, "fair_share_rate_limited")),
+      { status: 429, headers }
+    );
+  }
+
   let payload;
   try {
     payload = JSON.parse(bodyText);
@@ -818,7 +876,7 @@ export async function executeWithFallback({
         throw err;
       }
       lastFailureResponse = accountBusyResponse(targetFormat, connection);
-      captureLine(`[TRAFFIC] provider=${provider.id} account="${connection.name || connection.id}" ${err.message}`);
+      captureLine(`[TRAFFIC] request_id=${attemptId} provider=${provider.id} account="${connection.name || connection.id}" ${err.message}`);
       continue;
     }
 
@@ -871,14 +929,14 @@ export async function executeWithFallback({
 
     // Capture response for error relaying
     const errText = await readErrorText(res);
-    lastFailureResponse = buildErrorResponse(res, errText, targetFormat);
+    lastFailureResponse = buildErrorResponse(res, errText, targetFormat, { provider, model: targetModel });
 
     // The client hung up mid-attempt: nothing is waiting for this answer, so it is
     // neither a failover nor a reason to park an account.
     if (signal?.aborted) return { ok: false, response: lastFailureResponse };
 
     captureLine(
-      `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
+      `[FAILOVER] request_id=${attemptId} phase=${stream ? "before_first_token" : "request"} provider=${provider.id} account="${connection.name || connection.id}" model=${modelId} HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
     );
 
     // Probing murni (x-zenith-no-failover): satu upstream call, tanpa rotasi akun
@@ -891,7 +949,7 @@ export async function executeWithFallback({
       reasoningUnsupported.add(reasoningKey);
       payload = withoutReasoning(payload);
       bodyText = JSON.stringify(payload);
-      captureLine(`[PARAMS] provider=${provider.id} model=${modelId} rejects reasoning_effort; retrying without it`);
+      captureLine(`[PARAMS] request_id=${attemptId} provider=${provider.id} model=${modelId} rejects reasoning_effort; retrying without it`);
       triedIds.pop();
       attempt--;
       continue;
@@ -908,14 +966,14 @@ export async function executeWithFallback({
       );
       if (hasOtherAccount) {
         captureLine(
-          `[FAILOVER] provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, pindah ke akun lain`
+          `[FAILOVER] request_id=${attemptId} provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, pindah ke akun lain`
         );
         continue;
       }
       if (transientNotFoundRetries < MAX_TRANSIENT_NOT_FOUND_RETRIES) {
         transientNotFoundRetries++;
         captureLine(
-          `[RETRY] provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, mengulang ke akun yang sama`
+          `[RETRY] request_id=${attemptId} provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, mengulang ke akun yang sama`
         );
         // Hold this account back so the next round runs the same request
         // against it again.
@@ -948,14 +1006,26 @@ export async function executeWithFallback({
 
     // Transient failure: cool down, apply jitter, and try next account before any bytes are sent to client
     if (res.status === 429 || res.status >= 500) {
-      // Contention on a serialised provider: the slot was released above, so
-      // re-acquiring it applies the throttle gap and the turn is retried on the
-      // same account. No lock, no park, no strike.
+      // Nous fair-share is an authoritative account x model cooldown. Do not
+      // retry the same account after the local throttle gap; let the next
+      // eligible account or configured fallback take the request instead.
+      if (isNousFairShareRateLimit(provider, res, errText)) {
+        applyRateLimitCooldown(connection, provider, res, errText, modelId, 60000);
+        const hint = extractRetryHint(res, errText);
+        captureLine(
+          `[RATE_LIMIT] request_id=${attemptId} provider=${provider.id} model=${modelId} account="${connection.name || connection.id}" fair-share cooldown=${hint ? Math.ceil(hint.ms / 1000) : "default"}s; same account not retried`
+        );
+        continue;
+      }
+
+      // Contention on another serialised provider: the slot was released above,
+      // so re-acquiring it applies the throttle gap and the turn is retried on
+      // the same account. No lock, no park, no strike.
       if (connection.id && isSoftRateLimitResponse(provider, res)) {
         if (softRateLimitRetries < MAX_SOFT_RATE_LIMIT_RETRIES) {
           softRateLimitRetries++;
           captureLine(
-            `[RETRY] provider=${provider.id} account="${connection.name || connection.id}" soft 429 upstream, mengulang ke akun yang sama setelah jeda throttle`
+            `[RETRY] request_id=${attemptId} provider=${provider.id} account="${connection.name || connection.id}" soft 429 upstream, mengulang ke akun yang sama setelah jeda throttle`
           );
           retryConnection = connection;
           attempt--;
@@ -1039,12 +1109,14 @@ export async function executeWithFallback({
           releaseSlot = null;
         }
         const retryErrText = await readErrorText(res);
-        lastFailureResponse = buildErrorResponse(res, retryErrText, targetFormat);
+        lastFailureResponse = buildErrorResponse(res, retryErrText, targetFormat, { provider, model: targetModel });
         if (res.status === 429 || res.status >= 500) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
-          // Same rule as the main branch: a soft 429 is contention, so it never
-          // locks the account and never counts as a park strike.
-          if (!isSoftRateLimitResponse(provider, res) && !isTransportFailure(res, retryErrText)) {
+          if (isNousFairShareRateLimit(provider, res, retryErrText)) {
+            applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
+          } else if (!isSoftRateLimitResponse(provider, res) && !isTransportFailure(res, retryErrText)) {
+            // Same rule as the main branch: a soft 429 is contention, so it never
+            // locks the account and never counts as a park strike.
             if (parkThresholdReached(connection, { modelId, requestId: attemptId })) {
               applyRateLimitCooldown(connection, provider, res, retryErrText, modelId, 60000);
             }
@@ -1090,21 +1162,40 @@ export async function executeWithFallback({
   // /v1/models so clients stop picking it. It can be re-enabled on the provider page.
   if (lastFailureResponse && tierDenials > 0 && tierDenials === triedIds.length && modelId) {
     disableModel(provider.id, modelId);
-    captureLine(`[ROUTING] Disabled ${provider.id}/${modelId}: not available on any account tier`);
+    captureLine(`[ROUTING] request_id=${attemptId} Disabled ${provider.id}/${modelId}: not available on any account tier`);
   }
 
   if (lastFailureResponse) {
     return { ok: false, response: lastFailureResponse };
   }
 
-  captureLine(`[ROUTING] No available connection for provider '${provider.id}'`);
+  captureLine(`[ROUTING] request_id=${attemptId} No available connection for provider '${provider.id}'`);
 
   // Tell the client how long the cooldown lasts instead of a bare 503. Only the
   // locks that actually block this model count: the account-wide one and this
   // model's own lock. A per-model lock for a different model stays invisible.
   const now = Date.now();
+  const connections = getConnections(provider.id);
+  const eligibleForFairShare = provider.id === "nous"
+    ? connections.filter(
+        (c) =>
+          c.is_active === 1 &&
+          !c.credentials?.needs_login &&
+          !(Number(c.cooldown_until) > now) &&
+          !isQuotaBlocking(c) &&
+          !resolveConnectionProxy(c).blocked
+      )
+    : [];
+  const fairShareLocks = eligibleForFairShare
+    .map((c) => ({ connection: c, lock: modelId ? getModelLockDetails(c.id, modelId) : null }))
+    .filter(({ lock }) => lock?.reason === "fair_share");
+  const fairShareOnly =
+    provider.id === "nous" &&
+    Boolean(modelId) &&
+    eligibleForFairShare.length > 0 &&
+    fairShareLocks.length === eligibleForFairShare.length;
   const cooldownEnds = [];
-  for (const c of getConnections(provider.id)) {
+  for (const c of connections) {
     if (c.is_active !== 1) continue;
     if (Number(c.cooldown_until) > now) cooldownEnds.push(Number(c.cooldown_until));
     if (modelId) {
@@ -1115,8 +1206,28 @@ export async function executeWithFallback({
   const virtualUntil = getVirtualCooldownUntil(provider.id, modelId) || getVirtualCooldownUntil(provider.id, null);
   if (virtualUntil && virtualUntil > now) cooldownEnds.push(virtualUntil);
   const retryAfterSec = cooldownEnds.length ? Math.ceil((Math.min(...cooldownEnds) - now) / 1000) : 0;
+  if (fairShareOnly) {
+    const retryAt = Math.min(...fairShareLocks.map(({ lock }) => lock.until));
+    const retryAfterSec = Math.max(1, Math.ceil((retryAt - now) / 1000));
+    const message = `Nous membatasi model '${modelId}'. Coba lagi dalam ${retryAfterSec} detik.`;
+    return {
+      ok: false,
+      response: new Response(
+        JSON.stringify(buildErrorPayload(targetFormat, "rate_limit_error", message, "fair_share_rate_limited")),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(retryAfterSec),
+            "X-Zenith-Error": "fair_share_rate_limited",
+          },
+        }
+      ),
+    };
+  }
+
   let message = `No available connection for provider '${provider.id}'.`;
-  const needLogin = getConnections(provider.id).filter((c) => c.is_active === 1 && c.credentials?.needs_login).length;
+  const needLogin = connections.filter((c) => c.is_active === 1 && c.credentials?.needs_login).length;
   if (needLogin) {
     message += ` ${needLogin} account${needLogin === 1 ? "" : "s"} need a new login in the dashboard.`;
   }

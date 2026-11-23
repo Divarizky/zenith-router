@@ -755,9 +755,21 @@ export function dispatchProxyFailureSignal(proxyEntry, { model = "", status = nu
   }
 }
 
-export function planProxyRotationEntries(providerId, strategy) {
+export function getOpencodeEgressPolicy() {
+  const value = getSetting("opencode_egress_policy", "legacy");
+  return ["legacy", "direct", "prefer", "require"].includes(value) ? value : value === "require_proxy" ? "require" : "legacy";
+}
+
+export function getOpencodeScopedPoolIds() {
+  try {
+    const ids = JSON.parse(getSetting("opencode_proxy_pool_ids", "[]"));
+    return Array.isArray(ids) ? ids.filter((id) => Number.isSafeInteger(id) && id > 0) : [];
+  } catch { return []; }
+}
+
+export function planProxyRotationEntries(providerId, strategy, scopedIds = null) {
   if (strategy !== "round_robin" && strategy !== "random") return [];
-  const active = getProxyPools().filter((p) => Number(p.is_active) === 1);
+  const active = getProxyPools().filter((p) => Number(p.is_active) === 1 && (!scopedIds || (scopedIds.includes(Number(p.id)) && !validateProxyAddress(p.url))));
   if (active.length === 0) return [];
 
   let rawOrdered;

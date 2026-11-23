@@ -38,7 +38,7 @@ function isLoopbackHostname(hostname) {
   return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
-function getBridgeDispatch(url, headers, proxyUrl) {
+function getBridgeDispatch(url, headers, proxyUrl, requireProxy) {
   let target;
   let configuredBridge;
   try {
@@ -53,7 +53,7 @@ function getBridgeDispatch(url, headers, proxyUrl) {
   if (!proxyUrl || !isBridgeTarget) return { headers, proxyUrl };
 
   return {
-    headers: { ...headers, "x-zenith-proxy": proxyUrl },
+    headers: { ...headers, "x-zenith-proxy": proxyUrl, ...(requireProxy ? { "x-zenith-require-proxy": "1" } : {}) },
     proxyUrl: null,
   };
 }
@@ -507,7 +507,13 @@ export function ensureAssistantReasoningContent(body, model) {
 }
 
 export class OpencodeExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, proxyMeta = null, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, proxyMeta = null, requireProxy = false, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
+    if (requireProxy && !proxyUrl) return new Response(JSON.stringify({ error: { code: "proxy_required" } }), { status: 503, headers: { "content-type": "application/json" } });
+    if (requireProxy && getOpencodeBaseUrlOverride()) {
+      let trusted = false;
+      try { trusted = isLoopbackHostname(new URL(getOpencodeBaseUrlOverride()).hostname); } catch {}
+      if (!trusted) return new Response(JSON.stringify({ error: { code: "proxy_required", message: "External bridge cannot verify proxy enforcement." } }), { status: 503, headers: { "content-type": "application/json" } });
+    }
     // While an egress is cooling down, forwarding only feeds the block: answer
     // locally so the gateway moves on to its fallback model instead.
     const gateKey = opencodeGateKey(proxyUrl);
@@ -598,7 +604,7 @@ export class OpencodeExecutor extends BaseExecutor {
     }
 
     const executeRoutedRequest = (url, requestHeaders) => {
-      const dispatch = getBridgeDispatch(url, requestHeaders, proxyUrl);
+      const dispatch = getBridgeDispatch(url, requestHeaders, proxyUrl, requireProxy);
       return super.execute({
         url,
         method,

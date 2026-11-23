@@ -28,6 +28,9 @@ import {
   requireResolvedProxy,
   getProxyRotationStrategy,
   planProxyRotationEntries,
+  getOpencodeEgressPolicy,
+  getOpencodeScopedPoolIds,
+  validateProxyAddress,
   notifyProxyRotate,
   beginProxyStream,
   signalProxy429,
@@ -648,6 +651,7 @@ export async function executeWithFallback({
   adaptiveThinking = false,
   requestId = null,
   noFailover = false,
+  requireProxyChain = false,
 }) {
   const modelId = targetModel || upstreamPayload?.model || "";
   // One client request = one attempt budget. Retries inside it reuse the id.
@@ -736,9 +740,16 @@ export async function executeWithFallback({
   const hasRotation = getProxyRotationStrategy(provider.id) !== "off";
   const virtualOnly = available.length === 1 && available[0].id === null;
   const shouldUseRotation = (virtualOnly || Boolean(provider.noAuth)) && hasRotation;
-  const rotationEntries = shouldUseRotation
-    ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id))
-    : [];
+  const egressPolicy = provider.id === "opencode" ? getOpencodeEgressPolicy() : "legacy";
+  const requireProxy = requireProxyChain || egressPolicy === "require";
+  const scopedPolicy = provider.id === "opencode" && (requireProxy || egressPolicy === "prefer");
+  const rotationEntries = scopedPolicy
+    ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id) === "random" ? "random" : "round_robin", getOpencodeScopedPoolIds())
+    : egressPolicy !== "direct" && shouldUseRotation ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id)) : [];
+  if (egressPolicy === "prefer" && rotationEntries.length === 0) captureLine("[EGRESS] provider=opencode policy=prefer fallback=direct");
+  if (scopedPolicy && requireProxy && rotationEntries.length === 0) {
+    return { ok: false, response: new Response(JSON.stringify({ error: { code: "proxy_required", message: "OpenCode requires an active scoped proxy." } }), { status: 503, headers: { "content-type": "application/json" } }) };
+  }
   const rotationProxies = rotationEntries.map((e) => e.url);
   const maxAttempts =
     rotationEntries.length > 0 ? rotationEntries.length : Math.max(1, available.length);
@@ -794,7 +805,10 @@ export async function executeWithFallback({
     applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
     const url = resolveUrl(connection);
     const proxyEntry = rotationEntries.length > 0 ? rotationEntries[attempt - 1] ?? null : null;
-    const proxyUrl = proxyEntry ? proxyEntry.url : requireResolvedProxy(connection);
+    const proxyUrl = proxyEntry ? proxyEntry.url : egressPolicy === "direct" || scopedPolicy ? null : requireResolvedProxy(connection);
+    if (requireProxy && (!proxyUrl || validateProxyAddress(proxyUrl))) {
+      return { ok: false, response: new Response(JSON.stringify({ error: { code: "proxy_required", message: "This fallback requires a valid proxy." } }), { status: 503, headers: { "content-type": "application/json" } }) };
+    }
 
     let releaseSlot = null;
     try {
@@ -818,6 +832,7 @@ export async function executeWithFallback({
         signal,
         proxyUrl,
         proxyMeta: proxyEntry,
+        requireProxy,
         connection,
         stream,
         targetModel,

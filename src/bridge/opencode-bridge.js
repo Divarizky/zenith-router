@@ -256,6 +256,22 @@ export function buildOpenCodeHeaders(incomingHeaders = {}, sessionId = null) {
 /**
  * Request handler for the bridge server.
  */
+/**
+ * Bun's fetch skips its explicit `proxy` option when NO_PROXY matches the target,
+ * which would send a require-proxy request out directly. Report that match so the
+ * bridge can refuse instead.
+ */
+export function noProxyBypassesHost(hostname, env = process.env) {
+  const raw = String(env.NO_PROXY ?? env.no_proxy ?? "").trim();
+  if (!raw) return false;
+  const host = String(hostname || "").toLowerCase();
+  return raw.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean).some((entry) => {
+    if (entry === "*") return true;
+    const bare = entry.replace(/^\*?\./, "").replace(/:\d+$/, "");
+    return host === bare || host.endsWith(`.${bare}`);
+  });
+}
+
 export async function handleBridgeRequest(
   req,
   {
@@ -298,6 +314,16 @@ export async function handleBridgeRequest(
 
     // Optional proxy forwarded from internal caller (e.g. Zenith Node gateway)
     const bridgeProxy = readHeader(req.headers, "x-zenith-proxy");
+    if (readHeader(req.headers, "x-zenith-require-proxy") === "1") {
+      let valid = false;
+      try { const parsed = new URL(bridgeProxy); valid = parsed.protocol === "http:" && Boolean(parsed.hostname) && !/\s/.test(bridgeProxy); } catch {}
+      if (!valid) return new Response(JSON.stringify({ error: { code: "proxy_required", message: "A valid proxy is required." } }), { status: 503, headers: { "content-type": "application/json" } });
+      if (valid && useBunProxy) {
+        let upstreamHost = "";
+        try { upstreamHost = new URL(upstreamUrl).hostname; } catch {}
+        if (noProxyBypassesHost(upstreamHost)) return new Response(JSON.stringify({ error: { code: "proxy_required", message: "NO_PROXY would bypass the required proxy." } }), { status: 503, headers: { "content-type": "application/json" } });
+      }
+    }
     const fetchOptions = {
       method: "POST",
       headers,

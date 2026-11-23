@@ -45,6 +45,8 @@ import {
   validateProxyAddress,
   getProxyRotationStrategy,
   setProxyRotationStrategy,
+  getOpencodeEgressPolicy,
+  getOpencodeScopedPoolIds,
 } from "../../services/proxyPools.js";
 import { escapeHtml } from "../html.js";
 import { getSetting, setSetting, deleteSetting } from "../../services/settings.js";
@@ -1270,6 +1272,15 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
         <h3>Rotasi Proxy</h3>
         ${noAuthProxyBadge}
       </div>
+      ${p.id === "opencode" ? `<form action="/dashboard/providers/proxy-rotation" method="POST">
+        <input type="hidden" name="provider" value="opencode" />
+        <label for="opencode-egress-policy">Kebijakan egress OpenCode</label>
+        <select id="opencode-egress-policy" name="egress_policy">${["legacy", "direct", "prefer", "require"].map((mode) => `<option value="${mode}" ${getOpencodeEgressPolicy() === mode ? "selected" : ""}>${mode}</option>`).join("")}</select>
+        <label for="opencode-pool-ids">ID proxy pool yang diizinkan (pisahkan dengan koma)</label>
+        <input id="opencode-pool-ids" name="pool_ids" value="${escapeHtml(getOpencodeScopedPoolIds().join(","))}" />
+        <p class="hint">Require menolak request tanpa proxy aktif dalam daftar. Prefer memakai daftar tersebut, atau langsung jika kosong. Legacy mempertahankan perilaku sebelumnya.</p>
+        <button type="submit" class="btn btn-primary">Simpan Kebijakan</button>
+      </form>` : ""}
       <form action="/dashboard/providers/proxy-rotation" method="POST">
         <input type="hidden" name="provider" value="${id}" />
         <div class="field">
@@ -1484,6 +1495,15 @@ export async function handleSetProxyRotation(c) {
   const provider = getProvider(String(body.provider || "").trim());
   if (!provider || !provider.noAuth) return c.redirect("/dashboard/providers");
 
+  if (provider.id === "opencode" && body.egress_policy !== undefined) {
+    const policy = String(body.egress_policy);
+    const raw = String(body.pool_ids || "").trim();
+    const ids = raw ? raw.split(",").map((part) => Number(part.trim())) : [];
+    if (!["legacy", "direct", "prefer", "require"].includes(policy) || ids.some((id) => !Number.isSafeInteger(id) || id <= 0 || !getProxyPoolById(id))) return c.redirect(`${backTo(provider.id)}?notice=rotation_invalid`);
+    setSetting("opencode_proxy_pool_ids", JSON.stringify([...new Set(ids)]));
+    setSetting("opencode_egress_policy", policy);
+    return c.redirect(`${backTo(provider.id)}?notice=rotation_updated`);
+  }
   const strategy = String(body.strategy || "");
   if (strategy === "off" || strategy === "round_robin" || strategy === "random") {
     setProxyRotationStrategy(provider.id, strategy);

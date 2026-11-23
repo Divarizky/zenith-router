@@ -2,6 +2,7 @@ import { resolveModel, memberCapabilities, buildSyncedCapabilitiesLookup } from 
 import { getActiveComboByName } from "../services/combos.js";
 import { captureLine } from "../services/logger.js";
 import { executeWithFallback } from "../services/fallback.js";
+import { getOpencodeEgressPolicy } from "../services/proxyPools.js";
 import { readErrorText } from "../utils/errorBody.js";
 import { getSetting } from "../services/settings.js";
 import { prepareUpstreamRequest } from "./prepare.js";
@@ -212,7 +213,9 @@ function prepareMember(provider, targetModel, endpoint) {
 async function runPreparedMember(prepared, provider, targetModel, endpoint) {
   const { targetFormat, upstreamStream, upstreamPayload, baseHeaders, executor, startTime, resolveUrl, effort, toolNames, adaptiveThinking } = prepared;
 
+  if (provider.id === "opencode" && getOpencodeEgressPolicy() === "require") endpoint.requireProxy = true;
   const result = await executeWithFallback({
+    requireProxyChain: Boolean(endpoint.requireProxy),
     provider,
     targetFormat,
     upstreamPayload,

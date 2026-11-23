@@ -687,6 +687,20 @@ function pickPinnedConnection(available, triedIds, pin) {
   return match;
 }
 
+// Plafon kiriman nyata ke upstream per request (akun + retry transport).
+export const MAX_REQUEST_DISPATCHES = 3;
+
+/** Penghitung kiriman bersama; `spend` mencatat, `remaining` menyisakan kuota. */
+export function createDispatchBudget(limit) {
+  let used = 0;
+  return {
+    limit,
+    spend() { used++; return used; },
+    remaining() { return Math.max(0, limit - used); },
+    get used() { return used; },
+  };
+}
+
 /**
  * Try one or more connections for the provider.
  * Returns { ok: true, upstreamRes, connection } or { ok: false, response }.
@@ -819,8 +833,15 @@ export async function executeWithFallback({
   let softRateLimitRetries = 0;
   // The account a same-account retry goes back to.
   let retryConnection = null;
+  // Anggaran dispatch bersama: setiap kiriman nyata ke upstream (akun, retry
+  // transport di executor) menghitung ke sini. Mencegah ledakan 2 x akun.
+  const dispatchBudget = createDispatchBudget(MAX_REQUEST_DISPATCHES);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (dispatchBudget.remaining() <= 0) {
+      captureLine(`[DISPATCH] request_id=${attemptId} provider=${provider.id} budget=${MAX_REQUEST_DISPATCHES} habis; berhenti`);
+      break;
+    }
     let connection;
     // An account held back for a same-account retry, so the retry does not
     // depend on the order accounts are picked in.
@@ -882,12 +903,14 @@ export async function executeWithFallback({
 
     let res;
     try {
+      dispatchBudget.spend();
       res = await executor.execute({
         url,
         method: "POST",
         headers,
         body: bodyForConnection(connection),
         signal,
+        dispatchBudget,
         proxyUrl,
         proxyMeta: proxyEntry,
         requireProxy,
@@ -1075,13 +1098,20 @@ export async function executeWithFallback({
           continue;
         }
 
+        if (dispatchBudget.remaining() <= 0) {
+          if (releaseSlot) releaseSlot();
+          releaseSlot = null;
+          return { ok: false, response: lastFailureResponse };
+        }
         try {
+          dispatchBudget.spend();
           res = await executor.execute({
             url,
             method: "POST",
             headers,
             body: bodyForConnection(connection),
             signal,
+            dispatchBudget,
             proxyUrl: retryProxyUrl,
             connection,
             stream,

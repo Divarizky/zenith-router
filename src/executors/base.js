@@ -102,7 +102,7 @@ export class BaseExecutor {
    * Execute an HTTP request. `timeoutMs` bounds the wait for response headers;
    * after that, only upstream silence longer than the idle timeout aborts the body.
    */
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, dispatchBudget = null }) {
     const headersTimeout = timeoutMs || this.headersTimeoutMs;
     const controller = new AbortController();
     const abort = (reason) => {
@@ -167,7 +167,10 @@ export class BaseExecutor {
         }
 
         const code = transportErrorCode(err);
-        if (attempt < TRANSPORT_ATTEMPTS && isReplayable && TRANSPORT_RETRY_CODES.has(code)) {
+        // Retry hanya bila masih ada anggaran dispatch bersama untuk request ini.
+        const budgetLeft = dispatchBudget ? dispatchBudget.remaining() > 0 : true;
+        if (attempt < TRANSPORT_ATTEMPTS && isReplayable && TRANSPORT_RETRY_CODES.has(code) && budgetLeft) {
+          dispatchBudget?.spend();
           logQuiet(`[UPSTREAM] ${code} on ${hostOf(url)}, retrying once on a new connection`, "warn");
           continue;
         }

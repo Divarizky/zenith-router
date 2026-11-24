@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert";
 import { AntigravityExecutor } from "../src/executors/antigravity.js";
 import antigravity from "../src/providers/registry/antigravity.js";
-import { buildAntigravityFamilies, resolveFamilyRuntime } from "../src/services/antigravityCatalog.js";
+import { resolveModel } from "../src/providers/index.js";
+import {
+  buildAntigravityFamilies,
+  isSelectableRuntimeModelId,
+  resolveFamilyRuntime,
+} from "../src/services/antigravityCatalog.js";
 
 function capture() {
   const seen = {};
@@ -100,6 +105,30 @@ test("antigravity catalog - varian xhigh bergabung ke keluarga induknya", () => 
   assert.strictEqual(family.variants.xhigh, "gemini-4-hydrogen-xhigh");
   assert.strictEqual(family.displayName, "Gemini 4 Hydrogen");
   assert.deepStrictEqual(resolveFamilyRuntime(family, "xhigh"), { id: "gemini-4-hydrogen-xhigh", thinkingLevel: undefined });
+});
+
+test("antigravity catalog - disabled placeholder tidak diiklankan atau di-resolve", () => {
+  assert.strictEqual(isSelectableRuntimeModelId("gemini-4-argon-disabled"), false);
+  assert.strictEqual(resolveModel("ag/gemini-4-argon-disabled"), null);
+  assert.strictEqual(resolveModel("gemini-4-argon-disabled"), null);
+  assert.deepStrictEqual(
+    [...buildAntigravityFamilies({
+      "gemini-4-argon-disabled": { displayName: "Gemini 4 Argon" },
+    }).keys()],
+    []
+  );
+});
+
+test("[sintetis, tidak terverifikasi upstream] antigravity catalog - varian max inventory memilih runtime max", () => {
+  const families = buildAntigravityFamilies({
+    "claude-sonnet-5-5-high": { displayName: "Claude Sonnet 5.5 (High)" },
+    "claude-sonnet-5-5-max": { displayName: "Claude Sonnet 5.5 (Max)" },
+  });
+  const family = families.get("claude-sonnet-5-5");
+  assert.deepStrictEqual(resolveFamilyRuntime(family, "max"), {
+    id: "claude-sonnet-5-5-max",
+    thinkingLevel: undefined,
+  });
 });
 
 test("antigravity catalog - id xhigh tanpa display name juga memilih varian xhigh", () => {

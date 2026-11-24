@@ -2,7 +2,13 @@ import test from "node:test";
 import assert from "node:assert";
 import { initDb, addConnection } from "../src/db/index.js";
 import { AntigravityExecutor } from "../src/executors/antigravity.js";
-import { effortFromRequest, buildAntigravityFamilies, resolveFamilyRuntime, levelFromThinkingBudget } from "../src/services/antigravityCatalog.js";
+import {
+  effortFromRequest,
+  buildAntigravityFamilies,
+  normalizeEffort,
+  resolveFamilyRuntime,
+  levelFromThinkingBudget,
+} from "../src/services/antigravityCatalog.js";
 import { prepareUpstreamRequest } from "../src/gateway/prepare.js";
 import { getProvider } from "../src/providers/index.js";
 
@@ -24,6 +30,7 @@ test("effortFromRequest - setiap dialek klien dipetakan ke tingkat yang sama", (
   assert.strictEqual(effortFromRequest("openai-responses", { reasoning: { effort: "none" } }), "low");
   assert.strictEqual(effortFromRequest("openai", {}), undefined);
   assert.strictEqual(effortFromRequest("openai-responses", { reasoning: { effort: "medium" } }), "medium");
+  assert.strictEqual(effortFromRequest("openai-responses", { reasoning: { effort: "max" } }), "max");
   assert.strictEqual(effortFromRequest("claude", { thinking: { type: "enabled", budget_tokens: 1024 } }), "low");
   assert.strictEqual(effortFromRequest("claude", { thinking: { type: "enabled", budget_tokens: 4096 } }), "medium");
   assert.strictEqual(effortFromRequest("claude", { thinking: { type: "enabled", budget_tokens: 32000 } }), "high");
@@ -70,6 +77,32 @@ test("buildAntigravityFamilies - pengelompokan id runtime", () => {
   assert.strictEqual(families.get("gemini-3.8-flash").tiered, "gemini-3.8-flash-tiered");
   assert.strictEqual(families.get("gemini-3.5-flash").variants.high, "gemini-3-flash-agent", "alias agent masuk keluarga");
   assert.strictEqual(families.get("gemini-4-argon").supportsThinking, true);
+});
+
+test("[sintetis, tidak terverifikasi upstream] normalizeEffort - max tetap terpisah dari xhigh", () => {
+  assert.strictEqual(normalizeEffort("max"), "max");
+  assert.strictEqual(normalizeEffort("xhigh"), "xhigh");
+});
+
+test("[sintetis, tidak terverifikasi upstream] resolveFamilyRuntime - max memakai varian nyata dan legacy collapse ke xhigh", () => {
+  const withMax = buildAntigravityFamilies({
+    "claude-sonnet-5-5-high": { displayName: "Claude Sonnet 5.5 (High)" },
+    "claude-sonnet-5-5-xhigh": { displayName: "Claude Sonnet 5.5 (XHigh)" },
+    "claude-sonnet-5-5-max": { displayName: "Claude Sonnet 5.5 (Max)" },
+  }).get("claude-sonnet-5-5");
+  assert.deepStrictEqual(resolveFamilyRuntime(withMax, "max"), {
+    id: "claude-sonnet-5-5-max",
+    thinkingLevel: undefined,
+  });
+
+  const withoutMax = buildAntigravityFamilies({
+    "claude-sonnet-5-5-high": { displayName: "Claude Sonnet 5.5 (High)" },
+    "claude-sonnet-5-5-xhigh": { displayName: "Claude Sonnet 5.5 (XHigh)" },
+  }).get("claude-sonnet-5-5");
+  assert.deepStrictEqual(resolveFamilyRuntime(withoutMax, "max"), {
+    id: "claude-sonnet-5-5-xhigh",
+    thinkingLevel: undefined,
+  });
 });
 
 test("resolveFamilyRuntime - rantai cadangan dan bucket tiered", () => {

@@ -35,6 +35,16 @@ test("prioritas tier persis stabil dan inventori kosong tetap fail-open", () => 
   assert.deepEqual(ids(undefined), [medium.id, full.id, unknown.id]);
 });
 
+test("max memprioritaskan tier nyata dan mempertahankan preferensi xhigh tanpa max", () => {
+  initDb(":memory:");
+  const high = account("high", ["high"]);
+  const xhigh = account("xhigh", ["xhigh"]);
+  assert.deepEqual(ids("max"), [xhigh.id, high.id]);
+  const max = account("max", ["max"]);
+  assert.deepEqual(ids("max"), [max.id, xhigh.id, high.id]);
+  assert.deepEqual(ids("xhigh"), [xhigh.id, high.id]);
+});
+
 test("kuota habis atau cooldown mempertahankan fallback; satu akun tidak berubah", () => {
   initDb(":memory:");
   const medium = account("medium", ["medium"]);

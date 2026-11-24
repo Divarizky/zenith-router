@@ -16,6 +16,7 @@
 
 /** Order matters: the first matching suffix wins for ids like `-flash-extra-low`. */
 const SUFFIXES = [
+  { suffix: "max", level: "max" },
   { suffix: "extra-low", level: "low" },
   { suffix: "extra-high", level: "xhigh" },
   { suffix: "xhigh", level: "xhigh" },
@@ -28,6 +29,7 @@ const SUFFIXES = [
 
 /** Display name wins over the id suffix: `gemini-3.5-flash-low` is "Flash (Medium)". */
 const DISPLAY_LEVELS = [
+  { pattern: /\(\s*max\s*\)/i, level: "max" },
   { pattern: /\(\s*extra\s*low\s*\)/i, level: "low" },
   { pattern: /\(\s*(?:extra\s*high|x-?high)\s*\)/i, level: "xhigh" },
   { pattern: /\(\s*thinking\s*\)/i, level: "high" },
@@ -47,7 +49,7 @@ const RUNTIME_ALIASES = {
 export const DEFAULT_EFFORT = "medium";
 
 /** Urutan tingkat untuk tampilan, dari paling ringan ke paling berat. */
-export const LEVEL_DISPLAY_ORDER = ["minimal", "low", "medium", "high", "xhigh"];
+export const LEVEL_DISPLAY_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /** Fallback order per level, mirroring the extension's routing table. */
 const EFFORT_CHAIN = {
@@ -56,19 +58,28 @@ const EFFORT_CHAIN = {
   medium: ["medium", "low", "high", "minimal"],
   high: ["high", "medium", "low", "minimal"],
   xhigh: ["xhigh", "high", "medium", "low", "minimal"],
+  // `max` is distinct only when inventory exposes an actual max runtime. Older
+  // families continue to collapse to xhigh/high through this fallback chain.
+  max: ["max", "xhigh", "high", "medium", "low", "minimal"],
 };
 
-const KNOWN_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+const KNOWN_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
 
-/** `max` is a Pi-level that the upstream has no bucket for. */
-const EFFORT_ALIASES = { max: "xhigh", none: "off", off: "off", disabled: "off" };
+const EFFORT_ALIASES = { none: "off", off: "off", disabled: "off" };
 
 /**
  * Only chat models belong in the catalog: internal `chat_*`/`tab_*` entries and
  * image models are not callable through the chat endpoints.
  */
+export function isAntigravityDisabledPlaceholder(id) {
+  return /-disabled$/i.test(id);
+}
+
 export function isSelectableRuntimeModelId(id) {
   if (typeof id !== "string" || !/^(gemini-|claude-|gpt-oss-)/i.test(id)) return false;
+  // Antigravity exposes `*-disabled` placeholders for unavailable plans. They
+  // must never become public families or raw runtime fallbacks.
+  if (isAntigravityDisabledPlaceholder(id)) return false;
   if (/^(chat_|tab_)/i.test(id)) return false;
   if (/image/i.test(id)) return false;
   return true;
@@ -94,7 +105,7 @@ function levelFromDisplayName(displayName) {
 
 export function familyFromDisplayName(displayName) {
   if (typeof displayName !== "string") return undefined;
-  return displayName.replace(/\s*\((?:extra\s*low|extra\s*high|x-?high|low|medium|high|minimal|thinking)\)\s*$/i, "").trim();
+  return displayName.replace(/\s*\((?:max|extra\s*low|extra\s*high|x-?high|low|medium|high|minimal|thinking)\)\s*$/i, "").trim();
 }
 
 /**
@@ -244,10 +255,12 @@ export function resolveFamilyRuntime(familyEntry, effort) {
 
 /**
  * The tiered buckets accept the level as generationConfig.thinkingConfig.thinkingLevel.
- * `xhigh` has no bucket upstream and collapses onto `high`.
+ * They have no independently discovered `max` bucket, so max remains compatible
+ * with the historical xhigh -> high collapse. A real max runtime is selected
+ * before this function through `variants.max`.
  */
 function tierForThinkingLevel(level) {
-  if (level === "xhigh") return "high";
+  if (level === "xhigh" || level === "max") return "high";
   if (level === "minimal") return "low";
   return level;
 }

@@ -108,6 +108,16 @@ test("HTTP /v1/models - setiap tier yang diiklankan dikirim ke runtime varian ya
   }
 });
 
+test("HTTP /v1/models - [sintetis, tidak terverifikasi upstream] family dengan max mengiklankan dan merutekan max", async () => {
+  seedCarbon(["low", "high", "max"]);
+  const models = await listModels();
+  const entry = models.data.find((m) => m.id === "ag/gemini-4-carbon");
+  assert.deepStrictEqual(entry.capabilities.thinking_levels, ["low", "high", "max"]);
+  for (const level of entry.thinking_levels) {
+    assert.strictEqual(await dispatchedModel(level), `gemini-4-carbon-${level}`, `tier ${level}`);
+  }
+});
+
 test("HTTP /v1/models - family tanpa varian xhigh tidak mengiklankan xhigh", async () => {
   seedAccount([
     ["gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"],

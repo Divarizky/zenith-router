@@ -108,8 +108,8 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   if (quotaProbe && available.length === 0) available.push(quotaProbe);
 
   if (antigravityInventory && normalizeEffort(effort)) {
-    // Stable partition: unknown inventories remain eligible but cannot prove an exact tier.
-    available.sort((a, b) => Number(hasExactAntigravityTier(b, request, antigravityInventory)) - Number(hasExactAntigravityTier(a, request, antigravityInventory)));
+    // Stable sort: exact max wins; otherwise keep the legacy xhigh preference.
+    available.sort((a, b) => antigravityTierPriority(b, request, antigravityInventory) - antigravityTierPriority(a, request, antigravityInventory));
   }
 
   if (available.length === 0 && providerDef?.noAuth) {
@@ -154,17 +154,19 @@ function servesModel(connection, { providerDef, model, effort }, inventory) {
   return !(isExhausted && hasFutureReset);
 }
 
-function hasExactAntigravityTier(connection, { providerDef, model, effort }, inventory) {
+function antigravityTierPriority(connection, { providerDef, model, effort }, inventory) {
   const wanted = normalizeEffort(effort);
   const rows = inventory?.get(connection.id);
-  if (!wanted || wanted === "off" || !rows?.size) return false;
+  if (!wanted || wanted === "off" || !rows?.size) return 0;
   const family = buildAntigravityFamilies(
     Object.fromEntries([...rows].map(([id, row]) => [id, { displayName: row.display_name }]))
   ).get(model);
-  if (!family) return false;
+  if (!family) return 0;
   const runtime = resolveProviderRuntime(providerDef, model, effort, rows);
-  return Boolean(runtime && (family.variants[wanted] === runtime.id ||
-    (family.tiered === runtime.id && runtime.thinkingLevel === wanted)));
+  if (!runtime) return 0;
+  if (family.variants[wanted] === runtime.id ||
+      (family.tiered === runtime.id && runtime.thinkingLevel === wanted)) return 2;
+  return wanted === "max" && family.variants.xhigh === runtime.id ? 1 : 0;
 }
 
 export function getNextConnection(providerId, triedIds = [], model = null, effort = undefined) {
@@ -889,8 +891,10 @@ export async function executeWithFallback({
       const inventory = provider.id === "antigravity" && modelId && normalizeEffort(effort)
         ? getAntigravityModelsByConnection() : null;
       const request = { providerDef: provider, model: modelId, effort };
-      const exact = inventory ? available.filter((c) => !triedIds.includes(c.id) && hasExactAntigravityTier(c, request, inventory)) : [];
-      const pinCandidates = exact.length ? exact : available;
+      const tiers = inventory ? available.filter((c) => !triedIds.includes(c.id))
+        .map((c) => [c, antigravityTierPriority(c, request, inventory)]) : [];
+      const bestTier = Math.max(0, ...tiers.map(([, rank]) => rank));
+      const pinCandidates = bestTier ? tiers.filter(([, rank]) => rank === bestTier).map(([c]) => c) : available;
       const pinned = pickPinnedConnection(pinCandidates, triedIds, pin);
       // A pin that points at an eligible but full account hands the turn to an idle sibling.
       const pinnedFull = !pinned && pin ? pinnedAccountIsFull(pinCandidates, pin) : false;

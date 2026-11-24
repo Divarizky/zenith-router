@@ -65,9 +65,16 @@ export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "
  * Pi adds `off` itself, so only the named levels are listed here.
  */
 export function antigravityThinkingLevels(family) {
-  const levels = Object.keys(family?.discoveredVariants || family?.variants || {});
-  if (levels.length === 0) return null;
-  return LEVEL_DISPLAY_ORDER.filter((level) => levels.includes(level));
+  const variants = family?.discoveredVariants || family?.variants || {};
+  if (Object.keys(variants).length === 0) return null;
+
+  // Discovery is also the source used by account-scoped dispatch. Validate each
+  // advertised level through the same resolver so /v1/models cannot claim a
+  // tier that routing would fail to resolve.
+  const dispatchFamily = family?.discoveredVariants ? { ...family, variants } : family;
+  return LEVEL_DISPLAY_ORDER.filter(
+    (level) => variants[level] && resolveFamilyRuntime(dispatchFamily, level)?.id === variants[level]
+  );
 }
 
 /**
@@ -94,7 +101,7 @@ function thinkingLevelFields(providerId, model = null) {
   return {};
 }
 import { getConnections, getAntigravityInventoryRows, listCustomProviders } from "../db/index.js";
-import { buildAntigravityFamilies, resolveFamilyRuntime, LEVEL_DISPLAY_ORDER } from "../services/antigravityCatalog.js";
+import { buildAntigravityFamilies, isAntigravityDisabledPlaceholder, resolveFamilyRuntime, LEVEL_DISPLAY_ORDER } from "../services/antigravityCatalog.js";
 
 /**
  * Every synced runtime id across active accounts, keyed by runtime id. Families
@@ -122,6 +129,9 @@ function familyEntry(id, name, source = {}) {
     name,
     family: id,
     variants: source.variants || {},
+    // Synced families must advertise the same variant set that account-scoped
+    // dispatch uses; builtin variants remain only a fallback until discovery.
+    discoveredVariants: source.discoveredVariants || (source.source === "synced" ? source.variants : undefined),
     unsuffixed: source.unsuffixed,
     tiered: source.tiered,
     supportsImages: source.supportsImages,
@@ -282,7 +292,7 @@ export function getProviderModels(p) {
         existing.supportsImages = discovered.supportsImages ?? existing.supportsImages;
         existing.supportsThinking = discovered.supportsThinking ?? existing.supportsThinking;
       } else {
-        builtinFamilies.set(family, familyEntry(family, discovered.displayName || family, discovered));
+        builtinFamilies.set(family, familyEntry(family, discovered.displayName || family, { ...discovered, source: "synced" }));
       }
     }
     return [...builtinFamilies.values()].map((f) => withCaps(f));
@@ -331,8 +341,10 @@ export function resolveModel(modelStr) {
   const colonIdx = modelStr.indexOf(":");
   const sepIdx = slashIdx !== -1 ? slashIdx : colonIdx;
 
-  const checkDisabled = (provider, targetModel) =>
-    provider && !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
+  const checkDisabled = (provider, targetModel) => {
+    if (!provider || (provider.id === "antigravity" && isAntigravityDisabledPlaceholder(targetModel))) return null;
+    return !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
+  };
 
   if (sepIdx !== -1) {
     const prefix = modelStr.slice(0, sepIdx);
@@ -343,8 +355,7 @@ export function resolveModel(modelStr) {
     }
   }
 
-  const guess = (provider, targetModel) =>
-    provider && !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
+  const guess = checkDisabled;
 
   // Guess provider by model name prefix if no slash given
   if (modelStr.startsWith("claude-")) {

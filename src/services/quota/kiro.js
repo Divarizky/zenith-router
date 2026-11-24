@@ -1,6 +1,7 @@
 import { oauthFetch } from "../oauth/providers.js";
 import { requireResolvedProxy } from "../proxyPools.js";
 import { parseResetTime } from "./shared.js";
+import { buildKiroIdentityHeaders } from "../kiroIdentity.js";
 
 const CW_HOST = "https://codewhisperer.us-east-1.amazonaws.com";
 const Q_HOST = "https://q.us-east-1.amazonaws.com";
@@ -102,8 +103,7 @@ export async function fetchKiroQuota(connection) {
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
-            "x-amz-user-agent": "aws-sdk-js/1.0.0 KiroIDE",
-            "User-Agent": "aws-sdk-js/1.0.0 KiroIDE",
+            ...buildKiroIdentityHeaders({ kind: "quota" }),
             ...(attempt.init.headers || {}),
             ...apiKeyHeaders,
             ...externalIdpHeaders,

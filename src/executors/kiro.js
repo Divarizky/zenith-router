@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
+import { buildKiroIdentityHeaders } from "../services/kiroIdentity.js";
 
 const RUNTIME_URL = "https://runtime.us-east-1.kiro.dev/generateAssistantResponse";
 
@@ -15,6 +16,7 @@ export function kiroBaseUrls(credentials = {}) {
 export function kiroHeadersForUrl(baseHeaders = {}, credentials = {}, url = "") {
   const headers = {
     ...baseHeaders,
+    ...buildKiroIdentityHeaders({ kind: "executor" }),
     "Amz-Sdk-Invocation-Id": randomUUID(),
     "Amz-Sdk-Request": "attempt=1; max=3",
     "x-amzn-kiro-agent-mode": "spec",

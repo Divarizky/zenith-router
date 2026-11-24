@@ -2,6 +2,7 @@ import { getConnectionById, getConnections, mergeConnectionCredentials } from ".
 import { logQuiet } from "./logger.js";
 import { OAUTH_CONFIG, oauthFetch, fetchCopilotToken, fetchKiroProfileArn, nousTtlSeconds } from "./oauth/providers.js";
 import { requireResolvedProxy } from "./proxyPools.js";
+import { buildKiroIdentityHeaders } from "./kiroIdentity.js";
 
 let customTokenRefresher = null;
 const inFlightRefreshes = new Map();
@@ -170,13 +171,13 @@ const REFRESHERS = {
           grantType: "refresh_token",
         },
         "Kiro",
-        {},
+        {}, // Preserve the AWS OIDC refresh request without a Kiro client identity.
         proxyUrl
       );
     } else {
       // Social (Google/GitHub) login from the Kiro IDE.
       t = await postJson(OAUTH_CONFIG.kiro.socialRefreshUrl, { refreshToken: creds.refresh_token }, "Kiro", {
-        "User-Agent": "kiro-cli/1.0.0",
+        ...buildKiroIdentityHeaders({ kind: "refresh" }),
       }, proxyUrl);
     }
     const profileArn = creds.profile_arn || t.profileArn || (await fetchKiroProfileArn(t.accessToken, { proxyUrl }));

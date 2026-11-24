@@ -1,4 +1,5 @@
 import "../../executors/kiro.js";
+import { buildKiroIdentityHeaders } from "../../services/kiroIdentity.js";
 
 export default {
   id: "kiro",
@@ -14,11 +15,12 @@ export default {
       "https://runtime.us-east-1.kiro.dev/generateAssistantResponse",
     ],
     format: "kiro",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/vnd.amazon.eventstream",
-      "User-Agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-      "X-Amz-User-Agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
+    get headers() {
+      return {
+        "Content-Type": "application/json",
+        Accept: "application/vnd.amazon.eventstream",
+        ...buildKiroIdentityHeaders({ kind: "transport" }),
+      };
     },
     tokenUrl: "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken",
   },

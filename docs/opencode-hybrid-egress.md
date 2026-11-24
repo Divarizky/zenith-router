@@ -13,10 +13,17 @@ opencode_proxy_pool_ids    = [2,12]
 opencode_proton_probe_url  = https://example.invalid/my-ip
 ```
 
-`opencode_egress_registry` wajib memetakan pool ID secara eksplisit. Runtime tidak
-menebak adapter dari nama, port, atau posisi pool. Bila scope tersedia, setiap ID
-di scope harus punya mapping dan setiap mapping harus berada di scope. Adapter
-WARP memakai lane `1..10`; adapter Proton memakai label lane non-kosong.
+`opencode_egress_registry` memetakan pool ID secara eksplisit. Runtime tidak
+menebak adapter dari nama, port, atau posisi pool. Adapter WARP memakai lane
+`1..10`; adapter Proton memakai label lane non-kosong.
+
+Validasi scope bergantung pada mode:
+
+- Dalam `enforce`, setiap pool dalam scope harus terdaftar, dan setiap mapping
+  registry harus berada dalam scope. Ketidaksesuaian membuat konfigurasi invalid.
+- Dalam `shadow`, registry boleh memuat Proton di luar scope OpenCode-WARP agar
+  readiness dapat diamati tanpa menambahkan Proton ke routing produksi. Probe
+  memakai registry yang valid, termasuk entry di luar scope.
 
 `enforce` menolak konfigurasi invalid dengan `503 proxy_required`; konfigurasi
 invalid tidak diam-diam jatuh ke mode legacy. URL probe Proton wajib HTTPS,
@@ -24,9 +31,13 @@ tanpa kredensial. Probe tidak mengirim kredensial OpenCode.
 
 ## Shadow dan readiness
 
-`shadow` menjalankan observasi Proton tanpa mengubah routing. Probe dijalankan
-melewati proxy pool yang sama, timeout 5 detik, tanpa redirect, response body
-maksimal 4 KiB, dan harus berisi IPv4/IPv6 yang valid. Readiness Proton hanya
+`shadow` hanya menjalankan observasi; request tetap memakai planner routing lama.
+Pool Proton yang terdaftar dikecualikan dari planner lama agar tidak bocor ke
+round-robin biasa, baik pool itu berada di dalam maupun di luar scope. Readiness
+Proton tetap dapat diprobe dari registry tanpa mengubah egress request.
+
+Probe melewati proxy pool yang sama, timeout 5 detik, tanpa redirect, response
+body maksimal 4 KiB, dan harus berisi IPv4/IPv6 yang valid. Readiness Proton hanya
 disimpan di memori. Snapshot terikat pada URL pool, adapter, dan URL probe;
 perubahan konfigurasi membuat snapshot stale. TTL readiness adalah 180 detik
 berdasarkan waktu observasi, bukan waktu refresh scheduler. Scheduler dijalankan
@@ -63,5 +74,7 @@ non-transport. Dispatch tetap dibatasi oleh budget/deadline request dan abort kl
 5. Ubah mode ke `enforce` hanya setelah readiness dan routing fail-closed lulus.
 
 Rollback aman: ubah mode ke `off`, lalu gunakan policy `require` dengan scope
-WARP-only yang sudah ada. Perubahan produksi, pengisian DB produksi, dan deploy
-berada di luar tugas ini serta memerlukan konfirmasi terpisah.
+WARP-only yang sudah ada. Untuk rollout produksi, validasi konfigurasi dan
+readiness di lingkungan target, jalankan gate kill-switch Proton, dan pastikan
+jalur fail-closed sebelum mengaktifkan `enforce`. Perubahan database tetap
+menggunakan settings key-value; tidak ada migrasi schema SQLite.

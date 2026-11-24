@@ -68,6 +68,17 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
   - Pelestarian `strategy` dan status `enabled` milik pengguna pada `saveCombo()` serta penyaringan provider berakun tanpa koneksi aktif saat `syncManagedCombos()` otomatis.
   - Pengurutan kualitas koding dasar bagi sesama model yang diparkir pada `zenith-cooldown` dan pembungkus transaksi SQLite atomik saat sinkronisasi combo.
 
+- **OpenCode Egress Policies & Hybrid WARP/Proton (opt-in)**:
+  - Kebijakan OpenCode `legacy`, `direct`, `prefer`, dan `require` dapat membatasi pool yang dipakai; `require` gagal tertutup dengan `503 proxy_required` jika proxy wajib tidak tersedia.
+  - Mode hybrid `off`, `shadow`, dan `enforce` memakai registry eksplisit `pool ID → adapter/lane`; runtime tidak menebak WARP atau Proton dari nama dan port.
+  - `shadow` mengukur readiness Proton tanpa mengubah routing lama dan mengecualikan pool Proton dari planner legacy. `enforce` memprioritaskan WARP yang siap, memakai Proton sebagai cadangan availability, dan tidak berpindah ke Proton pada respons WARP non-transport seperti 429 atau penolakan autentikasi/model.
+  - Probe egress menguji IP keluar melalui transport proxy pool yang sama. Probe readiness Proton bersifat pasif dan tidak mengirim kredensial OpenCode; konfigurasi enforce yang invalid gagal tertutup.
+  - Panduan konfigurasi, readiness, rollout, kill-switch, dan rollback tersedia di [`docs/opencode-hybrid-egress.md`](docs/opencode-hybrid-egress.md).
+- **Batas Dispatch OpenCode**:
+  - Retry akun, transport, dan retry protokol yang berbagi konteks eksekusi OpenCode memakai dispatch budget bersama (maksimal 3 dispatch) dan deadline 5 menit; retry tidak memperoleh jatah dispatch baru.
+- **Penyegaran Router Topology 360°**:
+  - Tata letak visual Usage & Kuota disusun ulang menjadi diagram radial responsif dengan kartu telemetry dan kapasitas pool; perbaikan posisi docking menjaga kabel dan teks provider tetap terbaca pada viewport berbeda.
+
 ### Perbaikan
 
 - **Pembacaan Error Body Upstream Terbatas**:
@@ -78,6 +89,7 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
   - Lock akun yang sudah aktif tidak lagi dipersingkat oleh cooldown baru yang lebih pendek (regresi issue #1, ditutup dengan tes).
   - Kegagalan 5xx tetap dianggap sementara: `Retry-After` yang panjang tidak memperpanjang lock di atas 1 jam, dan 5xx tidak pernah memakai batas jendela kuota.
 - **OpenCode Bridge & Tunneling**:
+  - Placeholder dinamis pada prompt bridge OpenCode kini diganti dengan nilai konteks yang tersedia, sehingga token placeholder tidak bocor sebagai teks mentah.
   - Penerusan proxy langsung ke opsi fetch bawaan Bun pada bridge worker alih-alih dispatcher undici untuk mencegah kebocoran IP host.
   - Penanganan event exit pada worker Bun dengan pembersihan state dan auto-respawn otomatis saat worker berhenti.
   - Penerusan konfigurasi proxy ke bridge lokal melalui header internal untuk mencegah pemicuan error HTTP 405.

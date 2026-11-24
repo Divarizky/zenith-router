@@ -52,9 +52,10 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · Nous · OpenRouter �
 
 - **Protokol Terpadu & Universal Translator:** Menerima format OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), dan OpenAI Responses (`/v1/responses`), baik streaming SSE maupun non-streaming. Translasi otomatis tool-calling lintas protokol (dialek JSON schema, tool_use Claude, function_call Responses, hingga DSML).
 - **21 Provider Built-in + BYOP (Bring Your Own Provider):** Mendukung login OAuth dengan PKCE, device code flow, import session browser, API key, free tier tanpa login, dan custom endpoint OpenAI/Claude. Termasuk provider **Nous Portal / Hermes (`nous`)** dengan login device code, auto-sync model gratis, dan pacing serial turns.
-- **Failover & Rotasi Akun Cerdas:** Failover otomatis ke akun berikutnya saat terkena rate-limit (429) atau server down (5xx), dilengkapi cooldown cerdas, parsing `retry_after` langsung dari body respons, dan refresh token otomatis (dengan penanda status `needs_login`).
+- **Failover & Rotasi Akun Cerdas:** Failover otomatis ke akun berikutnya saat terkena rate-limit (429) atau server down (5xx), dilengkapi cooldown cerdas, parsing `retry_after` langsung dari body respons, refresh token otomatis (dengan penanda status `needs_login`), dan budget dispatch bersama pada retry OpenCode.
 - **Model Combos:** Agregasi virtual model lintas provider dalam satu alias (misalnya `combo/smart-coding`) dengan urutan prioritas fallback otomatis dan rebuild otomatis pasca sinkronisasi katalog.
-- **Proxy Pools & Cloudflare WARP Lanes:** Manajemen pool proxy HTTP, HTTPS, dan SOCKS5 langsung dari dashboard, uji latensi, rotasi proxy per provider, penugasan bound accounts per proxy, dukungan tipe proxy `gateway` dengan retry budget & webhook rotasi, per-node Cloudflare WARP lanes dengan skrip `scripts/setupWarpLanes.js`, sinyal rotasi 429 fire-and-forget terdeduplikasi, dan prioritas proxy sehat.
+- **Proxy Pools & Cloudflare WARP Lanes:** Manajemen pool proxy HTTP, HTTPS, dan SOCKS5 langsung dari dashboard, uji latensi dan IP egress per pool, rotasi proxy per provider, penugasan bound accounts, tipe `gateway` dengan retry budget & webhook rotasi, serta readiness lane WARP.
+- **OpenCode Egress Policy:** Pilih kebijakan proxy `legacy`, `direct`, `prefer`, atau `require`; mode `require` menolak request dengan `503 proxy_required` bila proxy wajib tidak tersedia. Mode hybrid WARP/Proton bersifat opt-in, memakai registry pool eksplisit, dan menyediakan `shadow` pasif sebelum `enforce`. Lihat [panduan OpenCode hybrid egress](docs/opencode-hybrid-egress.md).
 - **Live Quota Scraper (10 Provider):** Memantau sisa kuota, jendela batas pemakaian (5 jam, harian, mingguan), dan waktu reset akun secara akurat tanpa perlu membuka situs provider.
 - **Peningkatan OpenAI Codex & Responses API:** Sinkronisasi model Codex otomatis pasca login OAuth, auto-generate `prompt_cache_key`, pelaporan cached/estimated tokens, dan dukungan tangga level thinking hingga `xhigh` dan `max`.
 - **Tingkat Berpikir Fleksibel (Adaptive & XHigh):** Dukungan level thinking `xhigh` pada Google Antigravity dan tangga thinking penuh pada OpenAI Codex serta Claude via prefix model.
@@ -159,6 +160,9 @@ Fitur Combos memungkinkan Anda membuat alias virtual yang menggabungkan beberapa
 * **Manajemen Akun Terikat (Bound Accounts):** Ikat atau lepaskan akun provider ke proxy pool spesifik secara massal melalui checklist pada modal edit proxy dashboard.
 * **Prioritisasi Proxy Sehat:** Rotasi proxy (round-robin maupun acak) secara cerdas mendahulukan proxy aktif yang sehat (tidak berstatus exhausted atau dalam masa gate cooldown).
 * **Indikator Status No-Auth:** Menampilkan status koneksi provider tanpa login di dashboard: `Proxy Pool` (rotasi bergiliran/acak), `Proxy` (terikat ke proxy tertentu), atau `Langsung (Tanpa Proxy)`.
+
+### OpenCode Egress Policies & Hybrid WARP/Proton
+Kebijakan egress OpenCode disimpan di settings database, bukan environment variable. `opencode_egress_policy` mengatur mode proxy legacy/direct/prefer/require dan `opencode_proxy_pool_ids` membatasi pool yang boleh dipakai. Mode hybrid terpisah (`opencode_egress_mode`) menggunakan registry adapter/lane eksplisit; `shadow` mengamati readiness Proton tanpa merutekan trafik ke Proton, sedangkan `enforce` mengaktifkan urutan WARP-first dan fail-closed. Konfigurasi serta batas rollout dijelaskan di [panduan hybrid egress](docs/opencode-hybrid-egress.md).
 
 ### OpenAI Codex & Responses API
 * **Auto-Sync Model Codex:** Mengambil katalog model Codex di latar belakang secara otomatis setelah login OAuth berhasil tanpa mengganggu sesi login.
@@ -330,6 +334,11 @@ Extension ini mendaftarkan provider `zenith-router`, menyinkronkan daftar model 
 - **Penyimpanan Lokal Eksklusif:** Seluruh session token, refresh token, password hash (scrypt), dan API key disimpan pada database SQLite lokal berizin file ketat (`0600`).
 - **Zero Cloud Relay:** Permintaan Anda dikirimkan langsung dari mesin lokal Anda ke endpoint provider resmi tanpa perantara server pihak ketiga.
 - **Timing-Safe Authentication:** Autentikasi API key dan password dashboard diverifikasi menggunakan perbandingan hash timing-safe untuk menangkal serangan side-channel.
+
+---
+
+## 📦 Persiapan Release
+Maintainer: lihat [checklist release](docs/releasing.md) untuk pembaruan versi, changelog, validasi paket, dan GitHub Release.
 
 ---
 

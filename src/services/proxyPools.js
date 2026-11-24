@@ -66,6 +66,327 @@ export function validateProxyAddress(raw) {
 
 const ROT_FIELD = "rotate_" + "token";
 const MASK_PLACEHOLDER = "****";
+const WARP_POOL_STATUS_URL = process.env.WARP_POOL_STATUS_URL || "http://127.0.0.1:8405/status";
+const WARP_READINESS_TTL_MS = 180000;
+const HYBRID_READINESS_TTL_MS = 180000;
+const HYBRID_MODE_KEY = "opencode_egress_mode";
+const HYBRID_REGISTRY_KEY = "opencode_egress_registry";
+const HYBRID_PROBE_URL_KEYS = ["opencode_proton_probe_url", "proxy_egress_probe_url"];
+let warpReadinessSnapshot = null;
+let protonReadinessSnapshot = new Map();
+const hybridRotationCursors = new Map();
+
+function normalizeHybridMode(raw) {
+  const value = String(raw || "off").trim().toLowerCase();
+  return value === "shadow" || value === "enforce" ? value : "off";
+}
+
+export function getOpencodeHybridMode() {
+  const raw = getSetting(HYBRID_MODE_KEY, getSetting("opencode_hybrid_egress_mode", "off"));
+  return normalizeHybridMode(raw);
+}
+
+function readHybridRegistry() {
+  const raw = getSetting(HYBRID_REGISTRY_KEY, "{}");
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function poolIdFromRegistryKey(key) {
+  const id = Number(key);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Validate the opt-in WARP/Proton registry. The adapter and lane are always
+ * taken from this registry; pool names and ports are deliberately ignored.
+ */
+export function getOpencodeHybridEgressConfig() {
+  const mode = getOpencodeHybridMode();
+  const raw = readHybridRegistry();
+  const scope = getOpencodeScopedPoolIds();
+  const errors = [];
+  const entries = [];
+  const seenWarpLanes = new Set();
+  const poolMap = new Map(getProxyPools().map((pool) => [Number(pool.id), pool]));
+
+  if (mode !== "off") {
+    if (!raw) errors.push("opencode_egress_registry harus berupa object JSON.");
+    if (!raw || Object.keys(raw).length === 0) errors.push("registri egress hybrid kosong.");
+  }
+  if (raw) {
+    for (const [key, value] of Object.entries(raw)) {
+      const poolId = poolIdFromRegistryKey(key);
+      if (!poolId) {
+        errors.push(`pool ID registri tidak valid: ${key}.`);
+        continue;
+      }
+      const pool = poolMap.get(poolId);
+      if (!pool) {
+        errors.push(`pool ${poolId} tidak ditemukan.`);
+        continue;
+      }
+      const adapter = String(value?.adapter || "").trim().toLowerCase();
+      if (adapter !== "warp" && adapter !== "proton") {
+        errors.push(`adapter pool ${poolId} harus warp atau proton.`);
+        continue;
+      }
+      const lane = value?.lane;
+      if (adapter === "warp") {
+        const laneNumber = Number(lane);
+        if (!Number.isInteger(laneNumber) || laneNumber < 1 || laneNumber > 10) {
+          errors.push(`lane WARP pool ${poolId} harus bilangan bulat 1-10.`);
+          continue;
+        }
+        if (seenWarpLanes.has(laneNumber)) {
+          errors.push(`lane WARP ${laneNumber} dipetakan lebih dari sekali.`);
+          continue;
+        }
+        seenWarpLanes.add(laneNumber);
+        entries.push({ pool, poolId, adapter, lane: laneNumber });
+      } else {
+        const protonLane = String(lane ?? "proton").trim();
+        if (!protonLane || protonLane.length > 64) {
+          errors.push(`lane Proton pool ${poolId} tidak valid.`);
+          continue;
+        }
+        entries.push({ pool, poolId, adapter, lane: protonLane });
+      }
+    }
+  }
+
+  const registryEntries = entries;
+  const registryIds = registryEntries.map((entry) => entry.poolId);
+  const effectiveScope = scope.length ? scope : registryIds;
+  if (mode !== "off" && effectiveScope.length === 0) errors.push("scope pool OpenCode kosong.");
+  if (mode === "enforce") {
+    const registrySet = new Set(registryIds);
+    for (const poolId of effectiveScope) {
+      if (!registrySet.has(poolId)) errors.push(`pool scope ${poolId} belum memiliki mapping adapter/lane.`);
+    }
+    for (const poolId of registryIds) {
+      if (!effectiveScope.includes(poolId)) errors.push(`pool registry ${poolId} berada di luar scope OpenCode.`);
+    }
+  }
+  const probeUrl = HYBRID_PROBE_URL_KEYS.map((key) => getSetting(key, "")).find(Boolean) || "";
+  if (mode === "enforce") {
+    const probeError = validateHybridProbeUrl(probeUrl);
+    if (probeError) errors.push(probeError);
+  }
+  return {
+    mode,
+    valid: mode === "off" || errors.length === 0,
+    errors,
+    scope: effectiveScope,
+    // Shadow only routes entries inside the legacy scope, but keeps the full
+    // valid registry available for passive Proton probes outside that scope.
+    entries: registryEntries.filter((entry) => effectiveScope.includes(entry.poolId)),
+    probeEntries: mode === "shadow" ? registryEntries : registryEntries.filter((entry) => effectiveScope.includes(entry.poolId)),
+    probeUrl,
+  };
+}
+
+export function validateHybridProbeUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "URL probe Proton wajib dikonfigurasi untuk mode enforce.";
+  if (/\s/.test(value)) return "URL probe Proton tidak boleh memuat spasi.";
+  let parsed;
+  try { parsed = new URL(value); } catch { return "URL probe Proton tidak valid."; }
+  if (parsed.protocol !== "https:") return "URL probe Proton harus https://.";
+  if (parsed.username || parsed.password) return "URL probe Proton tidak boleh memuat kredensial.";
+  return null;
+}
+
+export function setOpencodeHybridMode(mode) {
+  const normalized = String(mode || "").trim().toLowerCase();
+  if (!["off", "shadow", "enforce"].includes(normalized)) throw new Error("Mode egress harus off, shadow, atau enforce.");
+  setSetting(HYBRID_MODE_KEY, normalized);
+  return normalized;
+}
+
+export function setOpencodeHybridRegistry(registry) {
+  const parsed = typeof registry === "string" ? JSON.parse(registry) : registry;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Registri egress hybrid harus berupa object.");
+  setSetting(HYBRID_REGISTRY_KEY, JSON.stringify(parsed));
+  protonReadinessSnapshot.clear();
+  return parsed;
+}
+
+function currentHybridWarpFingerprint() {
+  const config = getOpencodeHybridEgressConfig();
+  return config.entries
+    .filter((entry) => entry.adapter === "warp")
+    .map((entry) => `${entry.poolId}|${entry.pool.url}|${entry.lane}`)
+    .sort()
+    .join(",");
+}
+
+export function setWarpReadinessSnapshot(snapshot, now = Date.now()) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.nodes)) {
+    warpReadinessSnapshot = null;
+    return false;
+  }
+  const nodes = new Map();
+  for (const node of snapshot.nodes) {
+    const number = Number(node?.node);
+    if (Number.isInteger(number) && number > 0) nodes.set(number, {
+      ready: node.ready === true,
+      state: String(node.state || "unknown"),
+      lastError: node.last_error || null,
+      observedAt: Number(node?.observed_at ?? node?.observedAt ?? node?.checked_at ?? node?.checkedAt ?? now),
+    });
+  }
+  warpReadinessSnapshot = { checkedAt: now, fresh: snapshot.fresh === true, nodes, hybridFingerprint: currentHybridWarpFingerprint() };
+  return true;
+}
+
+export function resetWarpReadinessSnapshot() {
+  warpReadinessSnapshot = null;
+}
+
+export function isWarpPoolReady(pool, now = Date.now(), explicitLane = null) {
+  const match = String(pool?.name || "").match(/^warp-node-(\d+)$/i);
+  const lane = explicitLane == null ? (match ? Number(match[1]) : null) : Number(explicitLane);
+  if (!Number.isInteger(lane) || !warpReadinessSnapshot) return false;
+  if (warpReadinessSnapshot.fresh !== true || now - warpReadinessSnapshot.checkedAt > WARP_READINESS_TTL_MS) return false;
+  if (explicitLane != null && warpReadinessSnapshot.hybridFingerprint !== currentHybridWarpFingerprint()) return false;
+  const node = warpReadinessSnapshot.nodes.get(lane);
+  return Boolean(node?.ready === true && node.state === "ready" && now - (Number(node.observedAt) || warpReadinessSnapshot.checkedAt) <= WARP_READINESS_TTL_MS);
+}
+
+export async function syncWarpReadiness(fetchFn = fetch, now = Date.now()) {
+  try {
+    const res = await fetchFn(WARP_POOL_STATUS_URL, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) throw new Error(`WARP readiness HTTP ${res.status}`);
+    const snapshot = await res.json();
+    return setWarpReadinessSnapshot(snapshot, now);
+  } catch {
+    resetWarpReadinessSnapshot();
+    return false;
+  }
+}
+
+function hybridPoolFingerprint(pool, probeUrl) {
+  return `${pool?.id}|${pool?.url}|${pool?.kind || "single"}|${probeUrl}`;
+}
+
+function parseHybridIp(text) {
+  let value = String(text || "").trim();
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object") value = String(parsed.ip ?? "").trim();
+  } catch {}
+  const octets = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (octets && octets.slice(1).every((part) => Number(part) <= 255)) return value;
+  if (/^[0-9a-f:]+$/i.test(value) && value.includes(":")) return value.toLowerCase();
+  return null;
+}
+
+async function readHybridBodyBounded(response, maxBytes = 4096) {
+  if (!response?.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total <= maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value || []);
+      const remaining = maxBytes - total;
+      if (chunk.length > remaining) {
+        chunks.push(chunk.subarray(0, remaining));
+        total = maxBytes + 1;
+        break;
+      }
+      chunks.push(chunk);
+      total += chunk.length;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  if (total > maxBytes) throw new Error("Respons probe terlalu besar.");
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export function resetProtonReadinessSnapshot() {
+  protonReadinessSnapshot = new Map();
+}
+
+export function getProtonPoolReadiness(poolId, now = Date.now()) {
+  const entry = protonReadinessSnapshot.get(Number(poolId));
+  if (!entry) return null;
+  const config = getOpencodeHybridEgressConfig();
+  const current = (config.probeEntries || config.entries).find((candidate) => candidate.poolId === Number(poolId));
+  if (!current || entry.fingerprint !== hybridPoolFingerprint(current.pool, config.probeUrl)) return { ...entry, stale: true };
+  return { ...entry, stale: now - entry.checkedAt > HYBRID_READINESS_TTL_MS };
+}
+
+export function isProtonPoolReady(poolId, now = Date.now()) {
+  const entry = getProtonPoolReadiness(poolId, now);
+  return Boolean(entry && entry.stale !== true && entry.ready === true && entry.ip);
+}
+
+/** Probe Proton through the same HTTP proxy. This state is memory-only. */
+export async function syncProtonReadiness({ fetchFn = proxyFetch, now = Date.now(), probeFn = null } = {}) {
+  const config = getOpencodeHybridEgressConfig();
+  const protonEntries = (config.probeEntries || config.entries).filter((entry) => entry.adapter === "proton");
+  if (config.mode === "off" || !protonEntries.length || validateHybridProbeUrl(config.probeUrl)) {
+    resetProtonReadinessSnapshot();
+    return false;
+  }
+  const probe = probeFn || (async (pool, probeUrl) => fetchFn(probeUrl, {
+    method: "GET",
+    headers: { "user-agent": "zenith-proton-egress/1", accept: "application/json,text/plain" },
+    redirect: "error",
+    signal: AbortSignal.timeout(5000),
+  }, pool.url));
+  const next = new Map();
+  for (const entry of protonEntries) {
+    const fingerprint = hybridPoolFingerprint(entry.pool, config.probeUrl);
+    const result = { checkedAt: now, fingerprint, ready: false, ip: null, error: null };
+    if (Number(entry.pool.is_active) !== 1 || validateProxyAddress(entry.pool.url)) {
+      result.error = "pool Proton nonaktif atau URL proxy tidak valid";
+      next.set(entry.poolId, result);
+      continue;
+    }
+    try {
+      const response = await probe(entry.pool, config.probeUrl);
+      if (!response?.ok || response.status < 200 || response.status >= 300) throw new Error(`probe HTTP ${response?.status || 0}`);
+      const body = await readHybridBodyBounded(response);
+      result.ip = parseHybridIp(body);
+      if (!result.ip) throw new Error("respons probe tidak memuat IP valid");
+      result.ready = true;
+    } catch (error) {
+      result.error = String(error?.message || error).slice(0, 160);
+    }
+    next.set(entry.poolId, result);
+  }
+  protonReadinessSnapshot = next;
+  return [...next.values()].some((entry) => entry.ready);
+}
+
+let hybridReadinessInFlight = null;
+export async function syncHybridReadiness(options = {}) {
+  if (hybridReadinessInFlight) return hybridReadinessInFlight;
+  hybridReadinessInFlight = (async () => {
+    const warp = await syncWarpReadiness(options.fetchWarpFn || fetch, options.now ?? Date.now());
+    const proton = await syncProtonReadiness({
+      fetchFn: options.fetchProtonFn || proxyFetch,
+      now: options.now ?? Date.now(),
+      probeFn: options.probeFn || null,
+    });
+    return { warp, proton };
+  })();
+  try {
+    return await hybridReadinessInFlight;
+  } finally {
+    hybridReadinessInFlight = null;
+  }
+}
 
 export function validateProxyKind(kind) {
   const normalized = String(kind || "single").trim().toLowerCase();
@@ -428,6 +749,7 @@ const proxyRotationCursors = new Map();
 /** Lupa semua posisi rotasi (hook tes dan reset manual). */
 export function resetProxyRotation() {
   proxyRotationCursors.clear();
+  hybridRotationCursors.clear();
 }
 
 /**
@@ -767,9 +1089,67 @@ export function getOpencodeScopedPoolIds() {
   } catch { return []; }
 }
 
+function hybridEntry(entry) {
+  const pool = entry.pool;
+  return {
+    id: pool.id,
+    name: pool.name,
+    url: pool.url,
+    kind: pool.kind || "single",
+    retry_budget: Number(pool.retry_budget) || 1,
+    rotate_url: pool.rotate_url || null,
+    adapter: entry.adapter,
+    lane: entry.lane,
+    [ROT_FIELD]: pool[ROT_FIELD] || null,
+  };
+}
+
+/**
+ * Plan the opt-in hybrid route. WARP is ready-first and round-robin; Proton
+ * occupies the final slot when ready. Cooling-down lanes are excluded rather
+ * than appended, so enforce mode can fail closed with zero dispatches.
+ */
+export function planOpencodeHybridEntries(strategy = "round_robin", now = Date.now()) {
+  const config = getOpencodeHybridEgressConfig();
+  if (!config.valid || config.mode === "off") return [];
+  const available = (entry) => Number(entry.pool.is_active) === 1
+    && !validateProxyAddress(entry.pool.url)
+    && !isProxyPoolExhausted(entry.pool.id, now)
+    && !isProxyPoolExhausted(entry.pool.url, now)
+    && !getOpencodeGateState(entry.pool.url);
+  const warp = config.entries.filter((entry) => entry.adapter === "warp" && available(entry) && isWarpPoolReady(entry.pool, now, entry.lane));
+  const proton = config.entries.filter((entry) => entry.adapter === "proton" && available(entry) && isProtonPoolReady(entry.poolId, now));
+  let orderedWarp = [...warp];
+  if (strategy === "random") {
+    for (let i = orderedWarp.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [orderedWarp[i], orderedWarp[j]] = [orderedWarp[j], orderedWarp[i]];
+    }
+  } else if (orderedWarp.length) {
+    const cursor = hybridRotationCursors.get("opencode") || 0;
+    const start = cursor % orderedWarp.length;
+    orderedWarp = orderedWarp.slice(start).concat(orderedWarp.slice(0, start));
+    hybridRotationCursors.set("opencode", (start + 1) % orderedWarp.length);
+  }
+  const selected = proton.length ? [...orderedWarp.slice(0, 2), proton[0]] : orderedWarp.slice(0, 3);
+  return selected.map((entry) => hybridEntry(entry));
+}
+
+export function resetHybridRotation() {
+  hybridRotationCursors.clear();
+  resetProtonReadinessSnapshot();
+}
+
 export function planProxyRotationEntries(providerId, strategy, scopedIds = null) {
   if (strategy !== "round_robin" && strategy !== "random") return [];
-  const active = getProxyPools().filter((p) => Number(p.is_active) === 1 && (!scopedIds || (scopedIds.includes(Number(p.id)) && !validateProxyAddress(p.url))));
+  const enforceReadiness = getSetting("warp_readiness_enforce", "false") === "true";
+  const shadowProtonIds = providerId === "opencode" && getOpencodeHybridMode() === "shadow"
+    ? new Set((getOpencodeHybridEgressConfig().probeEntries || []).filter((entry) => entry.adapter === "proton").map((entry) => entry.poolId))
+    : new Set();
+  const active = getProxyPools().filter((p) => Number(p.is_active) === 1
+    && !shadowProtonIds.has(Number(p.id))
+    && (!scopedIds || (scopedIds.includes(Number(p.id)) && !validateProxyAddress(p.url)))
+    && (!enforceReadiness || providerId !== "opencode" || !String(p.name || "").startsWith("warp-node-") || isWarpPoolReady(p)));
   if (active.length === 0) return [];
 
   let rawOrdered;

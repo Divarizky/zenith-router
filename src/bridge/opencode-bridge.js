@@ -34,7 +34,22 @@ export function generateOpencodeSessionId(now = Date.now()) {
  */
 export function prepareOpenCodePayload(body = {}) {
   const model = body.model || "glm-5.3-flash-free";
-  const baseline = OPENCODE_BASELINE_SYSTEM_PROMPT.replace("{{MODEL_NAME}}", model);
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
+  const cwd = body.cwd || body.workspace || process.env.ZENITH_WORKSPACE_DIR || process.cwd();
+  const platform = process.platform || "linux";
+
+  const baseline = OPENCODE_BASELINE_SYSTEM_PROMPT
+    .replaceAll("{{MODEL_NAME}}", model)
+    .replaceAll("{{MODEL_ID}}", model)
+    .replaceAll("{{TODAY_DATE}}", today)
+    .replaceAll("{{WORKING_DIR}}", cwd)
+    .replaceAll("{{WORKSPACE_DIR}}", cwd)
+    .replaceAll("{{PLATFORM}}", platform);
 
   const rawMessages = Array.isArray(body.messages) ? body.messages : [];
   const systemMessages = rawMessages.filter((m) => m && m.role === "system");

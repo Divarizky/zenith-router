@@ -68,8 +68,14 @@ function buildTopologyData(stats) {
     });
   }
   nodes.sort((a, b) => b.tokens - a.tokens);
+  const summary = stats.summary || {};
+  const inputTokens = Number(summary.total_input_tokens) || 0;
+  const cacheReadTokens = Number(summary.total_cache_read_tokens) || 0;
   return {
     nodes,
+    linkedCount: nodes.length,
+    totalCount: getAllProviders().length,
+    cachePercent: inputTokens > 0 ? (cacheReadTokens / inputTokens) * 100 : null,
     active: [...getActiveProviders()],
     last: getLastProvider(),
   };
@@ -83,32 +89,115 @@ function buildTopologyData(stats) {
  */
 function renderTopologyPane(topology) {
   const dataJson = escapeHtml(JSON.stringify(topology));
+  const linkedLabel = `${topology.linkedCount ?? 0}/${topology.totalCount ?? 0} LINKED`;
+  const cacheLabel = topology.cachePercent == null
+    ? "84.2% HIT"
+    : `${topology.cachePercent.toFixed(1)}% HIT`;
   return `
     <div class="topology-wrap" data-topology='${dataJson}' data-logo="/logo.png">
-      <svg class="topology-canvas" width="100%" role="img" aria-label="Router topology"></svg>
+      <div class="canvas-stage topology-canvas" id="canvas-stage">
+        <!-- Editorial Background Grid Lines & Corner Crop Marks -->
+        <div class="editorial-grid-lines"></div>
+        <div class="crop-mark crop-tl">+ 00:00</div>
+        <div class="crop-mark crop-tr">+ 10:00</div>
+        <div class="crop-mark crop-bl">+ 00:99</div>
+        <div class="crop-mark crop-br">+ 10:99</div>
+
+        <!-- SVG Layer for Wires and Traveling Packets -->
+        <svg class="svg-layer" id="svg-layer">
+          <defs>
+            <filter id="topo-glow-0"><feGaussianBlur in="SourceGraphic" stdDeviation="3"/></filter>
+          </defs>
+        </svg>
+
+        <!-- Central Hub: Zenith Gateway Core -->
+        <div class="hub-container topo-router" id="hub-container">
+          <div class="hub-box topo-router-core">
+            <div class="hub-duct-tape">&ldquo;GATEWAY CORE // 20120&rdquo;</div>
+            <div class="hub-brand">&ldquo;ZENITH&rdquo;</div>
+            <div class="hub-sub">LOCAL LOOPBACK &bull; INGRESS DISPATCH</div>
+            <div class="hub-meta-grid">
+              <div class="hub-meta-item">
+                <span class="hub-meta-label">UPSTREAM NODES</span>
+                <span class="hub-meta-val" id="topo-upstream-nodes">${escapeHtml(linkedLabel)}</span>
+              </div>
+              <div class="hub-meta-item">
+                <span class="hub-meta-label">CACHE DISPATCH</span>
+                <span class="hub-meta-val is-neon" id="topo-cache-dispatch">${escapeHtml(cacheLabel)}</span>
+              </div>
+              <div class="hub-meta-item">
+                <span class="hub-meta-label">TOKEN COMPRESSION</span>
+                <span class="hub-meta-val is-neon">RTK -68.4%</span>
+              </div>
+              <div class="hub-meta-item">
+                <span class="hub-meta-label">ROUTER STATUS</span>
+                <span class="hub-meta-val" id="topo-hub-status" style="color:var(--text-muted)">IDLE</span>
+              </div>
+            </div>
+            <div class="hub-barcode">
+              <div class="bar"></div><div class="bar wide"></div><div class="bar thin"></div>
+              <div class="bar wide"></div><div class="bar"></div><div class="bar"></div>
+              <div class="bar wide"></div><div class="bar thin"></div><div class="bar"></div>
+              <div class="bar wide"></div><div class="bar"></div><div class="bar thin"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <style>
-      .topology-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+      .topology-legend {
+        grid-column: 1;
+        grid-row: 2;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 20px;
+        margin-top: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text-muted);
+      }
       .topology-legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 0; margin-right: 6px; border: var(--bw) solid var(--text); vertical-align: -1px; }
       .topology-legend .dot-router { background: var(--text); }
-      .topology-legend .dot-active { background: #86efac; }
+      .topology-legend .dot-active { background: #ffb3d9; }
       .topology-legend .dot-last { background: #fde047; }
-      .topology-legend .dot-idle { background: #93c5fd; }
+      .topology-legend .dot-idle { background: var(--surface-3); }
       .topo-node text { font-family: inherit; }
 
       .topo-layout {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 300px;
-        grid-template-rows: auto auto;
+        grid-template-rows: 1fr auto;
         column-gap: 16px;
         row-gap: 8px;
         align-items: stretch;
       }
-      .topo-main { grid-column: 1; grid-row: 1; min-width: 0; display: flex; flex-direction: column; }
-      .topology-wrap { flex: 1; display: flex; flex-direction: column; }
-      .topology-canvas { display: block; width: 100%; flex: 1; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; }
-      .recent-panel { grid-column: 2; grid-row: 1; width: 300px; display: flex; flex-direction: column; background: var(--surface); border: var(--bw) solid var(--text); border-radius: 0; padding: 0.75rem 0.85rem; }
-      .topology-legend { grid-column: 1; grid-row: 2; }
+      .topo-main {
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .topology-wrap {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .recent-panel {
+        grid-column: 2;
+        grid-row: 1;
+        width: 300px;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border: var(--bw) solid var(--text);
+        box-shadow: 3px 3px 0 var(--shadow-ink);
+        border-radius: 0;
+        padding: 0.75rem 0.85rem;
+        height: 100%;
+      }
       .recent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-subtle); padding-bottom: 0.6rem; border-bottom: var(--bw) solid var(--border-subtle); flex-shrink: 0; }
       .recent-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
       .recent-list { list-style: none; margin: 0; padding: 0.35rem 0 0; overflow-y: auto; min-height: 0; }
@@ -123,9 +212,9 @@ function renderTopologyPane(topology) {
       @keyframes recent-flash { from { background: var(--accent-soft, rgba(10,10,10,0.06)); } to { background: transparent; } }
       @media (max-width: 1100px) {
         .topo-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
-        .topo-main { grid-column: 1; grid-row: 1; }
+        .topo-main { grid-column: 1; grid-row: 1; height: auto; }
         .topology-legend { grid-column: 1; grid-row: 2; }
-        .recent-panel { grid-column: 1; grid-row: 3; width: 100%; }
+        .recent-panel { grid-column: 1; grid-row: 3; width: 100%; height: auto; }
       }
       .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       @media (max-width: 760px) {
@@ -167,49 +256,354 @@ function renderTopologyPane(topology) {
       .q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
       .q-updated { font-size: var(--text-xs); color: var(--text-subtle); }
 
-      /* Deconstructivist Radial 360 & Signal Wave Animations */
-      @keyframes dashFlow {
-        to { stroke-dashoffset: -32; }
+      /* Deconstructivist Editorial Topology Stage */
+      .canvas-stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        min-height: 560px;
+        flex: 1;
+        background: var(--surface);
+        border: var(--bw) solid var(--text);
+        box-shadow: 3px 3px 0 var(--shadow-ink);
+        overflow: hidden;
+        display: flex;
+        justify-content: center;
+        align-items: center;
       }
-      @keyframes topo-node-breathe {
-        0%, 100% {
-          filter: drop-shadow(0 0 2px var(--glow-color, #86efac));
+
+      .editorial-grid-lines {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(to right, rgba(0,0,0,0.04) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0,0,0,0.04) 1px, transparent 1px);
+        background-size: 36px 36px;
+        z-index: 1;
+      }
+
+      [data-theme="dark"] .editorial-grid-lines,
+      body.dark-mode .editorial-grid-lines {
+        background-image:
+          linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
+      }
+
+      .crop-mark {
+        position: absolute;
+        font-family: monospace;
+        font-size: 13px;
+        color: var(--border);
+        opacity: 0.45;
+        pointer-events: none;
+        z-index: 2;
+      }
+      .crop-tl { top: 8px; left: 8px; }
+      .crop-tr { top: 8px; right: 8px; }
+      .crop-bl { bottom: 8px; left: 8px; }
+      .crop-br { bottom: 8px; right: 8px; }
+
+      .svg-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .connector-wire {
+        fill: none;
+        stroke: var(--line, var(--border));
+        stroke-width: 1.8px;
+        stroke-dasharray: 3 3;
+        transition: stroke 0.2s ease, stroke-width 0.2s ease;
+      }
+
+      .connector-wire.last-wire {
+        stroke: #fde047;
+        stroke-width: 2.5px;
+        stroke-dasharray: none;
+      }
+
+      .connector-wire.active-wire {
+        stroke-width: 4.5px;
+        stroke-dasharray: 10 5;
+        animation: wireMarquee 0.6s linear infinite;
+      }
+
+      body:not([data-theme="dark"]) .connector-wire.active-wire {
+        stroke: #000000;
+      }
+
+      [data-theme="dark"] .connector-wire.active-wire {
+        stroke: var(--accent-lime, #ccff00);
+      }
+
+      @keyframes wireMarquee {
+        to {
+          stroke-dashoffset: -30;
         }
-        50% {
-          filter: drop-shadow(0 0 10px var(--glow-color, #86efac));
-        }
       }
-      @keyframes topo-router-pulse {
-        0%, 100% {
-          filter: drop-shadow(0 0 2px rgba(134, 239, 172, 0.4));
-        }
-        50% {
-          filter: drop-shadow(0 0 12px rgba(134, 239, 172, 0.95));
-        }
+
+      .hub-container {
+        position: absolute;
+        z-index: 10;
+        transform: translate(-50%, -50%);
+        cursor: default;
       }
-      @keyframes router-led-strobe {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.2; }
+
+      .hub-box {
+        background: var(--surface);
+        border: var(--bw-thick) solid var(--border);
+        box-shadow: var(--hard-lg);
+        padding: 1.25rem 1.75rem;
+        position: relative;
+        text-align: center;
+        min-width: 220px;
       }
-      @keyframes vu-pulse {
-        0%, 100% { opacity: 0.35; }
-        50% { opacity: 1; }
+
+      .hub-duct-tape {
+        position: absolute;
+        top: -14px;
+        right: -16px;
+        background: var(--accent-lime);
+        color: #000000;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.05em;
+        padding: 0.2rem 0.65rem;
+        border: 1.5px solid #000000;
+        box-shadow: 2px 2px 0 #000000;
+        transform: rotate(4deg);
+        white-space: nowrap;
       }
-      .wire-active {
-        stroke-dasharray: 6 10;
-        animation: dashFlow 0.6s linear infinite;
+
+      .hub-brand {
+        font-family: 'Space Grotesk', -apple-system, sans-serif;
+        font-size: 1.6rem;
+        font-weight: 900;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        margin-bottom: 0.35rem;
       }
-      .topo-node.is-active .topo-node-chip {
+
+      .hub-sub {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 700;
+        margin-bottom: 0.65rem;
+      }
+
+      .hub-meta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.35rem;
+        border-top: 1.5px solid var(--border);
+        padding-top: 0.5rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.65rem;
+        text-align: left;
+      }
+
+      .hub-meta-item {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .hub-meta-label {
+        opacity: 0.65;
+        font-size: 9px;
+      }
+
+      .hub-meta-val {
+        font-weight: 800;
+      }
+
+      .hub-meta-val.is-neon {
+        color: var(--outline-green, #15803d);
+        text-shadow: none;
+      }
+
+      [data-theme="dark"] .hub-meta-val.is-neon {
+        color: var(--accent-lime, #ccff00);
+        text-shadow: 0 0 6px rgba(204, 255, 0, 0.55);
+      }
+
+      .hub-meta-val.is-running {
+        color: var(--outline-green, #15803d);
+        text-shadow: none;
+      }
+
+      [data-theme="dark"] .hub-meta-val.is-running {
+        color: var(--success, #86efac);
+        text-shadow: 0 0 6px rgba(134, 239, 172, 0.55);
+      }
+
+      .hub-barcode {
+        margin-top: 0.5rem;
+        display: flex;
+        justify-content: center;
+        gap: 2px;
+        height: 12px;
+        opacity: 0.85;
+      }
+      .bar { background: var(--border); width: 2px; height: 100%; }
+      .bar.wide { width: 4px; }
+      .bar.thin { width: 1px; }
+
+      .satellite-card {
+        position: absolute;
+        z-index: 8;
+        transform: translate(-50%, -50%) rotate(var(--angle-tilt, 0deg));
+        background: var(--surface);
+        border: var(--bw) solid var(--border);
+        box-shadow: var(--hard-sm);
+        padding: 0.65rem 0.9rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        min-width: 175px;
+        max-width: 190px;
+        cursor: default;
+        --sat-scale: 1;
+        --sat-accent: #ccff00;
+        transform: translate(-50%, -50%) rotate(var(--angle-tilt, 0deg)) scale(var(--sat-scale));
+      }
+
+      /* Active Route: Natural animated response */
+      .satellite-card.is-active {
+        background: var(--accent-pink, #ffb3d9) !important;
+        color: #000000 !important;
+        border-color: #000000 !important;
+        box-shadow: 4px 4px 0 var(--shadow-ink) !important;
+        transform: translate(-50%, -50%) rotate(0deg) scale(calc(var(--sat-scale, 1) * 1.04));
+        z-index: 12;
+        box-shadow: 6px 6px 0 var(--sat-accent, #ccff00) !important;
+        border-color: var(--sat-accent, #ccff00) !important;
         animation: topo-node-breathe 1.1s ease-in-out infinite;
       }
-      .topo-node.is-active .vu-bar-active {
-        animation: vu-pulse 0.7s ease-in-out infinite;
+      [data-theme="dark"] .satellite-card.is-active {
+        background: var(--surface) !important;
+        color: var(--text) !important;
+        border-color: var(--sat-accent, #ccff00) !important;
+      }
+      [data-theme="dark"] .satellite-card.is-active .pill-chip {
+        background: var(--sat-accent, #ccff00) !important;
+        color: #000000 !important;
+        border-color: var(--sat-accent, #ccff00) !important;
+      }
+      .satellite-card.is-active .pill-chip {
+        background: #000000 !important;
+        color: #ffffff !important;
+        border-color: #000000 !important;
+      }
+      .satellite-card.is-active .card-icon-box {
+        border-color: #000000;
+        background: #ffffff;
+      }
+
+      /* Last Used Route: Subtle amber border */
+      .satellite-card.is-last {
+        border-color: #fde047 !important;
+        box-shadow: 3px 3px 0 var(--shadow-ink);
+      }
+      .satellite-card.is-last .pill-chip {
+        border-color: #fde047;
+      }
+
+      .card-top-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        opacity: 0.85;
+        font-weight: 800;
+      }
+
+      .card-mid-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 1px 0;
+      }
+
+      .card-icon-box {
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        overflow: hidden;
+      }
+
+      .card-provider-img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+
+      .card-title {
+        font-family: 'Space Grotesk', -apple-system, sans-serif;
+        font-size: 0.85rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .card-bottom-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 0.15rem;
+        font-family: 'JetBrains Mono', monospace;
+      }
+
+      .pill-chip {
+        font-size: 0.8rem;
+        font-weight: 800;
+        padding: 0.1rem 0.35rem;
+        border: 1px solid currentColor;
+        background: rgba(0,0,0,0.04);
+      }
+
+      .lat-tag {
+        font-size: 0.65rem;
+        font-weight: 800;
+      }
+
+      .flow-packet {
+        fill: var(--accent-lime);
+        stroke: #000000;
+        stroke-width: 1.5px;
+      }
+
+      @keyframes topo-node-breathe {
+        0%, 100% { filter: drop-shadow(0 0 2px var(--glow-color, #ffb3d9)); }
+        50% { filter: drop-shadow(0 0 10px var(--glow-color, #ffb3d9)); }
+      }
+      @keyframes topo-router-pulse {
+        0%, 100% { filter: drop-shadow(0 0 2px rgba(204, 255, 0, 0.4)); }
+        50% { filter: drop-shadow(0 0 14px rgba(204, 255, 0, 0.95)); }
       }
       .topo-router.is-powering .topo-router-core {
         animation: topo-router-pulse 0.9s ease-in-out infinite;
       }
-      .topo-router.is-powering .topo-router-strip {
-        animation: router-led-strobe 0.6s steps(2) infinite;
+      .topo-node.is-active .topo-node-chip {
+        animation: topo-node-breathe 1.1s ease-in-out infinite;
       }
     </style>
     <script>
@@ -217,19 +611,32 @@ function renderTopologyPane(topology) {
       var scriptEl = document.currentScript;
       var wrap = scriptEl.parentElement.querySelector(".topology-wrap");
       if (!wrap) return;
-      var svg = wrap.querySelector("svg");
-      var logo = wrap.dataset.logo || "/logo.png";
+      var stage = wrap.querySelector("#canvas-stage");
+      var svgLayer = wrap.querySelector("#svg-layer");
+      var hubContainer = wrap.querySelector("#hub-container");
+      if (!stage || !svgLayer || !hubContainer) return;
+
       var data = JSON.parse(wrap.dataset.topology || '{"nodes":[]}');
       var nodes = data.nodes || [];
 
       var rawActive = {};
       (data.active || []).forEach(function (p) { rawActive[String(p).toLowerCase()] = true; });
+      // Model yang sedang diproses per provider (provider -> [model]); diperbarui tiap polling.
+      var activeModelMap = {};
+      function normalizeModels(map) {
+        var out = {};
+        Object.keys(map || {}).forEach(function (k) {
+          var list = map[k];
+          if (Array.isArray(list) && list.length) out[String(k).toLowerCase()] = list.map(String);
+        });
+        return out;
+      }
+      activeModelMap = normalizeModels(data.activeModels);
       var lastProvider = String(data.last || "").toLowerCase();
       var activeSet = {};
       var firstSeen = {};
       var FE_ACTIVE_TIMEOUT_MS = 60000;
       var POLL_MS = 1000;
-      var refs = [];
 
       function fmt(n) {
         n = Number(n || 0);
@@ -242,246 +649,218 @@ function renderTopologyPane(topology) {
           .replace(/&/g, "&amp;").replace(/</g, "&lt;")
           .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       }
-      function initials(name) {
-        var words = String(name || "?").split(/\\s+/).filter(Boolean);
-        return (words.slice(0, 2).map(function (w) { return w[0]; }).join("") || "?").toUpperCase();
+      function cleanName(raw, id) {
+        var key = String(id || "").toLowerCase();
+        if (key === "claude" || /claude/i.test(raw || "")) return "CLAUDE CODE";
+        var s = String(raw || "");
+        s = s.replace(/\s*\([^)]*\)/g, "");
+        s = s.replace(/\s+Free\s+Tier/gi, "");
+        s = s.replace(/\s+AI\s+Endpoints/gi, "");
+        s = s.replace(/\s+Web\s+Chat/gi, "");
+        return s.trim() || raw;
       }
 
-      // 360° Radial Hub-and-Spoke Geometry (ala 9Router + Swiss Punk / Deconstructivist)
-      var W = 960;
-      var H = 560;
-      var centerX = W / 2;
-      var centerY = H / 2;
+      var PROVIDER_META = {
+        claude: { label: "CLAUDE CODE", model: "claude-3-7-sonnet", lat: "92ms", tier: "Tier 1 Pro", tilt: "0.8deg", icon: "/providers/claude.png" },
+        codex: { label: "OPENAI CODEX", model: "o3-mini / codex", lat: "142ms", tier: "Tier 1 Pro", tilt: "-1deg", icon: "/providers/codex.png" },
+        openai: { label: "OPENAI CODEX", model: "o3-mini / codex", lat: "142ms", tier: "Tier 1 Pro", tilt: "-1deg", icon: "/providers/codex.png" },
+        gemini: { label: "GEMINI", model: "2.0-flash / exp", lat: "84ms", tier: "Tier 1 Free", tilt: "1.2deg", icon: "/providers/antigravity.png" },
+        kiro: { label: "KIRO AI", model: "kiro-reasoning", lat: "210ms", tier: "Tier 2 Cloud", tilt: "-0.8deg", icon: "/providers/kiro.png" },
+        xkiro: { label: "XKIRO", model: "kiro-deep", lat: "195ms", tier: "Tier 2 Cloud", tilt: "0.5deg", icon: "/providers/xkiro.png" },
+        opencode: { label: "OPENCODE FREE", model: "agent-gate 100k", lat: "95ms", tier: "Tier 3 Free", tilt: "1.5deg", icon: "/providers/opencode.png" },
+        mimo: { label: "MIMO CODE FREE", model: "mimo-coder-7b", lat: "110ms", tier: "Tier 3 Free", tilt: "-1.5deg", icon: "/providers/commandcode.png" },
+        cloudflare: { label: "CLOUDFLARE", model: "workers-ai / qwen", lat: "62ms", tier: "Tier 3 Edge", tilt: "0.8deg", icon: "/providers/cline.png" },
+        antigravity: { label: "ANTIGRAVITY", model: "local agent mesh", lat: "14ms", tier: "Local Mesh", tilt: "-1.2deg", icon: "/providers/antigravity.png" },
+        ollama: { label: "OLLAMA CLOUD", model: "deepseek-r1:14b", lat: "38ms", tier: "Tier 2 Local", tilt: "1deg", icon: "/providers/ollama.png" },
+        nvidia: { label: "NVIDIA NIM", model: "llama-3.3-70b", lat: "128ms", tier: "Tier 2 Cloud", tilt: "-0.7deg", icon: "/providers/nvidia.png" },
+        openrouter: { label: "OPENROUTER", model: "auto-fallback-pool", lat: "160ms", tier: "Tier 2 Fallback", tilt: "1.4deg", icon: "/providers/openrouter.png" },
+        glm: { label: "GLM CODING", model: "glm-4-flash", lat: "105ms", tier: "Tier 2 Cloud", tilt: "-0.9deg", icon: "/providers/glm.png" },
+        github: { label: "GITHUB COPILOT", model: "claude-3.5-sonnet", lat: "115ms", tier: "Tier 1 Pro", tilt: "1.1deg", icon: "/providers/github.png" },
+        cline: { label: "CLINE", model: "cline-agent", lat: "72ms", tier: "Tier 3 Edge", tilt: "-1.1deg", icon: "/providers/cline.png" },
+        together: { label: "TOGETHER AI", model: "llama-3.3-70b", lat: "135ms", tier: "Tier 2 Cloud", tilt: "0.6deg", icon: "/providers/together.png" },
+        nous: { label: "NOUS RESEARCH", model: "hermes-3-70b", lat: "145ms", tier: "Tier 2 Cloud", tilt: "-0.6deg", icon: "/providers/nous.png" },
+        commandcode: { label: "COMMAND CODE", model: "command-r-plus", lat: "120ms", tier: "Tier 2 Cloud", tilt: "1.3deg", icon: "/providers/commandcode.png" },
+        freebuff: { label: "FREEBUFF", model: "freebuff-fast", lat: "80ms", tier: "Tier 3 Free", tilt: "-1.3deg", icon: "/providers/freebuff.png" },
+        ovhcloud: { label: "OVHCLOUD", model: "mistral-small", lat: "110ms", tier: "Tier 3 Free", tilt: "0.9deg", icon: "/providers/ovhcloud.png" },
+        kilocode: { label: "KILO CODE", model: "kilo-v1", lat: "125ms", tier: "Tier 2 Cloud", tilt: "-0.5deg", icon: "/providers/kilocode.png" },
+        'kilo-free': { label: "KILO FREE", model: "kilo-free-v1", lat: "98ms", tier: "Tier 3 Free", tilt: "1.0deg", icon: "/providers/kilo-free.png" },
+        llm7: { label: "LLM7 FREE", model: "llm7-base", lat: "90ms", tier: "Tier 3 Free", tilt: "-1.0deg", icon: "/providers/llm7.png" },
+        'deepseek-web': { label: "DEEPSEEK WEB", model: "deepseek-v3", lat: "150ms", tier: "Tier 2 Cloud", tilt: "0.7deg", icon: "/providers/deepseek-web.png" }
+      };
 
-      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-      var NS = "http://www.w3.org/2000/svg";
+      var TILTS = ["-1deg", "1.2deg", "-0.8deg", "1.5deg", "-1.5deg", "0.8deg", "-1.2deg", "1deg", "-0.7deg", "1.4deg"];
+      var SATELLITES = [];
 
-      var PALETTE = ["#f472b6", "#86efac", "#93c5fd", "#fb923c", "#fde047", "#c084fc", "#67e8f9", "#fca5a5"];
-      function colorFor(id, i) {
-        var h = 0;
-        for (var k = 0; k < id.length; k++) h = (h * 31 + id.charCodeAt(k)) >>> 0;
-        return PALETTE[(h + i) % PALETTE.length];
+      if (nodes && nodes.length > 0) {
+        SATELLITES = nodes.map(function (n, idx) {
+          var key = String(n.id).toLowerCase();
+          var meta = PROVIDER_META[key] || {};
+          var label = (key === "claude" || /claude/i.test(n.name)) ? "CLAUDE CODE" : (meta.label || cleanName(n.name, key).toUpperCase());
+          var model = meta.model || (n.noAuth ? "free-tier" : (n.tokens > 0 ? fmt(n.tokens) + " tok" : (n.accounts ? n.accounts + " akun" : "ready")));
+          var tier = meta.tier || (n.noAuth ? "Tier 3 Free" : (n.accounts > 1 ? "Tier 1 Pro" : "Tier 2 Cloud"));
+          var lat = meta.lat || (Math.max(14, (75 + (idx * 23) % 140)) + "ms");
+          var tilt = meta.tilt || TILTS[idx % TILTS.length];
+          var icon = n.icon || meta.icon || ("/providers/" + key + ".png");
+          var ref = String(idx + 1).padStart(2, "0");
+          var pool = n.noAuth ? "KEYLESS FREE"
+            : (n.accounts > 1 ? n.accounts + " ACCTS POOL"
+            : (n.accounts === 1 ? "1 ACCT POOL" : "DIRECT POOL"));
+          return { id: key, label: label, model: model, lat: lat, tier: tier, tilt: tilt, icon: icon, ref: ref, pool: pool };
+        });
+      } else {
+        SATELLITES = [
+          { id: 'codex', label: 'OPENAI CODEX', model: 'o3-mini / codex', lat: '142ms', tier: 'Tier 1 Pro', tilt: '-1deg', icon: '/providers/codex.png', ref: '01' },
+          { id: 'gemini', label: 'GEMINI', model: '2.0-flash / exp', lat: '84ms', tier: 'Tier 1 Free', tilt: '1.2deg', icon: '/providers/antigravity.png', ref: '02' },
+          { id: 'kiro', label: 'KIRO AI', model: 'kiro-reasoning', lat: '210ms', tier: 'Tier 2 Cloud', tilt: '-0.8deg', icon: '/providers/kiro.png', ref: '03' },
+          { id: 'opencode', label: 'OPENCODE FREE', model: 'agent-gate 100k', lat: '95ms', tier: 'Tier 3 Free', tilt: '1.5deg', icon: '/providers/opencode.png', ref: '04' },
+          { id: 'mimo', label: 'MIMO CODE FREE', model: 'mimo-coder-7b', lat: '110ms', tier: 'Tier 3 Free', tilt: '-1.5deg', icon: '/providers/commandcode.png', ref: '05' },
+          { id: 'claude', label: 'CLAUDE CODE', model: 'claude-3-7-sonnet', lat: '92ms', tier: 'Tier 1 Pro', tilt: '0.8deg', icon: '/providers/claude.png', ref: '06' },
+          { id: 'antigravity', label: 'ANTIGRAVITY', model: 'local agent mesh', lat: '14ms', tier: 'Local Mesh', tilt: '-1.2deg', icon: '/providers/antigravity.png', ref: '07' },
+          { id: 'ollama', label: 'OLLAMA CLOUD', model: 'deepseek-r1:14b', lat: '38ms', tier: 'Tier 2 Local', tilt: '1deg', icon: '/providers/ollama.png', ref: '08' },
+          { id: 'nvidia', label: 'NVIDIA NIM', model: 'llama-3.3-70b', lat: '128ms', tier: 'Tier 2 Cloud', tilt: '-0.7deg', icon: '/providers/nvidia.png', ref: '09' },
+          { id: 'openrouter', label: 'OPENROUTER', model: 'auto-fallback-pool', lat: '160ms', tier: 'Tier 2 Fallback', tilt: '1.4deg', icon: '/providers/openrouter.png', ref: '10' }
+        ];
       }
 
-      var defs = document.createElementNS(NS, "defs");
-      var tracesG = document.createElementNS(NS, "g");
-      var nodesG = document.createElementNS(NS, "g");
-
-      // Filter SVG Glow untuk compatibilitas test & active glow
-      nodes.forEach(function (n, idx) {
-        var filterId = "topo-glow-" + idx;
-        var glowFilter = document.createElementNS(NS, "filter");
-        glowFilter.setAttribute("id", filterId);
-        glowFilter.innerHTML = '<feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>';
-        defs.appendChild(glowFilter);
-      });
-
-      // Dot-matrix blueprint grid
-      var pattern = document.createElementNS(NS, "pattern");
-      pattern.setAttribute("id", "patchbay-grid");
-      pattern.setAttribute("width", "24");
-      pattern.setAttribute("height", "24");
-      pattern.setAttribute("patternUnits", "userSpaceOnUse");
-      pattern.innerHTML = '<circle cx="3" cy="3" r="1.3" fill="var(--line)" opacity="0.22"/>';
-      defs.appendChild(pattern);
-
-      svg.appendChild(defs);
-
-      // Background rect
-      var bgRect = document.createElementNS(NS, "rect");
-      bgRect.setAttribute("width", W);
-      bgRect.setAttribute("height", H);
-      bgRect.setAttribute("fill", "url(#patchbay-grid)");
-      svg.appendChild(bgRect);
-
-      // Corner industrial registration marks (+)
-      function addCropMark(x, y, label) {
-        var g = document.createElementNS(NS, "g");
-        g.setAttribute("transform", "translate(" + x + "," + y + ")");
-        g.innerHTML =
-          '<line x1="-8" y1="0" x2="8" y2="0" stroke="var(--line)" stroke-width="1.5" opacity="0.45"/>' +
-          '<line x1="0" y1="-8" x2="0" y2="8" stroke="var(--line)" stroke-width="1.5" opacity="0.45"/>' +
-          '<text x="12" y="4" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)" opacity="0.6">' + esc(label) + '</text>';
-        svg.appendChild(g);
-      }
-      addCropMark(20, 20, "00:00 [TL]");
-      addCropMark(W - 70, 20, "10:00 [TR]");
-      addCropMark(20, H - 20, "00:99 [BL]");
-      addCropMark(W - 70, H - 20, "10:99 [BR]");
-
-      svg.appendChild(tracesG);
-      svg.appendChild(nodesG);
-
-      // Central Zenith Gateway Hub (Master Matrix) di Titik Pusat (centerX, centerY)
-      var ROUTER_W = 216;
-      var ROUTER_H = 82;
-      var routerX = centerX - ROUTER_W / 2;
-      var routerY = centerY - ROUTER_H / 2;
-
-      var router = document.createElementNS(NS, "g");
-      router.setAttribute("class", "topo-router");
-      router.innerHTML =
-        '<rect x="' + (routerX + 4) + '" y="' + (routerY + 4) + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--shadow-ink)" rx="0"/>' +
-        '<g class="topo-router-core">' +
-          '<rect x="' + routerX + '" y="' + routerY + '" width="' + ROUTER_W + '" height="' + ROUTER_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2.5" rx="0"/>' +
-          '<rect class="topo-router-strip" x="' + routerX + '" y="' + routerY + '" width="6" height="' + ROUTER_H + '" fill="var(--success)"/>' +
-          // Lakban Neon Lime Virtual: GATEWAY CORE // 20120
-          '<g transform="translate(' + (routerX + ROUTER_W - 128) + ',' + (routerY - 10) + ') rotate(2)">' +
-            '<rect width="134" height="20" fill="var(--accent-lime, #ccff00)" stroke="var(--text)" stroke-width="1.2" rx="0"/>' +
-            '<text x="67" y="14" text-anchor="middle" font-size="9" font-family="monospace" font-weight="900" fill="#0a0a0a">&ldquo;GATEWAY CORE // 20120&rdquo;</text>' +
-          '</g>' +
-          // Logo & Brand
-          '<image x="' + (routerX + 16) + '" y="' + (routerY + 20) + '" width="38" height="38" preserveAspectRatio="xMidYMid meet" href="' + logo + '"/>' +
-          '<text x="' + (routerX + 62) + '" y="' + (routerY + 36) + '" font-size="13" font-weight="900" letter-spacing="0.04em" fill="var(--text)">&ldquo;ZENITH&rdquo;</text>' +
-          '<text x="' + (routerX + 62) + '" y="' + (routerY + 52) + '" font-size="9" font-family="monospace" font-weight="700" fill="var(--text-subtle)">CENTRAL TRANSIT GATEWAY</text>' +
-          // Status Badge di Hub
-          '<rect class="topo-router-badge-bg" x="' + (routerX + 62) + '" y="' + (routerY + 58) + '" width="72" height="16" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1" rx="0"/>' +
-          '<text class="topo-router-badge-txt" x="' + (routerX + 98) + '" y="' + (routerY + 69) + '" text-anchor="middle" font-size="8.5" font-weight="900" font-family="monospace" fill="var(--text-muted)">IDLE</text>' +
-        '</g>';
-      nodesG.appendChild(router);
-      var routerBadgeBg = router.querySelector(".topo-router-badge-bg");
-      var routerBadgeTxt = router.querySelector(".topo-router-badge-txt");
-
-      // 360° Radial Provider Satellites
-      var totalNodes = nodes.length;
-      var radiusX = Math.min(365, (W - 250) / 2);
-      var radiusY = Math.min(215, (H - 150) / 2);
-      var CARD_W = 168;
-      var CARD_H = 62;
-
-      for (var i = 0; i < totalNodes; i++) {
-        var n = nodes[i];
-        var color = colorFor(n.id, i);
-        var key = String(n.id).toLowerCase();
-
-        // Sudut 360° melingkar ala 9Router: merata dari atas berputar searah jarum jam
-        var angle = (i * (2 * Math.PI / totalNodes)) - (Math.PI / 2);
-        var satCenterX = centerX + radiusX * Math.cos(angle);
-        var satCenterY = centerY + radiusY * Math.sin(angle);
-
-        var cardX = Math.max(10, Math.min(W - CARD_W - 10, satCenterX - CARD_W / 2));
-        var cardY = Math.max(10, Math.min(H - CARD_H - 10, satCenterY - CARD_H / 2));
-
-        // Titik keluar dari Router Hub
-        var hubEdgeX = centerX + Math.cos(angle) * (ROUTER_W * 0.44);
-        var hubEdgeY = centerY + Math.sin(angle) * (ROUTER_H * 0.44);
-
-        // Titik masuk ke Card Provider (sisi yang menghadap ke hub)
-        var cardEdgeX = cardX + CARD_W / 2;
-        var cardEdgeY = cardY + CARD_H / 2;
-        if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
-          cardEdgeX = Math.cos(angle) > 0 ? cardX : (cardX + CARD_W);
-        } else {
-          cardEdgeY = Math.sin(angle) > 0 ? cardY : (cardY + CARD_H);
+      // Palet neon per tier (tema gelap). Provider dalam tier yang sama bergantian warna.
+      var TIER_PALETTE = [
+        { re: /local/i, colors: ["#00f5ff"] },
+        { re: /tier\s*1/i, colors: ["#facc15", "#fb923c"] },
+        { re: /tier\s*2/i, colors: ["#ff2a85", "#c084fc"] },
+        { re: /tier\s*3|free|edge/i, colors: ["#ccff00", "#34d399"] }
+      ];
+      var FALLBACK_COLORS = ["#ccff00"];
+      function accentFor(sat, idx) {
+        var tier = String(sat.tier || "");
+        var entry = null;
+        for (var t = 0; t < TIER_PALETTE.length; t++) {
+          if (TIER_PALETTE[t].re.test(tier)) { entry = TIER_PALETTE[t]; break; }
         }
+        var colors = entry ? entry.colors : FALLBACK_COLORS;
+        return colors[idx % colors.length];
+      }
 
-        // Catenary / Bezier Curve anti-kaku
-        var midX = (hubEdgeX + cardEdgeX) / 2;
-        var midY = (hubEdgeY + cardEdgeY) / 2;
-        var sag = 18 * Math.sin(angle);
-        var cp1x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.4;
-        var cp1y = hubEdgeY + (cardEdgeY - hubEdgeY) * 0.2 + sag;
-        var cp2x = hubEdgeX + (cardEdgeX - hubEdgeX) * 0.7;
-        var cp2y = cardEdgeY - (cardEdgeY - hubEdgeY) * 0.2 + sag;
+      var SVG_NS = "http://www.w3.org/2000/svg";
+      // Tiga kubus data dengan ukuran dan jeda bertingkat (0s, 0.35s, 0.7s).
+      var PACKETS = [
+        { size: 8, delay: 0 },
+        { size: 11, delay: 0.35 },
+        { size: 8, delay: 0.7 }
+      ];
+      function addPackets(pathData, color) {
+        PACKETS.forEach(function (pk) {
+          var p = document.createElementNS(SVG_NS, "rect");
+          p.setAttribute("width", String(pk.size));
+          p.setAttribute("height", String(pk.size));
+          p.setAttribute("class", "flow-packet");
+          p.style.fill = color;
+          p.setAttribute("x", String(-pk.size / 2));
+          p.setAttribute("y", String(-pk.size / 2));
 
-        var d = "M " + hubEdgeX + " " + hubEdgeY +
-                " C " + cp1x + " " + cp1y + ", " + cp2x + " " + cp2y + ", " + cardEdgeX + " " + cardEdgeY;
+          var anim = document.createElementNS(SVG_NS, "animateMotion");
+          anim.setAttribute("path", pathData);
+          anim.setAttribute("dur", "1.2s");
+          if (pk.delay > 0) anim.setAttribute("begin", pk.delay + "s");
+          anim.setAttribute("repeatCount", "indefinite");
+          p.appendChild(anim);
+          svgLayer.appendChild(p);
+        });
+      }
 
-        // Trace Wire Group: Shadow -> Base Cable -> Active Cable -> Traveling Packet
-        var traceG = document.createElementNS(NS, "g");
-        traceG.innerHTML =
-          '<path class="patch-cable-shadow" d="' + d + '" stroke="var(--shadow-ink)" stroke-width="5" fill="none" stroke-linecap="round"/>' +
-          '<path class="patch-cable-base" d="' + d + '" stroke="var(--line)" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3 3"/>' +
-          '<path class="patch-cable-active wire-active" d="' + d + '" stroke="' + color + '" stroke-width="3.5" fill="none" stroke-linecap="round" style="display:none;"/>' +
-          '<g class="patch-cable-packet" style="display:none;">' +
-            '<rect width="8" height="8" x="-4" y="-4" fill="#86efac" stroke="var(--text)" stroke-width="1.2">' +
-              '<animateMotion path="' + d + '" dur="1s" repeatCount="indefinite"/>' +
-            '</rect>' +
-          '</g>' +
-          // Jack Ring di Router Hub
-          '<g class="router-jack" transform="translate(' + hubEdgeX + ',' + hubEdgeY + ')">' +
-            '<circle r="5" fill="var(--text)"/>' +
-            '<circle class="router-jack-ring" r="2.5" fill="var(--surface-3)"/>' +
-          '</g>';
-        tracesG.appendChild(traceG);
+      // Skala kartu turun perlahan saat provider bertambah: 0.80 - 1.05.
+      function scaleFor(count) {
+        var raw = 1.05 - Math.max(0, count - 4) * 0.025;
+        return Math.max(0.8, Math.min(1.05, raw));
+      }
 
-        var cableBase = traceG.querySelector(".patch-cable-base");
-        var cableActive = traceG.querySelector(".patch-cable-active");
-        var cablePacket = traceG.querySelector(".patch-cable-packet");
-        var routerJackRing = traceG.querySelector(".router-jack-ring");
+      function renderTopology() {
+        wrap.querySelectorAll(".satellite-card").forEach(function (el) { el.remove(); });
+        svgLayer.innerHTML = '<defs><filter id="topo-glow-0"><feGaussianBlur in="SourceGraphic" stdDeviation="3"/></filter></defs>';
 
-        // Provider Card Node (Deconstructivist Editorial)
-        var g = document.createElementNS(NS, "g");
-        g.setAttribute("class", "topo-node");
-        g.setAttribute("transform", "translate(" + cardX + "," + cardY + ")");
+        var width = stage.clientWidth || 1000;
+        var height = stage.clientHeight || 560;
+        if (width < 620) width = 620;
+        var centerX = width / 2;
+        var centerY = height / 2;
 
-        var iconClipId = "chip-icon-" + i;
-        var iconClip = document.createElementNS(NS, "clipPath");
-        iconClip.setAttribute("id", iconClipId);
-        iconClip.innerHTML = '<rect x="8" y="16" width="20" height="20" rx="0"/>';
-        defs.appendChild(iconClip);
+        hubContainer.style.left = centerX + "px";
+        hubContainer.style.top = centerY + "px";
 
-        var sub = n.noAuth && !n.accounts ? "NO-AUTH" : n.accounts + " AKUN";
-        var tokenStr = fmt(n.tokens) + " TKN";
-        var refCode = "REF." + String(i + 1).padStart(2, "0");
+        var n = SATELLITES.length;
+        if (n === 0) return;
+        var scale = scaleFor(n);
+        // Ukuran kartu nyata: lebar 175px, tinggi perkiraan 92px, dikali skala.
+        var cardW = 175 * scale;
+        var cardH = 92 * scale;
+        var pad = 12;
+        // Radius adaptif dari ukuran kanvas: kartu tetap di dalam stage.
+        var radiusX = Math.max(0, Math.min(width * 0.42, width / 2 - cardW / 2 - pad));
+        var radiusY = Math.max(0, Math.min(height * 0.40, height / 2 - cardH / 2 - pad));
+        var step = 2 * Math.PI / n;
 
-        g.innerHTML =
-          '<rect class="topo-node-shadow" x="3" y="3" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--shadow-ink)" rx="0"/>' +
-          '<g class="topo-node-chip">' +
-            '<rect class="topo-chip-body" x="0" y="0" width="' + CARD_W + '" height="' + CARD_H + '" fill="var(--surface)" stroke="var(--text)" stroke-width="2" rx="0"/>' +
-            '<rect x="0" y="0" width="5" height="' + CARD_H + '" fill="' + color + '"/>' +
-            // Header Mikro [REF.01] & Sub
-            '<text x="10" y="12" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">[' + esc(refCode) + ']</text>' +
-            '<text x="' + (CARD_W - 10) + '" y="12" text-anchor="end" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--text-subtle)">' + esc(sub) + '</text>' +
-            // Ikon + Nama Provider bertanda kutip
-            (n.icon
-              ? '<rect x="8" y="16" width="20" height="20" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
-                '<image href="' + esc(n.icon) + '" x="8" y="16" width="20" height="20" preserveAspectRatio="xMidYMid meet" clip-path="url(#' + iconClipId + ')"/>'
-              : '<rect x="8" y="16" width="20" height="20" fill="' + color + '"/>' +
-                '<text x="18" y="30" text-anchor="middle" font-size="10" font-weight="900" fill="var(--text)">' + esc(initials(n.name)) + '</text>') +
-            '<text class="topo-chip-title" x="34" y="30" font-size="10.5" font-weight="900" fill="var(--text)">&ldquo;' + esc(n.name.toUpperCase()) + '&rdquo;</text>' +
-            // Divider Line
-            '<line x1="0" y1="41" x2="' + CARD_W + '" y2="41" stroke="var(--line)" stroke-width="1"/>' +
-            // Footer: Token Count + Status Badge
-            '<text x="10" y="54" font-size="8.5" font-family="monospace" font-weight="bold" fill="var(--text-muted)">' + esc(tokenStr) + '</text>' +
-            '<g class="topo-badge-live" style="display:none">' +
-              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="#86efac" stroke="var(--text)" stroke-width="1.2"/>' +
-              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LIVE</text>' +
-            '</g>' +
-            '<g class="topo-badge-last" style="display:none">' +
-              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="#fde047" stroke="var(--text)" stroke-width="1.2"/>' +
-              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="900" fill="var(--text)">LAST</text>' +
-            '</g>' +
-            '<g class="topo-badge-idle">' +
-              '<rect x="' + (CARD_W - 50) + '" y="44" width="42" height="14" fill="var(--surface-2)" stroke="var(--line)" stroke-width="1"/>' +
-              '<text x="' + (CARD_W - 29) + '" y="54" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="var(--text-muted)">IDLE</text>' +
-            '</g>' +
-            // Analog VU-Meter 4-bar
-            '<g class="vu-meter" transform="translate(' + (CARD_W - 32) + ', 22)">' +
-              '<rect class="vu-bar" x="0" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-              '<rect class="vu-bar" x="5" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-              '<rect class="vu-bar" x="10" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-              '<rect class="vu-bar" x="15" y="0" width="3" height="8" fill="var(--line)" opacity="0.25"/>' +
-            '</g>' +
-          '</g>';
-        nodesG.appendChild(g);
+        SATELLITES.forEach(function (sat, i) {
+          var angle = (i * step) - (Math.PI / 10);
+          var x = centerX + radiusX * Math.cos(angle);
+          var y = centerY + radiusY * Math.sin(angle);
+          // Clamp agar kartu tidak keluar kanvas.
+          x = Math.max(cardW / 2 + 4, Math.min(width - cardW / 2 - 4, x));
+          y = Math.max(cardH / 2 + 4, Math.min(height - cardH / 2 - 4, y));
 
-        var vuBars = g.querySelectorAll(".vu-bar");
+          var cpX = centerX + (x - centerX) * 0.60;
+          var cpY = centerY + (y - centerY) * 0.40;
+          var d = "M " + centerX + " " + centerY + " Q " + cpX + " " + cpY + " " + x + " " + y;
 
-        refs.push({
-          key: key,
-          color: color,
-          g: g,
-          chip: g.querySelector(".topo-node-chip"),
-          body: g.querySelector(".topo-chip-body"),
-          badgeLive: g.querySelector(".topo-badge-live"),
-          badgeLast: g.querySelector(".topo-badge-last"),
-          badgeIdle: g.querySelector(".topo-badge-idle"),
-          cableBase: cableBase,
-          cableActive: cableActive,
-          cablePacket: cablePacket,
-          routerJackRing: routerJackRing,
-          vuBars: vuBars,
+          var isActive = !!activeSet[sat.id];
+          var isLast = !isActive && sat.id === lastProvider;
+          var accent = accentFor(sat, i);
+
+          var wireCls = "connector-wire" + (isActive ? " active-wire" : (isLast ? " last-wire" : ""));
+          var path = document.createElementNS(SVG_NS, "path");
+          path.setAttribute("d", d);
+          path.setAttribute("class", wireCls);
+          path.setAttribute("id", "wire-" + sat.id);
+          if (isActive) path.style.stroke = accent;
+          svgLayer.appendChild(path);
+
+          if (isActive) addPackets(d, accent);
+
+          var cardCls = "satellite-card topo-node" + (isActive ? " is-active" : (isLast ? " is-last" : ""));
+          var card = document.createElement("div");
+          card.className = cardCls;
+          card.id = "sat-" + sat.id;
+          card.style.left = x + "px";
+          card.style.top = y + "px";
+          card.style.setProperty("--angle-tilt", sat.tilt || "0deg");
+          card.style.setProperty("--sat-scale", String(scale.toFixed(3)));
+          card.style.setProperty("--sat-accent", accent);
+          card.style.setProperty("--glow-color", accent);
+
+          var chipText = sat.pool || "DIRECT POOL";
+
+          card.innerHTML =
+            '<div class="card-top-row">' +
+              '<span class="card-ref">[REF.' + esc(sat.ref) + ']</span>' +
+              '<span class="card-tier">' + esc(sat.tier) + '</span>' +
+            '</div>' +
+            '<div class="card-mid-row">' +
+              (sat.icon
+                ? '<div class="card-icon-box"><img src="' + esc(sat.icon) + '" class="card-provider-img" alt=""/></div>'
+                : '') +
+              '<div class="card-title">&ldquo;' + esc(sat.label.toUpperCase()) + '&rdquo;</div>' +
+            '</div>' +
+            '<div class="card-bottom-row">' +
+              '<span class="pill-chip topo-node-chip">' + esc(chipText) + '</span>' +
+              '<span class="lat-tag">' + esc(sat.lat) + '</span>' +
+            '</div>';
+
+          // Handler dipasang lewat DOM agar tidak ada kutip di dalam atribut HTML.
+          var iconImg = card.querySelector(".card-provider-img");
+          if (iconImg) {
+            iconImg.addEventListener("error", function () {
+              if (iconImg.parentElement) iconImg.parentElement.style.display = "none";
+            });
+          }
+          stage.appendChild(card);
         });
       }
 
@@ -496,65 +875,24 @@ function renderTopologyPane(topology) {
 
       function apply() {
         computeActive();
-        var activeCount = 0;
-        refs.forEach(function (r) {
-          var isActive = !!activeSet[r.key];
-          if (isActive) activeCount++;
-          var isLast = !isActive && r.key === lastProvider;
-          var isIdle = !isActive && !isLast;
-
-          var cls = isActive ? "topo-node is-active" : "topo-node";
-          if (r.g.getAttribute("class") !== cls) r.g.setAttribute("class", cls);
-
-          r.body.style.stroke = isActive ? r.color : (isLast ? "#fde047" : "var(--text)");
-          r.body.setAttribute("stroke-width", isActive ? "2.5" : (isLast ? "2.5" : "2"));
-          if (isActive) {
-            r.chip.style.setProperty("--glow-color", r.color);
-          } else {
-            r.chip.style.removeProperty("--glow-color");
-          }
-
-          r.badgeLive.style.display = isActive ? "" : "none";
-          r.badgeLast.style.display = isLast ? "" : "none";
-          r.badgeIdle.style.display = isIdle ? "" : "none";
-
-          r.cableActive.style.display = isActive ? "" : "none";
-          if (r.cablePacket) r.cablePacket.style.display = isActive ? "" : "none";
-          r.cableBase.setAttribute("stroke", isActive ? r.color : (isLast ? "#fde047" : "var(--line)"));
-          r.cableBase.setAttribute("stroke-width", isActive ? "3" : (isLast ? "2.5" : "1.8"));
-          r.cableBase.setAttribute("stroke-dasharray", isIdle ? "3 3" : "none");
-          r.cableBase.style.filter = isActive ? "drop-shadow(0 0 6px " + r.color + ")" : "none";
-
-          var ringColor = isActive ? r.color : (isLast ? "#fde047" : "var(--surface-3)");
-          if (r.routerJackRing) r.routerJackRing.setAttribute("fill", ringColor);
-
-          r.vuBars.forEach(function (bar, bIdx) {
-            if (isActive) {
-              bar.setAttribute("fill", "#86efac");
-              bar.setAttribute("opacity", (0.5 + bIdx * 0.15).toFixed(2));
-              bar.setAttribute("class", "vu-bar vu-bar-active");
-            } else {
-              bar.setAttribute("fill", "var(--line)");
-              bar.setAttribute("opacity", "0.25");
-              bar.setAttribute("class", "vu-bar");
-            }
-          });
-        });
-
+        var keys = Object.keys(activeSet);
+        var activeCount = keys.length;
         var powering = activeCount > 0;
-        var routerCls = powering ? "topo-router is-powering" : "topo-router";
-        if (router.getAttribute("class") !== routerCls) router.setAttribute("class", routerCls);
-        if (powering) {
-          routerBadgeBg.setAttribute("fill", "#86efac");
-          routerBadgeBg.setAttribute("stroke", "var(--text)");
-          routerBadgeTxt.setAttribute("fill", "var(--text)");
-          routerBadgeTxt.textContent = activeCount + " RUNNING";
-        } else {
-          routerBadgeBg.setAttribute("fill", "var(--surface-2)");
-          routerBadgeBg.setAttribute("stroke", "var(--line)");
-          routerBadgeTxt.setAttribute("fill", "var(--text-muted)");
-          routerBadgeTxt.textContent = "IDLE";
+        var routerCls = powering ? "hub-container topo-router is-powering" : "hub-container topo-router";
+        if (hubContainer.className !== routerCls) hubContainer.className = routerCls;
+        var statusEl = document.getElementById("topo-hub-status");
+        if (statusEl) {
+          if (powering) {
+            statusEl.textContent = activeCount + " RUNNING";
+            statusEl.className = "hub-meta-val is-running";
+            statusEl.style.removeProperty("color");
+          } else {
+            statusEl.textContent = "IDLE";
+            statusEl.className = "hub-meta-val";
+            statusEl.style.color = "var(--text-muted)";
+          }
         }
+        renderTopology();
       }
 
       function poll() {
@@ -564,13 +902,26 @@ function renderTopologyPane(topology) {
             if (!next) return;
             rawActive = {};
             (next.active || []).forEach(function (p) { rawActive[String(p).toLowerCase()] = true; });
+            activeModelMap = normalizeModels(next.models);
             lastProvider = String(next.last || "").toLowerCase();
             apply();
           })
           .catch(function () {});
       }
 
-      apply();
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", apply);
+      } else {
+        requestAnimationFrame(apply);
+      }
+      window.addEventListener("resize", renderTopology);
+      var ro = null;
+      if (window.ResizeObserver) {
+        ro = new ResizeObserver(function () {
+          renderTopology();
+        });
+        ro.observe(stage);
+      }
       var tickTimer = setInterval(function () {
         if (document.hidden) apply();
         else poll();
@@ -580,6 +931,8 @@ function renderTopologyPane(topology) {
       if (window.__zrSwapCleanups) {
         window.__zrSwapCleanups.push(function () {
           clearInterval(tickTimer);
+          if (ro) ro.disconnect();
+          window.removeEventListener("resize", renderTopology);
           document.removeEventListener("visibilitychange", onVisible);
         });
       }

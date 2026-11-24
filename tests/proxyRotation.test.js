@@ -7,6 +7,9 @@ import {
   getProxyRotationStrategy,
   setProxyRotationStrategy,
   planProxyRotation,
+  planProxyRotationEntries,
+  setWarpReadinessSnapshot,
+  resetWarpReadinessSnapshot,
   resetProxyRotation,
   PROXY_ROTATION_MAX_ATTEMPTS,
 } from "../src/services/proxyPools.js";
@@ -89,6 +92,23 @@ test("rencana bergiliran - dimulai dari kursor, maksimal tiga proxy, maju satu l
     "kursor maju satu langkah per request"
   );
   assert.strictEqual(planProxyRotation("opencode", "off").length, 0, "tidak aktif tidak membuat rencana");
+});
+
+test("readiness WARP fail-closed hanya saat enforcement diaktifkan", () => {
+  seed();
+  const warp = addProxyPool({ name: "warp-node-1", url: "http://warp1.local:3129" });
+  addProxyPool({ name: "vpn-proton-1", url: "http://proton1.local:3201" });
+  setSetting("opencode_egress_policy", "require");
+  setSetting("opencode_proxy_pool_ids", JSON.stringify([warp.id]));
+  setProxyRotationStrategy("opencode", "round_robin");
+  setSetting("warp_readiness_enforce", "false");
+  setWarpReadinessSnapshot({ fresh: true, nodes: [{ node: 1, ready: false, state: "degraded" }] });
+  assert.deepStrictEqual(planProxyRotationEntries("opencode", "round_robin", [warp.id]).map((entry) => entry.url), [warp.url], "shadow mode belum mengubah routing");
+  setSetting("warp_readiness_enforce", "true");
+  assert.deepStrictEqual(planProxyRotationEntries("opencode", "round_robin", [warp.id]), [], "lane degraded ditolak saat enforcement aktif");
+  setWarpReadinessSnapshot({ fresh: true, nodes: [{ node: 1, ready: true, state: "ready" }] });
+  assert.deepStrictEqual(planProxyRotationEntries("opencode", "round_robin", [warp.id]).map((entry) => entry.url), [warp.url]);
+  resetWarpReadinessSnapshot();
 });
 
 test("rencana acak - maksimal tiga proxy berbeda dari daftar aktif", () => {

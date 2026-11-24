@@ -31,6 +31,9 @@ import {
   planProxyRotationEntries,
   getOpencodeEgressPolicy,
   getOpencodeScopedPoolIds,
+  getOpencodeHybridMode,
+  getOpencodeHybridEgressConfig,
+  planOpencodeHybridEntries,
   validateProxyAddress,
   notifyProxyRotate,
   beginProxyStream,
@@ -687,6 +690,31 @@ function pickPinnedConnection(available, triedIds, pin) {
   return match;
 }
 
+// Plafon kiriman nyata ke upstream per request (akun + retry transport).
+export const MAX_REQUEST_DISPATCHES = 3;
+export const REQUEST_DEADLINE_MS = 300000;
+
+/** Penghitung kiriman bersama; `spend` mencatat, `remaining` menyisakan kuota. */
+export function createDispatchBudget(limit, deadlineAt = Date.now() + REQUEST_DEADLINE_MS) {
+  let used = 0;
+  return {
+    limit,
+    deadlineAt,
+    spend() { used++; return used; },
+    remaining() { return Math.max(0, limit - used); },
+    remainingTimeMs(now = Date.now()) { return Math.max(0, deadlineAt - now); },
+    get used() { return used; },
+  };
+}
+
+function dispatchDeadlineResponse() {
+  return new Response(JSON.stringify({ error: {
+    message: "Upstream request deadline exceeded before another dispatch",
+    type: "timeout_error",
+    code: "gateway_timeout",
+  } }), { status: 504, headers: { "Content-Type": "application/json" } });
+}
+
 /**
  * Try one or more connections for the provider.
  * Returns { ok: true, upstreamRes, connection } or { ok: false, response }.
@@ -799,11 +827,28 @@ export async function executeWithFallback({
   const virtualOnly = available.length === 1 && available[0].id === null;
   const shouldUseRotation = (virtualOnly || Boolean(provider.noAuth)) && hasRotation;
   const egressPolicy = provider.id === "opencode" ? getOpencodeEgressPolicy() : "legacy";
-  const requireProxy = requireProxyChain || egressPolicy === "require";
+  const hybridMode = provider.id === "opencode" ? getOpencodeHybridMode() : "off";
+  const hybridConfig = provider.id === "opencode" && hybridMode !== "off" ? getOpencodeHybridEgressConfig() : null;
+  if (hybridConfig?.mode === "enforce" && !hybridConfig.valid) {
+    return {
+      ok: false,
+      response: new Response(JSON.stringify({ error: {
+        code: "proxy_required",
+        type: "configuration_error",
+        message: "OpenCode hybrid egress configuration is invalid.",
+        details: hybridConfig.errors,
+      } }), { status: 503, headers: { "content-type": "application/json" } }),
+    };
+  }
+  const hybridEnforce = hybridConfig?.mode === "enforce" && hybridConfig.valid;
+  const requireProxy = requireProxyChain || egressPolicy === "require" || hybridEnforce;
   const scopedPolicy = provider.id === "opencode" && (requireProxy || egressPolicy === "prefer");
-  const rotationEntries = scopedPolicy
-    ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id) === "random" ? "random" : "round_robin", getOpencodeScopedPoolIds())
-    : egressPolicy !== "direct" && shouldUseRotation ? planProxyRotationEntries(provider.id, getProxyRotationStrategy(provider.id)) : [];
+  const rotationStrategy = getProxyRotationStrategy(provider.id);
+  const rotationEntries = hybridEnforce
+    ? planOpencodeHybridEntries(rotationStrategy === "random" ? "random" : "round_robin")
+    : scopedPolicy
+      ? planProxyRotationEntries(provider.id, rotationStrategy === "random" ? "random" : "round_robin", getOpencodeScopedPoolIds())
+      : egressPolicy !== "direct" && shouldUseRotation ? planProxyRotationEntries(provider.id, rotationStrategy) : [];
   if (egressPolicy === "prefer" && rotationEntries.length === 0) captureLine("[EGRESS] provider=opencode policy=prefer fallback=direct");
   if (scopedPolicy && requireProxy && rotationEntries.length === 0) {
     return { ok: false, response: new Response(JSON.stringify({ error: { code: "proxy_required", message: "OpenCode requires an active scoped proxy." } }), { status: 503, headers: { "content-type": "application/json" } }) };
@@ -812,6 +857,7 @@ export async function executeWithFallback({
   const maxAttempts =
     rotationEntries.length > 0 ? rotationEntries.length : Math.max(1, available.length);
   let lastFailureResponse = null;
+  let hybridProtonBlocked = false;
   // A transient upstream 404 is retried on the same account this many times
   // before it is reported to the client.
   let transientNotFoundRetries = 0;
@@ -819,8 +865,16 @@ export async function executeWithFallback({
   let softRateLimitRetries = 0;
   // The account a same-account retry goes back to.
   let retryConnection = null;
+  // Anggaran dispatch bersama: setiap kiriman nyata ke upstream (akun, retry
+  // transport di executor) menghitung ke sini. Mencegah ledakan 2 x akun.
+  const dispatchBudget = createDispatchBudget(MAX_REQUEST_DISPATCHES);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (dispatchBudget.remaining() <= 0 || dispatchBudget.remainingTimeMs() <= 0) {
+      lastFailureResponse = dispatchDeadlineResponse();
+      captureLine(`[DISPATCH] request_id=${attemptId} provider=${provider.id} budget_or_deadline=exhausted; berhenti`);
+      break;
+    }
     let connection;
     // An account held back for a same-account retry, so the retry does not
     // depend on the order accounts are picked in.
@@ -863,6 +917,7 @@ export async function executeWithFallback({
     applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
     const url = resolveUrl(connection);
     const proxyEntry = rotationEntries.length > 0 ? rotationEntries[attempt - 1] ?? null : null;
+    if (hybridProtonBlocked && proxyEntry?.adapter === "proton") break;
     const proxyUrl = proxyEntry ? proxyEntry.url : egressPolicy === "direct" || scopedPolicy ? null : requireResolvedProxy(connection);
     if (requireProxy && (!proxyUrl || validateProxyAddress(proxyUrl))) {
       return { ok: false, response: new Response(JSON.stringify({ error: { code: "proxy_required", message: "This fallback requires a valid proxy." } }), { status: 503, headers: { "content-type": "application/json" } }) };
@@ -882,12 +937,16 @@ export async function executeWithFallback({
 
     let res;
     try {
+      dispatchBudget.spend();
       res = await executor.execute({
         url,
         method: "POST",
         headers,
         body: bodyForConnection(connection),
         signal,
+        dispatchBudget,
+        dispatchAlreadyCounted: true,
+        timeoutMs: Math.max(1, Math.min(REQUEST_DEADLINE_MS, dispatchBudget.remainingTimeMs())),
         proxyUrl,
         proxyMeta: proxyEntry,
         requireProxy,
@@ -938,6 +997,13 @@ export async function executeWithFallback({
     captureLine(
       `[FAILOVER] request_id=${attemptId} phase=${stream ? "before_first_token" : "request"} provider=${provider.id} account="${connection.name || connection.id}" model=${modelId} HTTP ${res.status} error=${errText.slice(0, 140).replace(/\s+/g, " ")}`
     );
+
+    // In hybrid mode Proton is a transport backup, not a way around an
+    // upstream quota/rejection. Other WARP lanes may still be tried, but the
+    // Proton slot is cut after a non-transport WARP response.
+    if (hybridEnforce && proxyEntry?.adapter === "warp" && !isTransportFailure(res, errText)) {
+      hybridProtonBlocked = true;
+    }
 
     // Probing murni (x-zenith-no-failover): satu upstream call, tanpa rotasi akun
     // dan tanpa mem-park akun. Respons gagal diteruskan apa adanya.
@@ -1065,7 +1131,11 @@ export async function executeWithFallback({
         }
         connection = refreshed;
         applyConnectionAuth(headers, connection, { adaptiveThinking });
-        const retryProxyUrl = requireResolvedProxy(connection);
+        const retryProxyUrl = proxyEntry
+          ? proxyEntry.url
+          : egressPolicy === "direct" || scopedPolicy
+            ? null
+            : requireResolvedProxy(connection);
 
         try {
           releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
@@ -1075,14 +1145,25 @@ export async function executeWithFallback({
           continue;
         }
 
+        if (dispatchBudget.remaining() <= 0 || dispatchBudget.remainingTimeMs() <= 0) {
+          if (releaseSlot) releaseSlot();
+          releaseSlot = null;
+          return { ok: false, response: lastFailureResponse || dispatchDeadlineResponse() };
+        }
         try {
+          dispatchBudget.spend();
           res = await executor.execute({
             url,
             method: "POST",
             headers,
             body: bodyForConnection(connection),
             signal,
+            dispatchBudget,
+            dispatchAlreadyCounted: true,
+            timeoutMs: Math.max(1, Math.min(REQUEST_DEADLINE_MS, dispatchBudget.remainingTimeMs())),
             proxyUrl: retryProxyUrl,
+            proxyMeta: proxyEntry,
+            requireProxy,
             connection,
             stream,
             targetModel,

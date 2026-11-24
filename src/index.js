@@ -14,6 +14,7 @@ import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
 import { handleGetUsage, getLastProvider, getRecentUsage } from "./services/usage.js";
 import { getActiveProviders } from "./services/trafficGuard.js";
+import { syncHybridReadiness } from "./services/proxyPools.js";
 import { handleGetQuota, handleSyncQuotaForm } from "./services/quota.js";
 import { getVersionInfo } from "./services/version.js";
 import { handleUpgradeRequest, getUpgradeCapability } from "./services/upgrade.js";
@@ -53,6 +54,7 @@ import {
   handleAddProxy,
   handleImportProxies,
   handleTestProxy,
+  handleProbeProxyIp,
   handleUpdateProxy,
   handleDeleteProxy,
   handleToggleProxy,
@@ -293,6 +295,7 @@ app.get("/dashboard/proxy-pools", (c) => c.redirect("/dashboard/proxies"));
 app.post("/dashboard/proxies/add", (c) => handleAddProxy(c));
 app.post("/dashboard/proxies/import", (c) => handleImportProxies(c));
 app.post("/dashboard/proxies/test", (c) => handleTestProxy(c));
+app.post("/dashboard/proxies/probe-ip", (c) => handleProbeProxyIp(c));
 app.post("/dashboard/proxies/update", (c) => handleUpdateProxy(c));
 app.post("/dashboard/proxies/delete", (c) => handleDeleteProxy(c));
 app.post("/dashboard/proxies/toggle", (c) => handleToggleProxy(c));
@@ -432,6 +435,9 @@ export function startServer() {
     } catch {}
   }
   startQuotaSyncScheduler();
+  syncHybridReadiness().catch(() => {});
+  const egressReadinessTimer = setInterval(() => syncHybridReadiness().catch(() => {}), 60000);
+  egressReadinessTimer.unref?.();
   startTokenRefreshScheduler();
   startOpencodeBridgeService().catch(() => {});
 

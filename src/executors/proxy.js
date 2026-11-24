@@ -326,9 +326,12 @@ export async function proxyFetch(targetUrl, options = {}, proxyUrl) {
         return fail(new Error(`Proxy CONNECT failed with HTTP ${res.statusCode}`));
       }
 
+      // tlsCa hanya diisi oleh tes (CA lokal). Produksi tidak mengirim opsi ini,
+      // jadi verifikasi sertifikat tetap penuh.
       const tlsSocket = tls.connect({
         socket,
         servername: target.hostname,
+        ...(options.tlsCa ? { ca: options.tlsCa } : {}),
       });
 
       const reqOptions = {

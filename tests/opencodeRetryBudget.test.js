@@ -14,6 +14,54 @@ function protocol400() {
   );
 }
 
+test("Retry 400 - internal protocol flip menghitung ke budget bersama", async () => {
+  resetOpencodeProtocolLanes();
+  const calls = [];
+  const budget = { remaining: () => Math.max(0, 3 - calls.length), remainingTimeMs: () => 300000, spend: () => {} };
+  const executor = new OpencodeExecutor({
+    fetchFn: async (url) => {
+      calls.push(url);
+      if (calls.length === 1) return protocol400();
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    },
+  });
+  const res = await executor.execute({
+    url: "https://opencode.ai/inference/v1/chat/completions",
+    method: "POST",
+    body: JSON.stringify({ model: "budget-flip-model", messages: [{ role: "user", content: "hi" }] }),
+    dispatchBudget: budget,
+    dispatchAlreadyCounted: true,
+  });
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(calls.length, 2);
+});
+
+test("Retry 400 - protocol retry berhenti saat budget bersama habis", async () => {
+  resetOpencodeProtocolLanes();
+  const calls = [];
+  const budget = {
+    used: 1,
+    remaining() { return Math.max(0, 1 - this.used); },
+    remainingTimeMs() { return 300000; },
+    spend() { this.used++; },
+  };
+  const executor = new OpencodeExecutor({
+    fetchFn: async (url) => {
+      calls.push(url);
+      return protocol400();
+    },
+  });
+  const res = await executor.execute({
+    url: "https://opencode.ai/inference/v1/chat/completions",
+    method: "POST",
+    body: JSON.stringify({ model: "budget-exhausted-model", messages: [{ role: "user", content: "hi" }] }),
+    dispatchBudget: budget,
+    dispatchAlreadyCounted: true,
+  });
+  assert.strictEqual(res.status, 504);
+  assert.strictEqual(calls.length, 1, "protocol retry tidak boleh melewati budget");
+});
+
 test("Retry 400 - token budget tidak dihitung ulang (tanpa inflasi)", async () => {
   resetOpencodeProtocolLanes();
   const calls = [];

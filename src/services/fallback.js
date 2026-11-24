@@ -689,16 +689,27 @@ function pickPinnedConnection(available, triedIds, pin) {
 
 // Plafon kiriman nyata ke upstream per request (akun + retry transport).
 export const MAX_REQUEST_DISPATCHES = 3;
+export const REQUEST_DEADLINE_MS = 300000;
 
 /** Penghitung kiriman bersama; `spend` mencatat, `remaining` menyisakan kuota. */
-export function createDispatchBudget(limit) {
+export function createDispatchBudget(limit, deadlineAt = Date.now() + REQUEST_DEADLINE_MS) {
   let used = 0;
   return {
     limit,
+    deadlineAt,
     spend() { used++; return used; },
     remaining() { return Math.max(0, limit - used); },
+    remainingTimeMs(now = Date.now()) { return Math.max(0, deadlineAt - now); },
     get used() { return used; },
   };
+}
+
+function dispatchDeadlineResponse() {
+  return new Response(JSON.stringify({ error: {
+    message: "Upstream request deadline exceeded before another dispatch",
+    type: "timeout_error",
+    code: "gateway_timeout",
+  } }), { status: 504, headers: { "Content-Type": "application/json" } });
 }
 
 /**
@@ -838,8 +849,9 @@ export async function executeWithFallback({
   const dispatchBudget = createDispatchBudget(MAX_REQUEST_DISPATCHES);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (dispatchBudget.remaining() <= 0) {
-      captureLine(`[DISPATCH] request_id=${attemptId} provider=${provider.id} budget=${MAX_REQUEST_DISPATCHES} habis; berhenti`);
+    if (dispatchBudget.remaining() <= 0 || dispatchBudget.remainingTimeMs() <= 0) {
+      lastFailureResponse = dispatchDeadlineResponse();
+      captureLine(`[DISPATCH] request_id=${attemptId} provider=${provider.id} budget_or_deadline=exhausted; berhenti`);
       break;
     }
     let connection;
@@ -891,7 +903,7 @@ export async function executeWithFallback({
 
     let releaseSlot = null;
     try {
-      releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
+      releaseSlot = await acquireAccountSlot(connection, signal, { purpose });;
     } catch (err) {
       if (signal?.aborted) {
         throw err;
@@ -911,6 +923,8 @@ export async function executeWithFallback({
         body: bodyForConnection(connection),
         signal,
         dispatchBudget,
+        dispatchAlreadyCounted: true,
+        timeoutMs: Math.max(1, Math.min(REQUEST_DEADLINE_MS, dispatchBudget.remainingTimeMs())),
         proxyUrl,
         proxyMeta: proxyEntry,
         requireProxy,
@@ -1091,17 +1105,17 @@ export async function executeWithFallback({
         const retryProxyUrl = requireResolvedProxy(connection);
 
         try {
-          releaseSlot = await acquireAccountSlot(connection, signal, { purpose });
+          releaseSlot = await acquireAccountSlot(connection, signal, { purpose });;
         } catch (err) {
           if (signal?.aborted) return { ok: false, response: lastFailureResponse };
           lastFailureResponse = accountBusyResponse(targetFormat, connection);
           continue;
         }
 
-        if (dispatchBudget.remaining() <= 0) {
+        if (dispatchBudget.remaining() <= 0 || dispatchBudget.remainingTimeMs() <= 0) {
           if (releaseSlot) releaseSlot();
           releaseSlot = null;
-          return { ok: false, response: lastFailureResponse };
+          return { ok: false, response: lastFailureResponse || dispatchDeadlineResponse() };
         }
         try {
           dispatchBudget.spend();
@@ -1112,6 +1126,8 @@ export async function executeWithFallback({
             body: bodyForConnection(connection),
             signal,
             dispatchBudget,
+            dispatchAlreadyCounted: true,
+            timeoutMs: Math.max(1, Math.min(REQUEST_DEADLINE_MS, dispatchBudget.remainingTimeMs())),
             proxyUrl: retryProxyUrl,
             connection,
             stream,

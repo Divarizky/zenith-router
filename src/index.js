@@ -14,6 +14,7 @@ import { handleMessages } from "./gateway/messages.js";
 import { handleResponses } from "./gateway/responses.js";
 import { handleGetUsage, getLastProvider, getRecentUsage } from "./services/usage.js";
 import { getActiveProviders } from "./services/trafficGuard.js";
+import { syncWarpReadiness } from "./services/proxyPools.js";
 import { handleGetQuota, handleSyncQuotaForm } from "./services/quota.js";
 import { getVersionInfo } from "./services/version.js";
 import { handleUpgradeRequest, getUpgradeCapability } from "./services/upgrade.js";
@@ -434,6 +435,9 @@ export function startServer() {
     } catch {}
   }
   startQuotaSyncScheduler();
+  syncWarpReadiness().catch(() => {});
+  const warpReadinessTimer = setInterval(() => syncWarpReadiness().catch(() => {}), 60000);
+  warpReadinessTimer.unref?.();
   startTokenRefreshScheduler();
   startOpencodeBridgeService().catch(() => {});
 

@@ -66,6 +66,50 @@ export function validateProxyAddress(raw) {
 
 const ROT_FIELD = "rotate_" + "token";
 const MASK_PLACEHOLDER = "****";
+const WARP_POOL_STATUS_URL = process.env.WARP_POOL_STATUS_URL || "http://127.0.0.1:8405/status";
+const WARP_READINESS_TTL_MS = 180000;
+let warpReadinessSnapshot = null;
+
+export function setWarpReadinessSnapshot(snapshot, now = Date.now()) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.nodes)) {
+    warpReadinessSnapshot = null;
+    return false;
+  }
+  const nodes = new Map();
+  for (const node of snapshot.nodes) {
+    const number = Number(node?.node);
+    if (Number.isInteger(number) && number > 0) nodes.set(number, {
+      ready: node.ready === true,
+      state: String(node.state || "unknown"),
+      lastError: node.last_error || null,
+    });
+  }
+  warpReadinessSnapshot = { checkedAt: now, fresh: snapshot.fresh === true, nodes };
+  return true;
+}
+
+export function resetWarpReadinessSnapshot() {
+  warpReadinessSnapshot = null;
+}
+
+export function isWarpPoolReady(pool, now = Date.now()) {
+  const match = String(pool?.name || "").match(/^warp-node-(\d+)$/i);
+  if (!match || !warpReadinessSnapshot) return false;
+  if (warpReadinessSnapshot.fresh !== true || now - warpReadinessSnapshot.checkedAt > WARP_READINESS_TTL_MS) return false;
+  return warpReadinessSnapshot.nodes.get(Number(match[1]))?.ready === true;
+}
+
+export async function syncWarpReadiness(fetchFn = fetch, now = Date.now()) {
+  try {
+    const res = await fetchFn(WARP_POOL_STATUS_URL, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) throw new Error(`WARP readiness HTTP ${res.status}`);
+    const snapshot = await res.json();
+    return setWarpReadinessSnapshot(snapshot, now);
+  } catch {
+    resetWarpReadinessSnapshot();
+    return false;
+  }
+}
 
 export function validateProxyKind(kind) {
   const normalized = String(kind || "single").trim().toLowerCase();
@@ -769,7 +813,10 @@ export function getOpencodeScopedPoolIds() {
 
 export function planProxyRotationEntries(providerId, strategy, scopedIds = null) {
   if (strategy !== "round_robin" && strategy !== "random") return [];
-  const active = getProxyPools().filter((p) => Number(p.is_active) === 1 && (!scopedIds || (scopedIds.includes(Number(p.id)) && !validateProxyAddress(p.url))));
+  const enforceReadiness = getSetting("warp_readiness_enforce", "false") === "true";
+  const active = getProxyPools().filter((p) => Number(p.is_active) === 1
+    && (!scopedIds || (scopedIds.includes(Number(p.id)) && !validateProxyAddress(p.url)))
+    && (!enforceReadiness || providerId !== "opencode" || !String(p.name || "").startsWith("warp-node-") || isWarpPoolReady(p)));
   if (active.length === 0) return [];
 
   let rawOrdered;

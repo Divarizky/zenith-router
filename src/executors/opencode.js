@@ -507,7 +507,7 @@ export function ensureAssistantReasoningContent(body, model) {
 }
 
 export class OpencodeExecutor extends BaseExecutor {
-  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, proxyMeta = null, requireProxy = false, connection, stream = false, targetModel, targetFormat, sessionKey = null }) {
+  async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, proxyMeta = null, requireProxy = false, connection, stream = false, targetModel, targetFormat, sessionKey = null, dispatchBudget = null, dispatchAlreadyCounted = false }) {
     if (requireProxy && !proxyUrl) return new Response(JSON.stringify({ error: { code: "proxy_required" } }), { status: 503, headers: { "content-type": "application/json" } });
     if (requireProxy && getOpencodeBaseUrlOverride()) {
       let trusted = false;
@@ -603,7 +603,16 @@ export class OpencodeExecutor extends BaseExecutor {
       opencodeHeaders["x-opencode-request"] = headers["x-opencode-request"];
     }
 
+    let firstDispatch = true;
     const executeRoutedRequest = (url, requestHeaders) => {
+      const alreadyCounted = dispatchAlreadyCounted && firstDispatch;
+      firstDispatch = false;
+      if (!alreadyCounted) {
+        if (dispatchBudget && (dispatchBudget.remaining() <= 0 || dispatchBudget.remainingTimeMs?.() <= 0)) {
+          return Promise.resolve(new Response(JSON.stringify({ error: { message: "Upstream request dispatch budget exhausted", type: "timeout_error", code: "gateway_timeout" } }), { status: 504, headers: { "Content-Type": "application/json" } }));
+        }
+        dispatchBudget?.spend();
+      }
       const dispatch = getBridgeDispatch(url, requestHeaders, proxyUrl, requireProxy);
       return super.execute({
         url,
@@ -611,8 +620,9 @@ export class OpencodeExecutor extends BaseExecutor {
         headers: dispatch.headers,
         body,
         signal,
-        timeoutMs,
+        timeoutMs: dispatchBudget?.remainingTimeMs ? Math.max(1, Math.min(timeoutMs || 300000, dispatchBudget.remainingTimeMs())) : timeoutMs,
         proxyUrl: dispatch.proxyUrl,
+        dispatchBudget,
       });
     };
 

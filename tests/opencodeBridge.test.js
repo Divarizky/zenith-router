@@ -85,6 +85,17 @@ test("opencode bridge - payload preparation injects baseline template and tools"
   const toolNames = prepared2.tools.map((t) => t.function?.name || t.name);
   assert.ok(toolNames.includes("read"), "read tool must be included");
   assert.ok(toolNames.includes("custom_eval"), "custom_eval must be preserved");
+
+  // Case 3: Verify dynamic placeholders & no stale ultron-os path
+  const raw3 = {
+    model: "claude-3-7-sonnet",
+    cwd: "/workspace/my-project",
+    messages: [{ role: "user", content: "test" }],
+  };
+  const prepared3 = prepareOpenCodePayload(raw3);
+  assert.ok(!prepared3.messages[0].content.includes(".ultron-os"), "must not mention stale .ultron-os path");
+  assert.ok(prepared3.messages[0].content.includes("Name: claude-3-7-sonnet"), "model name must be dynamically replaced");
+  assert.ok(prepared3.messages[0].content.includes("Working directory: /workspace/my-project"), "working directory must be dynamically substituted");
 });
 
 test("opencode bridge - buildOpenCodeHeaders sets standard UA, auth, and 4 session headers", () => {

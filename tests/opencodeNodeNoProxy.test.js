@@ -19,8 +19,10 @@ const variants = [
   ["NO_PROXY=*", { NO_PROXY: "*", no_proxy: "*" }],
   ["NO_PROXY=127.0.0.1", { NO_PROXY: "127.0.0.1" }],
   ["NODE_USE_ENV_PROXY=1 + NO_PROXY=*", { NODE_USE_ENV_PROXY: "1", NO_PROXY: "*" }],
-  // Node 22 mengarahkan http.request ke env proxy saat NODE_USE_ENV_PROXY=1, termasuk hop menuju
-  // proxy terpilih. Hasilnya gagal tertutup (target tidak tersentuh), bukan bocor direct.
+  // Node >= 22.21.0 / >= 24.5.0 mengarahkan http.request ke env proxy saat NODE_USE_ENV_PROXY=1,
+  // termasuk hop menuju proxy terpilih. Hasilnya gagal tertutup (target tidak tersentuh), bukan
+  // bocor direct. Node yang lebih lama mengabaikan flag itu, sehingga hop tetap menuju proxy
+  // terpilih dan sukses. Keduanya memenuhi kontrak require-proxy: tidak ada egress direct.
   ["HTTP_PROXY menunjuk proxy lain", { HTTP_PROXY: "http://127.0.0.1:9", HTTPS_PROXY: "http://127.0.0.1:9", NODE_USE_ENV_PROXY: "1" }, { failClosed: true }],
 ];
 
@@ -28,8 +30,9 @@ for (const [label, env, opts = {}] of variants) {
   test(`Node bridge require-proxy: nol pengiriman direct (${label})`, () => {
     const out = run(env);
     if (opts.failClosed) {
-      assert.equal(out.success.status, 502, "ditolak, tidak dikirim");
-      assert.equal(out.success.target, 0, "target tidak tersentuh");
+      assert.ok([200, 502].includes(out.success.status));
+      if (out.success.status === 502) assert.equal(out.success.target, 0, "ditolak, tidak dikirim");
+      else assert.equal(out.success.proxy, 1, "lewat proxy eksplisit");
       assert.equal(out.success.direct, 0, "tidak ada pengiriman direct");
       assert.equal(out.proxyDown.status, 502);
       assert.equal(out.proxyDown.targetDelta, 0);

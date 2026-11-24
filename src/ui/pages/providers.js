@@ -863,62 +863,77 @@ function renderAddAccountModal(p) {
 }
 
 /**
- * Account row priority cell: the #n badge plus up/down controls, the same
- * pattern as a combo chain. A lone account has nothing to reorder against.
+ * Account row priority cell: the #n badge plus up/down controls, matching
+ * the neobrutalist hardware stepper style. A lone account has nothing to reorder against.
  */
 function accountOrderCell(c, id, index, total) {
-  const badge = `<span class="priority-badge" title="Prioritas #${index + 1}">${index + 1}</span>`;
-  if (total < 2) return `<div class="priority-stepper" style="box-shadow:none;">${badge}</div>`;
-  return `<div class="priority-stepper">
-      ${badge}
-      <form action="/dashboard/providers/accounts/move" method="POST" class="priority-actions">
+  const badge = `<div class="stamp-priority-index" title="Prioritas #${index + 1}">${index + 1}</div>`;
+  if (total < 2) return `<div class="priority-controls" style="box-shadow:none;">${badge}</div>`;
+  return `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <form action="/dashboard/providers/accounts/move" method="POST" class="priority-controls" style="margin: 0;">
         <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
         <input type="hidden" name="provider" value="${id}" />
-        <button type="submit" name="direction" value="up" class="priority-btn" title="Naikkan prioritas" ${
+        <button type="submit" name="direction" value="up" class="p-arrow-btn" title="Naikkan prioritas" ${
           index === 0 ? "disabled" : ""
-        }>&uarr;</button>
-        <button type="submit" name="direction" value="down" class="priority-btn" title="Turunkan prioritas" ${
+        }>&blacktriangle;</button>
+        <button type="submit" name="direction" value="down" class="p-arrow-btn" title="Turunkan prioritas" ${
           index === total - 1 ? "disabled" : ""
-        }>&darr;</button>
+        }>&blacktriangledown;</button>
       </form>
+      ${badge}
     </div>`;
 }
 
 /**
  * Account row proxy cell: shows the effective binding plus an inline
- * form to rebind it at any time. The manual address itself is never echoed.
+ * form to rebind it at any time in a compact neobrutalist dropdown jack.
  */
 function accountProxyCell(c, id, pools) {
   const poolById = new Map(pools.map((p) => [p.id, p]));
-  let label;
+  let labelText = "Langsung (Tanpa Proxy)";
+  let isPool = false;
   if (c.proxy_pool_id) {
     const pool = poolById.get(c.proxy_pool_id);
-    if (!pool) label = `<span class="pill pill-danger">Proxy dihapus</span>`;
-    else if (!pool.is_active) label = `<span class="pill pill-warning">Daftar nonaktif: ${escapeHtml(pool.name)}</span>`;
-    else label = `<span class="pill pill-success">Daftar: ${escapeHtml(pool.name)}</span>`;
+    if (!pool) labelText = "Proxy Dihapus";
+    else if (!pool.is_active) labelText = `Daftar: ${escapeHtml(pool.name)}`;
+    else {
+      labelText = `Daftar: ${escapeHtml(pool.name)}`;
+      isPool = true;
+    }
   } else if (c.proxy_url) {
-    label = `<code>${escapeHtml(maskProxyUrl(c.proxy_url))}</code>`;
-  } else {
-    label = `<span class="hint">Langsung</span>`;
+    labelText = escapeHtml(maskProxyUrl(c.proxy_url));
   }
+
   return `
-            ${label}
-            <form action="/dashboard/providers/accounts/set-proxy" method="POST" class="account-proxy-form">
-              <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
-              <input type="hidden" name="provider" value="${id}" />
-              <select name="proxy_choice">
-                <option value="" ${!c.proxy_pool_id && !c.proxy_url ? "selected" : ""}>Langsung</option>
-                ${pools
-                  .map(
-                    (p) =>
-                      `<option value="pool:${p.id}" ${c.proxy_pool_id === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`
-                  )
-                  .join("")}
-                <option value="manual" ${!c.proxy_pool_id && c.proxy_url ? "selected" : ""}>Manual…</option>
-              </select>
-              <input type="text" name="proxy_url" placeholder="alamat manual baru" />
-              <button type="submit" class="btn btn-sm">Simpan</button>
-            </form>`;
+    <div class="strip-proxy-cell">
+      <details class="proxy-jack-details">
+        <summary class="proxy-jack-badge" title="Klik untuk mengganti proxy">
+          <span class="proxy-jack-icon ${isPool ? "is-pool" : c.proxy_url ? "is-manual" : "is-direct"}">&#11041;</span>
+          <span>${labelText}</span>
+          <span style="font-size: 9px; margin-left: 2px;">&#9662;</span>
+        </summary>
+        <div class="proxy-jack-menu">
+          <form action="/dashboard/providers/accounts/set-proxy" method="POST" class="account-proxy-form" style="margin: 0;">
+            <input type="hidden" name="id" value="${escapeHtml(c.id)}" />
+            <input type="hidden" name="provider" value="${id}" />
+            <div class="proxy-jack-menu-title">Konfigurasi Proxy Jack</div>
+            <select name="proxy_choice" class="search-cli-input" style="width: 100%; margin-bottom: 6px; font-size: 12px; padding: 5px 8px;">
+              <option value="" ${!c.proxy_pool_id && !c.proxy_url ? "selected" : ""}>Langsung (Tanpa Proxy)</option>
+              ${pools
+                .map(
+                  (p) =>
+                    `<option value="pool:${p.id}" ${c.proxy_pool_id === p.id ? "selected" : ""}>Daftar: ${escapeHtml(p.name)}</option>`
+                )
+                .join("")}
+              <option value="manual" ${!c.proxy_pool_id && c.proxy_url ? "selected" : ""}>Alamat manual…</option>
+            </select>
+            <input type="text" name="proxy_url" placeholder="http://user:pass@host:port" class="search-cli-input" style="width: 100%; margin-bottom: 8px; font-size: 12px; padding: 5px 8px;" value="${c.proxy_url ? escapeHtml(maskProxyUrl(c.proxy_url)) : ""}" />
+            <button type="submit" class="btn-nb btn-nb-primary" style="width: 100%; justify-content: center; padding: 5px 10px; font-size: 11px;">Simpan Proxy</button>
+          </form>
+        </div>
+      </details>
+    </div>`;
 }
 
 /**
@@ -932,7 +947,108 @@ function accountIdentityCell(c) {
   if (creds.organization_name) parts.push(escapeHtml(creds.organization_name));
   if (creds.organization_rate_limit_tier) parts.push(`tier ${escapeHtml(creds.organization_rate_limit_tier)}`);
   if (parts.length === 0) return "";
-  return `<div class="hint" style="font-size: var(--text-xs);">${parts.join(" · ")}</div>`;
+  return `<div class="hint" style="font-size: 11.5px; font-family: ui-monospace, monospace; margin-top: 2px;">${parts.join(" · ")}</div>`;
+}
+
+function accountStatusTag(c) {
+  if (c.is_active !== 1) return `<span class="tag-status tag-status-inactive">Nonaktif</span>`;
+  if (isConnectionFullyCooledDown(c)) return `<span class="tag-status tag-status-cooldown">Cooldown</span>`;
+  if (isConnectionExhausted(c)) return `<span class="tag-status tag-status-exhausted">Habis Kuota</span>`;
+  return `<span class="tag-status tag-status-operational">Aktif</span>`;
+}
+
+function renderSlotMeter(trafficAccount, cap) {
+  const inFlight = trafficAccount?.inFlight || 0;
+  const effectiveCap = trafficAccount?.cap || cap || 1;
+  const displayUnits = Math.min(Math.max(effectiveCap, 1), 8);
+  const units = [];
+  for (let i = 0; i < displayUnits; i++) {
+    units.push(`<span class="meter-unit ${i < inFlight ? "on" : ""}"></span>`);
+  }
+  const queueBadge = trafficAccount?.queue > 0 ? ` <span class="tag-fusion" style="background:#facc15;color:#000;margin-left:4px;">+${trafficAccount.queue}</span>` : "";
+  return `
+    <div class="strip-slot-meter" title="Request berjalan ${inFlight} dari batas ${effectiveCap}">
+      <span>SLOT</span> <span class="slot-count">${inFlight}/${effectiveCap}</span>
+      <div class="slot-meter-units">
+        ${units.join("")}
+      </div>
+      ${queueBadge}
+    </div>`;
+}
+
+function renderAccountChannelStrip(c, index, total, id, p, proxyPools, trafficAccount, effectiveConcurrency) {
+  const isSession = p.category === "session";
+  const hidden = `<input type="hidden" name="id" value="${escapeHtml(c.id)}" /><input type="hidden" name="provider" value="${id}" />`;
+  
+  let keySnippet = "";
+  if (c.credentials?.api_key) {
+    const raw = String(c.credentials.api_key);
+    keySnippet = raw.length > 12 ? `${escapeHtml(raw.slice(0, 8))}...${escapeHtml(raw.slice(-4))}` : "api_key";
+  } else if (c.credentials?.token) {
+    keySnippet = "session_token";
+  } else if (c.credentials?.access_token) {
+    keySnippet = "access_token";
+  } else {
+    keySnippet = escapeHtml(c.auth_type || "auth");
+  }
+
+  const sessionForms = isSession
+    ? `
+      <form action="/dashboard/providers/accounts/check-session" method="POST" style="margin:0;display:inline;">
+        ${hidden}
+        <button type="submit" class="btn-nb" style="padding: 5px 12px; font-size: 11px;">Periksa sesi</button>
+      </form>
+      <details style="display:inline-block;position:relative;">
+        <summary class="btn-nb" style="padding: 5px 12px; font-size: 11px; cursor:pointer;">Perbarui sesi</summary>
+        <div class="proxy-jack-menu" style="right:0;left:auto;">
+          <form action="/dashboard/providers/accounts/update-session" method="POST" class="account-session-form" style="margin:0;">
+            ${hidden}
+            <div style="font-family: ui-monospace, monospace; font-size: 11px; font-weight: 800; margin-bottom: 6px; text-transform: uppercase;">Perbarui Token Sesi</div>
+            <input type="password" name="token" placeholder="token baru" required autocomplete="off" class="search-cli-input" style="width: 100%; margin-bottom: 4px; font-size: 12px; padding: 5px 8px;" />
+            <input type="text" name="cookies" placeholder="cookies (opsional)" autocomplete="off" class="search-cli-input" style="width: 100%; margin-bottom: 6px; font-size: 12px; padding: 5px 8px;" />
+            <button type="submit" class="btn-nb btn-nb-primary" style="width: 100%; justify-content: center; padding: 5px 10px; font-size: 11px;">Simpan Sesi</button>
+          </form>
+        </div>
+      </details>`
+    : `
+      <form action="/dashboard/providers/test-connection" method="POST" style="margin:0;display:inline;">
+        ${hidden}
+        <button type="submit" class="btn-nb" style="padding: 5px 12px; font-size: 11px;" title="Uji koneksi dan otentikasi akun ini">UJI</button>
+      </form>`;
+
+  const deleteForm = `
+    <form action="/dashboard/providers/accounts/delete" method="POST" style="margin:0;display:inline;" data-confirm="Hapus akun ini dari daftar?">
+      ${hidden}
+      <button type="submit" class="btn-nb btn-nb-danger" style="padding: 5px 12px; font-size: 11px;">HAPUS</button>
+    </form>`;
+
+  return `
+    <div class="account-channel-strip">
+      <div class="strip-identity-left">
+        ${accountOrderCell(c, id, index, total)}
+        <div class="account-name-block">
+          <h4 style="font-size: 14.5px; font-weight: 800; margin: 0;">${escapeHtml(c.name)}</h4>
+          <div class="account-sub-key">
+            <span>${keySnippet}</span> &middot; <span style="text-transform: uppercase;">${escapeHtml(c.auth_type)}</span>
+            ${accountIdentityCell(c)}
+          </div>
+        </div>
+      </div>
+
+      ${accountProxyCell(c, id, proxyPools)}
+
+      ${renderSlotMeter(trafficAccount, effectiveConcurrency)}
+
+      <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+        ${accountStatusTag(c)}
+        ${isSession ? `<span style="font-size: 11px;">${sessionHealthCell(c)}</span>` : ""}
+      </div>
+
+      <div class="strip-actions-group">
+        ${sessionForms}
+        ${deleteForm}
+      </div>
+    </div>`;
 }
 
 /**
@@ -982,87 +1098,49 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
   // so the hint must not promise the generic 30s it no longer uses.
   const queueTimeoutMs = resolveProviderQueueTimeout(p.id);
 
-  const accountRows = accounts
-    .map((c, index) => {
-      let status = `<span class="pill pill-success">Aktif</span>`;
-      if (c.is_active !== 1) status = `<span class="pill">Nonaktif</span>`;
-      else if (isConnectionFullyCooledDown(c)) status = `<span class="pill pill-warning">Cooldown</span>`;
-      else if (isConnectionExhausted(c)) status = `<span class="pill pill-danger">Habis Kuota</span>`;
-      const hidden = `<input type="hidden" name="id" value="${escapeHtml(c.id)}" />
-              <input type="hidden" name="provider" value="${id}" />`;
-      const sessionForms =
-        c.auth_type === "session"
-          ? `<form action="/dashboard/providers/accounts/check-session" method="POST">
-              ${hidden}
-              <button type="submit" class="btn btn-sm">Periksa sesi</button>
-            </form>
-            <form action="/dashboard/providers/accounts/update-session" method="POST" class="account-session-form">
-              ${hidden}
-              <input type="password" name="token" placeholder="token baru" required autocomplete="off" />
-              <input type="text" name="cookies" placeholder="cookies (opsional)" autocomplete="off" />
-              <button type="submit" class="btn btn-sm">Perbarui sesi</button>
-            </form>`
-          : `<form action="/dashboard/providers/test-connection" method="POST">
-              ${hidden}
-              <button type="submit" class="btn btn-sm btn-ghost" title="Uji koneksi dan otentikasi akun ini">Uji</button>
-            </form>`;
-      return `
-        <tr>
-          <td>${accountOrderCell(c, id, index, accounts.length)}</td>
-          <td><strong>${escapeHtml(c.name)}</strong>${accountIdentityCell(c)}</td>
-          <td>${escapeHtml(c.auth_type)}</td>
-          <td>${accountProxyCell(c, id, proxyPools)}</td>
-          <td>${status}</td>
-          <td>${slotCell(trafficByAccount.get(c.id))}</td>
-          ${isSession ? `<td>${sessionHealthCell(c)}</td>` : ""}
-          <td class="actions">
-            ${sessionForms}
-            <form action="/dashboard/providers/accounts/delete" method="POST" data-confirm="Hapus akun ini dari daftar?">
-              ${hidden}
-              <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
-            </form>
-          </td>
-        </tr>`;
-    })
+  const channelStripsHtml = accounts
+    .map((c, index) =>
+      renderAccountChannelStrip(c, index, accounts.length, id, p, proxyPools, trafficByAccount.get(c.id), effectiveConcurrency)
+    )
     .join("");
 
   let accountsBody;
   if (p.noAuth) {
     accountsBody = `
-      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-          ${noAuthProxyBadge}
-          <span class="hint" style="margin: 0;">Provider noAuth ini tidak memerlukan akun autentikasi token/kunci.</span>
+      <div class="channel-strips-wrapper">
+        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            ${noAuthProxyBadge}
+            <span class="hint" style="margin: 0;">Provider noAuth ini tidak memerlukan akun autentikasi token/kunci.</span>
+          </div>
+          <p class="hint" style="margin: 0; line-height: 1.5;">
+            ${
+              proxyRotationStrategy !== "off"
+                ? `Request otomatis dirotasikan secara <strong>${proxyRotationStrategy === "round_robin" ? "bergiliran (round-robin)" : "acak"}</strong> ke <strong>${activePoolCount} proxy aktif</strong> di Proxy Pool saat melayani request ${escapeHtml(p.name)}.`
+                : `Saat ini rotasi proxy tidak aktif. Request diteruskan langsung atau melalui proxy yang terikat.`
+            }
+          </p>
+          ${channelStripsHtml}
         </div>
-        <p class="hint" style="margin: 0; line-height: 1.5;">
-          ${
-            proxyRotationStrategy !== "off"
-              ? `Request otomatis dirotasikan secara <strong>${proxyRotationStrategy === "round_robin" ? "bergiliran (round-robin)" : "acak"}</strong> ke <strong>${activePoolCount} proxy aktif</strong> di Proxy Pool saat melayani request ${escapeHtml(p.name)}.`
-              : `Saat ini rotasi proxy tidak aktif. Request diteruskan langsung atau melalui proxy yang terikat.`
-          }
-        </p>
+      </div>`;
+  } else if (accounts.length === 0) {
+    accountsBody = `
+      <div class="channel-strips-wrapper">
+        <div class="empty" style="padding: 24px; text-align: center;">
+          <p class="big"><span class="pill pill-muted">Belum ada akun</span></p>
+          <p class="empty-sub-hint">Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p>
+        </div>
+      </div>`;
+  } else {
+    accountsBody = `
+      <div class="channel-strips-wrapper">
+        ${channelStripsHtml}
         ${
-          accounts.length > 0
-            ? `<div style="overflow-x: auto; margin-top: 0.5rem;">
-                <table class="accounts-table">
-                  <thead><tr><th title="Urutan prioritas">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy Terikat</th><th>Status</th><th></th></tr></thead>
-                  <tbody>${accountRows}</tbody>
-                </table>
-              </div>`
+          isSession
+            ? `<p class="hint" style="margin-top: 10px;">Status sesi berasal dari health check <code>create_pow_challenge</code> (tanpa memulai percakapan). Token diambil dari <code>localStorage.userToken</code> di chat.deepseek.com dan disimpan sebagai teks biasa di database lokal.</p>`
             : ""
         }
       </div>`;
-  } else if (accounts.length === 0) {
-    accountsBody = `<div class="empty"><p class="big"><span class="pill pill-muted">Belum ada akun</span></p><p>Tambahkan akun agar model ${escapeHtml(p.name)} bisa di-route.</p></div>`;
-  } else {
-    accountsBody = `<table class="accounts-table">
-        <thead><tr><th title="Akun #1 dipakai duluan; akun berikutnya hanya saat akun di atasnya tidak tersedia">Urutan</th><th>Nama</th><th>Auth</th><th>Proxy</th><th>Status</th><th title="Request berjalan / batas per akun. Angka diambil saat halaman dimuat.">Slot</th>${isSession ? "<th>Sesi</th>" : ""}<th></th></tr></thead>
-        <tbody>${accountRows}</tbody>
-      </table>${
-        isSession
-          ? `<p class="hint" style="margin-top: 10px;">Status sesi berasal dari health check <code>create_pow_challenge</code> (tanpa memulai percakapan). Token diambil dari <code>localStorage.userToken</code> di chat.deepseek.com dan disimpan sebagai teks biasa di database lokal.</p>`
-          : ""
-      }`;
   }
 
   const builtInModels = getProviderModels(p);
@@ -1076,10 +1154,10 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
   const hasImported = importedModels.length > 0;
 
   const SOURCE_CELL = {
-    builtin: `<span class="hint">Bawaan</span>`,
-    synced: `<span class="pill pill-info">Sinkron</span>`,
-    custom: `<span class="pill pill-accent">Kustom</span>`,
-    imported: `<span class="pill pill-warning">Impor</span>`,
+    builtin: `<span class="source-builtin">Bawaan</span>`,
+    synced: `<span class="tag-fusion tag-synced">Sinkron</span>`,
+    custom: `<span class="tag-fusion tag-custom">Kustom</span>`,
+    imported: `<span class="tag-fusion tag-imported">Impor</span>`,
   };
 
   const modelRow = (modelId, name, source, customId, isFree = false, capabilities = null) => {
@@ -1090,29 +1168,47 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       modelId
     )}" form="models-bulk-form" data-select-group="models" autocomplete="off" aria-label="Pilih ${escapeHtml(
       modelId
-    )}" />`;
+    )}" class="nb-check row-check" />`;
+
+    const categories = ["all"];
+    if (isFree) categories.push("free");
+    if (capabilities?.thinking || capabilities?.reasoning) categories.push("thinking");
+    if (capabilities?.vision) categories.push("vision");
+    if (custom) categories.push("custom");
+
+    const capBadges = [];
+    if (isFree) capBadges.push(`<span class="tag-fusion tag-free">Gratis</span>`);
+    if (capabilities?.thinking || capabilities?.reasoning) capBadges.push(`<span class="tag-fusion tag-thinking">THINKING</span>`);
+    if (capabilities?.vision) capBadges.push(`<span class="tag-fusion tag-vision">VISION</span>`);
+    if (custom) capBadges.push(`<span class="tag-fusion tag-custom">KUSTOM</span>`);
+
     return `
-        <tr class="model-row${disabled ? ` muted` : ""}" data-sync-row="models">
-          <td class="select-cell">${selectCell}</td>
-          <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code>${capabilityIcons(capabilities)}</td>
-          <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="pill pill-success">Gratis</span>` : ""}</td>
+        <tr class="model-row${disabled ? ` muted` : ""}" data-sync-row="models" data-cat="${categories.join(" ")}">
+          <td class="select-cell" style="width: 32px;">${selectCell}</td>
+          <td><code>${escapeHtml(alias)}/${escapeHtml(modelId)}</code>${capabilityIcons(capabilities)}${capBadges.join("")}</td>
+          <td>${escapeHtml(name || modelId)}${isFree ? ` <span class="tag-fusion tag-free">Gratis</span>` : ""}</td>
           <td>${SOURCE_CELL[source]}</td>
-          <td>${disabled ? `<span class="pill pill-warning">Nonaktif</span>` : `<span class="pill pill-success">Aktif</span>`}</td>
-          <td class="actions">
-            <form action="/dashboard/providers/models/${toggleAction}" method="POST">
-              <input type="hidden" name="provider" value="${id}" />
-              <input type="hidden" name="model_id" value="${escapeHtml(modelId)}" />
-              <button type="submit" class="btn btn-sm">${disabled ? "Aktifkan" : "Nonaktifkan"}</button>
-            </form>
-            ${
-              custom
-                ? `<form action="/dashboard/providers/models/custom/delete" method="POST" data-confirm="Hapus model kustom ini?">
-              <input type="hidden" name="id" value="${escapeHtml(customId)}" />
-              <input type="hidden" name="provider" value="${id}" />
-              <button type="submit" class="btn btn-danger btn-sm">Hapus</button>
-            </form>`
-                : ""
-            }
+          <td>${disabled ? `<span class="tag-status tag-status-cooldown">NONAKTIF</span>` : `<span class="tag-status tag-status-operational">AKTIF</span>`}</td>
+          <td style="text-align: right;">
+            <div style="display: inline-flex; align-items: center; gap: 8px;">
+              <form action="/dashboard/providers/models/${toggleAction}" method="POST" style="margin: 0; display: inline;">
+                <input type="hidden" name="provider" value="${id}" />
+                <input type="hidden" name="model_id" value="${escapeHtml(modelId)}" />
+                <button type="submit" class="rocker-toggle" title="${disabled ? "Aktifkan model ini" : "Nonaktifkan model ini"}">
+                  <span class="rocker-opt ${!disabled ? "active" : ""}">ON</span>
+                  <span class="rocker-opt ${disabled ? "active" : ""}">OFF</span>
+                </button>
+              </form>
+              ${
+                custom
+                  ? `<form action="/dashboard/providers/models/custom/delete" method="POST" style="margin: 0; display: inline;" data-confirm="Hapus model kustom ini?">
+                <input type="hidden" name="id" value="${escapeHtml(customId)}" />
+                <input type="hidden" name="provider" value="${id}" />
+                <button type="submit" class="btn-nb btn-nb-danger" style="padding: 3px 8px; font-size: 10.5px;">Hapus</button>
+              </form>`
+                  : ""
+              }
+            </div>
           </td>
         </tr>`;
   };
@@ -1123,6 +1219,16 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
     ...customModels.map((m) => modelRow(m.model_id, m.name, "custom", m.id, false, resolveCapabilities(m.model_id))),
   ].join("");
   const totalModels = builtInModels.length + importedModels.length + customModels.length;
+
+  const allModelsList = [
+    ...builtInModels.map((m) => ({ id: m.id, isFree: m.source === "synced", caps: m.capabilities, custom: false })),
+    ...importedModels.map((m) => ({ id: m.model_id, isFree: m.is_free === 1, caps: resolveCapabilities(m.model_id), custom: false })),
+    ...customModels.map((m) => ({ id: m.model_id, isFree: false, caps: resolveCapabilities(m.model_id), custom: true })),
+  ];
+  const freeCount = allModelsList.filter((m) => m.isFree).length;
+  const thinkingCount = allModelsList.filter((m) => m.caps?.thinking || m.caps?.reasoning).length;
+  const visionCount = allModelsList.filter((m) => m.caps?.vision).length;
+  const customCount = allModelsList.filter((m) => m.custom).length;
 
   const importModal = importModes.length > 0
     ? `
@@ -1153,162 +1259,1422 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
     : "";
 
   const content = `
-    <div class="back-nav">
-      <a href="/dashboard/providers" class="back-link">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"></line>
-          <polyline points="12 19 5 12 12 5"></polyline>
-        </svg>
-        <span>Back to Providers</span>
-      </a>
+    <style>
+      :root, [data-theme="light"] {
+        --pd-card-bg: #ffffff;
+        --pd-text: #09090b;
+        --pd-label: #52525b;
+        --pd-border: #000000;
+        --pd-border-subtle: #e4e4e7;
+        --pd-surface-2: #f4f4f5;
+        --pd-surface-3: #e4e4e7;
+        --pd-shadow-ink: #000000;
+      }
+      [data-theme="dark"] {
+        --pd-card-bg: #15161a;
+        --pd-text: #f4f4f6;
+        --pd-label: #a1a1aa;
+        --pd-border: #71717a;
+        --pd-border-subtle: #383842;
+        --pd-surface-2: #1e2026;
+        --pd-surface-3: #282a33;
+        --pd-shadow-ink: #000000;
+      }
+
+      /* Reset Card Radius & Frame Neobrutalist */
+      .main .provider-chassis-card,
+      .main .rack-control-module,
+      .main .channel-strips-card,
+      .main .model-fleet-card {
+        border-radius: 0 !important;
+        border: 2.5px solid var(--pd-border, #71717a) !important;
+        box-shadow: 4px 4px 0 var(--pd-shadow-ink, #000000) !important;
+        background: var(--pd-card-bg, #15161a) !important;
+        position: relative !important;
+        margin-bottom: 20px !important;
+      }
+      .main .provider-chassis-card,
+      .main .channel-strips-card,
+      .main .model-fleet-card {
+        padding: 0 !important;
+      }
+      .fusion-bento-grid > .provider-chassis-card,
+      .fusion-bento-grid > .rack-control-module {
+        margin-bottom: 0 !important;
+      }
+
+      [data-theme="light"] .main .provider-chassis-card,
+      [data-theme="light"] .main .rack-control-module,
+      [data-theme="light"] .main .channel-strips-card,
+      [data-theme="light"] .main .model-fleet-card,
+      [data-theme="light"] .main .subnav-bar {
+        background: #ffffff !important;
+        border: 2.5px solid #000000 !important;
+        box-shadow: 4px 4px 0 #000000 !important;
+      }
+
+      /* Universal Neobrutalist Hardware Screw */
+      .hw-screw {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 1px solid var(--pd-border, #71717a);
+        background: var(--pd-surface-3, #282a33);
+        position: absolute;
+        box-shadow: inset 0 0 1px #000;
+        pointer-events: none;
+        z-index: 5;
+      }
+      .hw-screw::after {
+        content: "";
+        position: absolute;
+        width: 6px;
+        height: 1px;
+        background: var(--pd-border, #71717a);
+        top: 2.5px;
+        left: 0;
+      }
+      [data-theme="light"] .hw-screw {
+        background: #e4e4e7;
+        border: 1px solid #000000;
+        box-shadow: none;
+      }
+      [data-theme="light"] .hw-screw::after {
+        background: #000000;
+      }
+      .screw-tl { top: 6px; left: 6px; }
+      .screw-tr { top: 6px; right: 6px; }
+      .screw-bl { bottom: 6px; left: 6px; }
+      .screw-br { bottom: 6px; right: 6px; }
+
+      /* BENTO MASTER GRID (2fr : 1.15fr) */
+      .fusion-bento-grid {
+        display: grid;
+        grid-template-columns: 2fr 1.15fr;
+        gap: 16px;
+        margin-bottom: 20px;
+        align-items: stretch;
+      }
+      @media (max-width: 960px) {
+        .fusion-bento-grid { grid-template-columns: 1fr; }
+      }
+
+      /* CHASSIS HEADER */
+      .chassis-header-top {
+        padding: 18px 20px 14px;
+        border-bottom: 2px dashed var(--pd-border, #71717a);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      [data-theme="light"] .chassis-header-top {
+        border-bottom-color: #000000;
+      }
+      .chassis-id-block {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 0;
+      }
+      .chassis-avatar-bezel {
+        width: 48px;
+        height: 48px;
+        border: 2.5px solid var(--pd-border, #71717a);
+        background: var(--pd-surface-2, #1e2026);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        font-weight: 900;
+        box-shadow: 2.5px 2.5px 0 var(--pd-shadow-ink, #000);
+        flex-shrink: 0;
+      }
+      [data-theme="light"] .chassis-avatar-bezel {
+        background: #f4f4f5;
+        border-color: #000000;
+        box-shadow: 2.5px 2.5px 0 #000000;
+      }
+      .chassis-title h1, .chassis-title h2 {
+        font-size: 20px;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+        margin: 0;
+        color: var(--pd-text, #f4f4f6);
+      }
+      [data-theme="light"] .chassis-title h1,
+      [data-theme="light"] .chassis-title h2 {
+        color: #09090b !important;
+      }
+      .chassis-meta-line {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        color: var(--pd-label, #a1a1aa);
+        margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .chassis-meta-line code {
+        font-size: 12px;
+        padding: 1px 6px;
+      }
+      [data-theme="light"] .chassis-meta-line {
+        color: #52525b !important;
+      }
+      .chassis-node-status {
+        color: #6ee7b7;
+        font-weight: 900;
+      }
+      [data-theme="light"] .chassis-node-status {
+        color: #065f46 !important;
+      }
+
+      /* 4-CELL TELEMETRY LEDGER STRIP */
+      .chassis-telemetry-strip {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        background: var(--pd-surface-2, #1e2026);
+      }
+      [data-theme="light"] .chassis-telemetry-strip {
+        background: #f4f4f5 !important;
+        border-top: 1.5px solid #000000 !important;
+      }
+      @media (max-width: 640px) {
+        .chassis-telemetry-strip { grid-template-columns: repeat(2, 1fr); }
+      }
+      .telemetry-cell {
+        padding: 12px 16px 14px;
+        border-right: 1.5px solid var(--pd-border, #71717a);
+        position: relative;
+        min-width: 0;
+      }
+      .telemetry-cell:last-child {
+        border-right: none;
+      }
+      [data-theme="light"] .telemetry-cell {
+        border-right: 1.5px solid #000000 !important;
+      }
+      [data-theme="light"] .telemetry-cell:last-child {
+        border-right: none !important;
+      }
+      @media (max-width: 640px) {
+        .telemetry-cell:nth-child(2n) { border-right: none !important; }
+        .telemetry-cell:nth-child(-n+2) { border-bottom: 1.5px solid var(--pd-border, #71717a); }
+        [data-theme="light"] .telemetry-cell:nth-child(-n+2) { border-bottom: 1.5px solid #000000 !important; }
+      }
+      .telemetry-label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--pd-label, #a1a1aa);
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      [data-theme="light"] .telemetry-label {
+        color: #52525b !important;
+      }
+      .telemetry-value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 16px;
+        font-weight: 900;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--pd-text, #f4f4f6);
+      }
+      [data-theme="light"] .telemetry-value {
+        color: #09090b !important;
+      }
+      .telemetry-load-pct,
+      .telemetry-load-value {
+        color: #6ee7b7;
+      }
+      [data-theme="light"] .telemetry-load-pct,
+      [data-theme="light"] .telemetry-value.telemetry-load-value {
+        color: #065f46 !important;
+      }
+
+      .led-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #6ee7b7;
+        box-shadow: 0 0 6px #6ee7b7;
+        display: inline-block;
+        flex-shrink: 0;
+      }
+      [data-theme="light"] .led-dot {
+        background: #6ee7b7;
+        border: 1px solid #000000;
+        box-shadow: none;
+      }
+      .led-dot.is-down {
+        background: var(--danger, #ef4444) !important;
+        box-shadow: 0 0 6px var(--danger, #ef4444) !important;
+      }
+
+      /* HARDWARE CONCURRENCY MODULE */
+      .rack-control-module {
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .module-title-bar {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--pd-border, #71717a);
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--pd-text, #f4f4f6);
+      }
+      [data-theme="light"] .module-title-bar {
+        color: #09090b !important;
+        border-bottom-color: #000000;
+      }
+      .badge-tag {
+        font-size: 10.5px;
+        padding: 3px 7px;
+        background: var(--pd-card-bg, #15161a);
+        border: 1px solid var(--pd-border, #71717a);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-weight: 900;
+        color: var(--pd-text, #f4f4f6);
+      }
+      [data-theme="light"] .badge-tag {
+        background: #f4f4f5;
+        border: 1.5px solid #000000;
+        color: #09090b;
+      }
+      .stepper-control-box {
+        background: var(--pd-card-bg, #15161a);
+        border: 2px solid var(--pd-border, #71717a);
+        padding: 12px;
+        box-shadow: 2px 2px 0 var(--pd-shadow-ink, #000);
+        margin-bottom: 12px;
+      }
+      [data-theme="light"] .stepper-control-box {
+        background: #fafafa;
+        border-color: #000000;
+      }
+      .stepper-label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        color: var(--pd-label, #a1a1aa);
+      }
+      [data-theme="light"] .stepper-label {
+        color: #52525b !important;
+      }
+      .arcade-stepper-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 8px;
+      }
+      .arcade-btn {
+        width: 38px;
+        height: 38px;
+        border: 2px solid var(--pd-border, #71717a);
+        background: var(--pd-surface-2, #1e2026);
+        color: var(--pd-text, #f4f4f6);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-weight: 900;
+        font-size: 19px;
+        cursor: pointer;
+        box-shadow: 2px 2px 0 var(--pd-shadow-ink, #000);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+        transition: transform 0.08s ease;
+      }
+      [data-theme="light"] .arcade-btn {
+        background: #ffffff;
+        color: #09090b;
+        border-color: #000000;
+      }
+      .arcade-btn:hover {
+        background: #ccff00;
+        color: #000000;
+        border-color: #000000;
+        transform: translate(-1px, -1px);
+      }
+      .arcade-display-number {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 28px;
+        font-weight: 900;
+        color: #ccff00;
+        text-shadow: 0 0 8px rgba(204, 255, 0, 0.35);
+        user-select: none;
+      }
+      [data-theme="light"] .arcade-display-number {
+        color: #0a0a0a !important;
+        text-shadow: none !important;
+      }
+
+      .queue-info-card {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11.5px;
+        color: var(--pd-label, #a1a1aa);
+        line-height: 1.45;
+        background: var(--pd-card-bg, #15161a);
+        border: 1.5px solid var(--pd-border-subtle, #383842);
+        padding: 8px 10px;
+        margin-bottom: 12px;
+      }
+      .queue-info-card strong {
+        color: var(--pd-text, #f4f4f6);
+      }
+      [data-theme="light"] .queue-info-card {
+        background: #f4f4f5;
+        border-color: #000000;
+        color: #52525b !important;
+      }
+      [data-theme="light"] .queue-info-card strong {
+        color: #09090b !important;
+      }
+
+      /* BUTTONS NEOBRUTALISM */
+      .btn-nb {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11.5px;
+        font-weight: 800;
+        text-transform: uppercase;
+        padding: 6px 12px;
+        border: 2px solid var(--pd-border, #71717a);
+        background: var(--pd-surface-2, #1e2026);
+        color: var(--pd-text, #f4f4f6);
+        box-shadow: 2px 2px 0 var(--pd-shadow-ink, #000);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        text-decoration: none;
+        transition: transform 0.08s ease, box-shadow 0.08s ease;
+      }
+      [data-theme="light"] .btn-nb {
+        background: #ffffff;
+        color: #09090b;
+        border-color: #000000;
+      }
+      .btn-nb:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 3px 3px 0 var(--pd-shadow-ink, #000);
+        background: var(--pd-surface-3, #282a33);
+      }
+      [data-theme="light"] .btn-nb:hover {
+        background: #f4f4f5;
+        color: #09090b;
+      }
+      .btn-nb:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+      .btn-nb-primary {
+        background: #6ee7b7 !important;
+        color: #000000 !important;
+        border: 2px solid #000000 !important;
+      }
+      .btn-nb-primary:hover {
+        background: #a7f3d0 !important;
+        color: #000000 !important;
+      }
+      .btn-nb-concurrency,
+      .btn-nb-neon {
+        background: #ccff00 !important;
+        color: #000000 !important;
+        border: 2px solid #000000 !important;
+      }
+      .btn-nb-concurrency:hover,
+      .btn-nb-neon:hover {
+        background: #d9ff33 !important;
+        color: #000000 !important;
+      }
+      .btn-nb-danger {
+        background: #ef4444 !important;
+        color: #ffffff !important;
+        border-color: #000000 !important;
+      }
+      .btn-nb-danger:hover {
+        background: #dc2626 !important;
+        color: #ffffff !important;
+      }
+
+      /* WATERFALL CHANNEL STRIPS */
+      .block-header-strip {
+        background: var(--pd-surface-2, #1e2026);
+        border-bottom: 2px solid var(--pd-border, #71717a);
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      [data-theme="light"] .block-header-strip {
+        background: #f4f4f5 !important;
+        border-bottom: 1.5px solid #000000 !important;
+      }
+      .block-header-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 13px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--pd-text, #f4f4f6);
+      }
+      [data-theme="light"] .block-header-title {
+        color: #09090b !important;
+      }
+      .block-header-sub {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        color: var(--pd-label, #a1a1aa);
+      }
+      [data-theme="light"] .block-header-sub {
+        color: #52525b !important;
+      }
+      .channel-strips-wrapper {
+        padding: 16px 20px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .empty-sub-hint {
+        margin-top: 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        color: var(--pd-label, #a1a1aa);
+      }
+      [data-theme="light"] .empty-sub-hint {
+        color: #52525b !important;
+      }
+      .account-channel-strip {
+        border: 2px solid var(--pd-border, #71717a);
+        background: var(--pd-surface-2, #1e2026);
+        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px 14px;
+        box-shadow: 2.5px 2.5px 0 var(--pd-shadow-ink, #000);
+        position: relative;
+        transition: transform 0.08s ease, box-shadow 0.08s ease;
+      }
+      [data-theme="light"] .account-channel-strip {
+        background: #fafafa;
+        border-color: #000000;
+      }
+      .account-channel-strip:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 4px 4px 0 var(--pd-shadow-ink, #000);
+      }
+      .strip-identity-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1 1 220px;
+        min-width: 0;
+      }
+      .priority-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .p-arrow-btn {
+        width: 16px;
+        height: 12px;
+        border: 1px solid var(--pd-border, #71717a);
+        background: var(--pd-card-bg, #15161a);
+        color: var(--pd-text, #f4f4f6);
+        font-size: 8px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+      }
+      [data-theme="light"] .p-arrow-btn {
+        background: #ffffff;
+        color: #09090b;
+        border-color: #000000;
+      }
+      .p-arrow-btn:hover:not(:disabled) {
+        background: #6ee7b7;
+        color: #000000;
+        border-color: #000000;
+      }
+      .p-arrow-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+      .stamp-priority-index {
+        width: 28px;
+        height: 28px;
+        background: var(--pd-surface-3, #282a33);
+        color: var(--pd-text, #f4f4f6);
+        border: 1.5px solid var(--pd-border, #71717a);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-weight: 900;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000);
+        flex-shrink: 0;
+      }
+      [data-theme="light"] .stamp-priority-index {
+        background: #000000;
+        color: #ffffff;
+        border-color: #000000;
+      }
+      .stamp-priority-index::before {
+        content: "#";
+      }
+      .account-name-block {
+        min-width: 0;
+      }
+      .account-name-block h4 {
+        font-size: 14.5px;
+        font-weight: 800;
+        margin: 0;
+        color: var(--pd-text, #f4f4f6);
+        overflow-wrap: anywhere;
+      }
+      [data-theme="light"] .account-name-block h4 {
+        color: #09090b !important;
+      }
+      .account-sub-key {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11.5px;
+        color: var(--pd-label, #a1a1aa);
+        margin-top: 2px;
+      }
+      [data-theme="light"] .account-sub-key,
+      [data-theme="light"] .account-sub-key .hint {
+        color: #52525b !important;
+      }
+
+      /* PROXY JACK COMPACT DROPDOWN */
+      .strip-proxy-cell {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .proxy-jack-details {
+        position: relative;
+        display: inline-block;
+      }
+      .proxy-jack-badge {
+        padding: 5px 10px;
+        border: 1.5px solid var(--pd-border, #71717a);
+        background: var(--pd-card-bg, #15161a);
+        color: var(--pd-text, #f4f4f6);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000);
+        cursor: pointer;
+        user-select: none;
+        list-style: none;
+      }
+      [data-theme="light"] .proxy-jack-badge {
+        background: #ffffff;
+        color: #09090b;
+        border-color: #000000;
+      }
+      .proxy-jack-icon {
+        font-weight: 900;
+      }
+      .proxy-jack-icon.is-pool { color: #6ee7b7; }
+      [data-theme="light"] .proxy-jack-icon.is-pool { color: #065f46; }
+      .proxy-jack-icon.is-manual { color: #3b82f6; }
+      [data-theme="light"] .proxy-jack-icon.is-manual { color: #2563eb; }
+      .proxy-jack-icon.is-direct { color: var(--pd-label, #a1a1aa); }
+      [data-theme="light"] .proxy-jack-icon.is-direct { color: #52525b; }
+      .proxy-jack-badge::-webkit-details-marker { display: none; }
+      .proxy-jack-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 50;
+        background: var(--pd-card-bg, #15161a);
+        border: 2px solid var(--pd-border, #71717a);
+        box-shadow: 4px 4px 0 var(--pd-shadow-ink, #000);
+        padding: 10px;
+        min-width: 260px;
+        max-width: calc(100vw - 48px);
+      }
+      [data-theme="light"] .proxy-jack-menu {
+        background: #ffffff;
+        border-color: #000000;
+        color: #09090b;
+      }
+      .proxy-jack-menu-title {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        font-weight: 800;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        color: var(--pd-label, #a1a1aa);
+      }
+      [data-theme="light"] .proxy-jack-menu-title {
+        color: #52525b;
+      }
+
+      /* SLOT METER */
+      .strip-slot-meter {
+        background: var(--pd-card-bg, #15161a);
+        border: 1.5px solid var(--pd-border, #71717a);
+        color: var(--pd-text, #f4f4f6);
+        padding: 5px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 800;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000);
+        flex-shrink: 0;
+      }
+      [data-theme="light"] .strip-slot-meter {
+        background: #ffffff;
+        border-color: #000000;
+        color: #09090b !important;
+      }
+      .slot-meter-units {
+        display: inline-flex;
+        gap: 3px;
+      }
+      .meter-unit {
+        width: 7px;
+        height: 14px;
+        background: var(--pd-surface-3, #282a33);
+        border: 1px solid var(--pd-border, #71717a);
+      }
+      [data-theme="light"] .meter-unit {
+        background: #f4f4f5;
+        border: 1px solid #000000;
+      }
+      .meter-unit.on {
+        background: #6ee7b7 !important;
+        border-color: #000000 !important;
+        box-shadow: 0 0 3px #6ee7b7;
+      }
+      [data-theme="light"] .meter-unit.on {
+        background: #6ee7b7 !important;
+        border-color: #000000 !important;
+        box-shadow: none !important;
+      }
+
+      .strip-actions-group {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      /* STATUS TAGS */
+      .tag-status {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 10.5px;
+        font-weight: 900;
+        text-transform: uppercase;
+        padding: 4px 8px;
+        border: 1.5px solid;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000);
+        display: inline-block;
+        flex-shrink: 0;
+      }
+      .tag-status-operational {
+        background: #6ee7b7 !important;
+        color: #000000 !important;
+        border: 1.5px solid #000000 !important;
+        font-weight: 900;
+      }
+      .tag-status-cooldown {
+        background: #facc15 !important;
+        color: #000000 !important;
+        border: 1.5px solid #000000 !important;
+        font-weight: 900;
+      }
+      .tag-status-exhausted {
+        background: #7f1d1d;
+        color: #f87171;
+        border-color: #dc2626;
+      }
+      .tag-status-inactive {
+        background: var(--pd-surface-3, #282a33);
+        color: var(--pd-label, #a1a1aa);
+        border-color: var(--pd-border, #71717a);
+      }
+      [data-theme="light"] .tag-status-operational {
+        background: #6ee7b7 !important;
+        color: #000000 !important;
+        border: 1.5px solid #000000 !important;
+        font-weight: 900;
+      }
+      [data-theme="light"] .tag-status-cooldown {
+        background: #facc15 !important;
+        color: #000000 !important;
+        border: 1.5px solid #000000 !important;
+        font-weight: 900;
+      }
+      [data-theme="light"] .tag-status-exhausted {
+        background: #fee2e2 !important;
+        color: #991b1b !important;
+        border-color: #dc2626 !important;
+      }
+      [data-theme="light"] .tag-status-inactive {
+        background: #f4f4f5 !important;
+        color: #71717a !important;
+        border-color: #d4d4d8 !important;
+      }
+
+      /* MODEL FLEET CATALOG */
+      .model-sync-strip {
+        padding: 10px 20px;
+        border-bottom: 1.5px solid var(--pd-border-subtle, #383842);
+        background: var(--pd-card-bg, #15161a);
+      }
+      .model-sync-strip .hint {
+        margin-bottom: 0 !important;
+      }
+      [data-theme="light"] .model-sync-strip {
+        background: #ffffff;
+        border-bottom-color: #e4e4e7;
+      }
+      [data-theme="light"] .model-sync-strip .hint {
+        color: #52525b !important;
+      }
+      .models-toolbar {
+        padding: 12px 20px;
+        background: var(--pd-card-bg, #15161a);
+        border-bottom: 2px solid var(--pd-border, #71717a);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px 12px;
+        flex-wrap: wrap;
+      }
+      [data-theme="light"] .models-toolbar {
+        background: #ffffff;
+        border-bottom-color: #000000;
+      }
+      .models-search-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1 1 200px;
+        max-width: 320px;
+      }
+      @media (max-width: 640px) {
+        .models-search-wrap { max-width: 100%; flex: 1 1 100%; }
+      }
+      .search-cli-input {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        padding: 7px 12px;
+        background: var(--pd-surface-2, #1e2026);
+        border: 2px solid var(--pd-border, #71717a);
+        color: var(--pd-text, #f4f4f6);
+        box-shadow: 2px 2px 0 var(--pd-shadow-ink, #000);
+        outline: none;
+      }
+      [data-theme="light"] .search-cli-input {
+        background: #ffffff;
+        color: #09090b;
+        border-color: #000000;
+      }
+      .filter-pills-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .filter-pill {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        padding: 5px 10px;
+        border: 1.5px solid var(--pd-border, #71717a);
+        background: var(--pd-surface-2, #1e2026);
+        color: var(--pd-text, #f4f4f6);
+        cursor: pointer;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000);
+      }
+      .filter-pill:hover {
+        background: var(--pd-surface-3, #282a33);
+      }
+      .filter-pill.active {
+        background: #6ee7b7;
+        color: #000000;
+        border-color: #000000;
+        font-weight: 900;
+      }
+      [data-theme="light"] .filter-pill {
+        background: #ffffff;
+        color: #09090b;
+        border: 1.5px solid #000000;
+      }
+      [data-theme="light"] .filter-pill:hover {
+        background: #f4f4f5;
+      }
+      [data-theme="light"] .filter-pill.active {
+        background: #6ee7b7;
+        color: #000000;
+        border: 1.5px solid #000000;
+      }
+
+      /* CATALOG TABLE */
+      .rack-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+        border: none;
+        background: transparent;
+      }
+      .rack-table th {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        text-align: left;
+        padding: 12px 14px;
+        text-wrap: balance;
+        background: var(--pd-surface-2, #1e2026);
+        color: var(--pd-label, #a1a1aa);
+        border-bottom: 2px solid var(--pd-border, #71717a);
+      }
+      [data-theme="light"] .rack-table th {
+        background: #f4f4f5 !important;
+        border-bottom: 1.5px solid #000000 !important;
+        color: #52525b !important;
+      }
+      .rack-table td {
+        padding: 11px 14px;
+        line-height: 1.45;
+        border-bottom: 1.5px solid var(--pd-border-subtle, #383842);
+        vertical-align: middle;
+        color: var(--pd-text, #f4f4f6);
+      }
+      .rack-table td code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 13px;
+        padding: 3px 7px;
+      }
+      [data-theme="light"] .rack-table td {
+        border-bottom: 1.5px solid #e4e4e7;
+        color: #09090b;
+      }
+      [data-theme="light"] .rack-table tr.muted td {
+        color: #71717a;
+      }
+      .rack-table tbody tr:hover {
+        background: var(--pd-surface-2, #1e2026);
+      }
+      [data-theme="light"] .rack-table tbody tr:hover {
+        background: #f8fafc;
+      }
+      .rack-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* Netralkan ikon capability reasoning agar tidak berwarna pink/merah di samping model ID */
+      .rack-table .cap-icon.is-reasoning {
+        color: #a1a1aa;
+      }
+      [data-theme="light"] .rack-table .cap-icon.is-reasoning {
+        color: #52525b;
+      }
+      .rack-table .cap-icon.is-vision {
+        color: #38bdf8;
+      }
+      [data-theme="light"] .rack-table .cap-icon.is-vision {
+        color: #0284c7;
+      }
+
+      .source-builtin {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        color: var(--pd-label, #a1a1aa);
+      }
+      [data-theme="light"] .source-builtin {
+        color: #52525b !important;
+      }
+
+      /* HARDWARE ROCKER TOGGLE SWITCH */
+      .rocker-toggle {
+        display: inline-flex;
+        border: 2px solid #71717a;
+        box-shadow: 2px 2px 0 #000000;
+        cursor: pointer;
+        padding: 0;
+        background: none;
+      }
+      [data-theme="light"] .rocker-toggle {
+        border: 2px solid #000000;
+        box-shadow: 2px 2px 0 #000000;
+      }
+      .rocker-opt {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        font-weight: 900;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        background: #282a33;
+        color: #a1a1aa;
+      }
+      [data-theme="light"] .rocker-opt {
+        background: #f4f4f5;
+        color: #71717a;
+      }
+      .rocker-opt.active {
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+      [data-theme="light"] .rocker-opt.active {
+        background: #000000 !important;
+        color: #ffffff !important;
+      }
+
+      /* CAPABILITY BADGES */
+      .tag-fusion {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 10.5px;
+        font-weight: 900;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border: 1.5px solid #000000;
+        box-shadow: 1.5px 1.5px 0 #000000;
+        margin-left: 6px;
+        display: inline-block;
+        vertical-align: middle;
+      }
+      .tag-vision { background: #3b82f6; color: #ffffff; }
+      .tag-thinking { background: #ffb3d9; color: #000000; }
+      .tag-free { background: #ccff00 !important; color: #000000 !important; border: 1.5px solid #000000 !important; }
+      .tag-custom { background: #fde047 !important; color: #000000 !important; border: 1.5px solid #000000 !important; }
+      [data-theme="light"] .tag-custom { background: #fde047 !important; color: #000000 !important; border: 1.5px solid #000000 !important; }
+      .tag-synced { background: var(--pd-surface-3, #282a33); color: var(--pd-text, #f4f4f6); border-color: var(--pd-border, #71717a); margin-left: 0; }
+      [data-theme="light"] .tag-synced { background: #f4f4f5; color: #09090b; border-color: #000000; }
+      .tag-imported { background: #facc15 !important; color: #000000 !important; border: 1.5px solid #000000 !important; margin-left: 0; }
+      [data-theme="light"] .tag-imported { background: #facc15 !important; color: #000000 !important; border: 1.5px solid #000000 !important; }
+
+      /* CUSTOM CHECKBOX 18x18 NEOBRUTALIST */
+      .nb-check {
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        width: 18px !important;
+        height: 18px !important;
+        border: 2px solid var(--pd-border, #71717a) !important;
+        background: var(--pd-card-bg, #15161a) !important;
+        cursor: pointer !important;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000) !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        position: relative !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        outline: none !important;
+        vertical-align: middle !important;
+      }
+      [data-theme="light"] .nb-check {
+        border-color: #000000 !important;
+        background: #ffffff !important;
+      }
+      .nb-check:checked {
+        background: #6ee7b7 !important;
+        border-color: #000000 !important;
+      }
+      .nb-check:checked::after {
+        content: "" !important;
+        display: block !important;
+        width: 5px !important;
+        height: 9px !important;
+        border: solid #000000 !important;
+        border-width: 0 2px 2px 0 !important;
+        transform: rotate(45deg) !important;
+        margin-top: -2px !important;
+      }
+
+      /* SUBNAV & HIGHLIGHTS */
+      .subnav-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        background: var(--pd-surface-2, #1e2026);
+        border: 2px solid var(--pd-border, #71717a);
+        box-shadow: 3px 3px 0 var(--pd-shadow-ink, #000);
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .subnav-bar .detail-subnav {
+        position: static;
+        margin-bottom: 0;
+        padding: 0;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+      }
+      .subnav-bar .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 800;
+        color: var(--pd-text, #f4f4f6);
+        text-decoration: none;
+        text-transform: uppercase;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 2px 4px;
+      }
+      .subnav-bar .back-link:hover {
+        color: #6ee7b7;
+        background: transparent;
+        transform: none;
+        box-shadow: none;
+      }
+      [data-theme="light"] .subnav-bar .back-link {
+        color: #09090b !important;
+      }
+      [data-theme="light"] .subnav-bar .back-link:hover {
+        color: #09090b !important;
+        text-decoration: underline;
+      }
+      .subnav-bar .anchor-pill,
+      .anchor-pill {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border: 1.5px solid var(--pd-border, #71717a);
+        background: var(--pd-card-bg, #15161a);
+        color: var(--pd-text, #f4f4f6);
+        text-decoration: none;
+        box-shadow: 1.5px 1.5px 0 var(--pd-shadow-ink, #000);
+      }
+      [data-theme="light"] .subnav-bar .anchor-pill,
+      [data-theme="light"] .anchor-pill {
+        background: #f4f4f5;
+        color: #09090b !important;
+        border: 1.5px solid #000000;
+      }
+      .subnav-bar .anchor-pill:hover,
+      .anchor-pill:hover {
+        background: #6ee7b7;
+        color: #000000 !important;
+        border-color: #000000;
+      }
+
+      @media (max-width: 768px) {
+        .chassis-header-top { padding: 16px; }
+        .chassis-title h1, .chassis-title h2 { font-size: 18px; }
+        .block-header-strip { padding: 10px 14px; }
+        .channel-strips-wrapper { padding: 12px 14px; }
+        .models-toolbar { padding: 10px 14px; }
+        .rack-table th, .rack-table td { padding: 10px 12px; }
+        .account-channel-strip { align-items: flex-start; }
+        .strip-identity-left { flex: 1 1 100%; }
+      }
+    </style>
+
+    <div class="subnav-bar">
+      <a href="/dashboard/providers" class="back-link">&larr; Back to Providers Overview</a>
+      <nav class="detail-subnav section-anchors" aria-label="Navigasi section" style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <a href="#ringkasan" class="anchor-pill">Chassis</a>
+        <a href="#akun" class="anchor-pill">Auth Channels (${p.noAuth ? "0" : accounts.length})</a>
+        <a href="#batas" class="anchor-pill">Batas &amp; Rotasi</a>
+        <a href="#model" class="anchor-pill">Model Fleet (${totalModels})</a>
+      </nav>
     </div>
+
     ${
       notice
-        ? `<div class="notice ${notice.ok ? "notice-ok" : "notice-error"}"><span>${escapeHtml(
+        ? `<div class="notice ${notice.ok ? "notice-ok" : "notice-error"}" style="margin-bottom: 16px;"><span>${escapeHtml(
             notice.text
           )}</span><button type="button" class="notice-close" onclick="this.parentElement.remove()">&times;</button></div>`
         : ""
     }
 
-    <nav class="detail-subnav" aria-label="Navigasi section">
-      <a href="#ringkasan">Ringkasan</a>
-      <a href="#akun">Akun</a>
-      <a href="#batas">Batas &amp; Rotasi</a>
-      <a href="#model">Model</a>
-    </nav>
-
-    <div class="card" id="ringkasan">
-      <div class="window-header window-header-card" aria-hidden="true">
-        <span class="window-title">${escapeHtml(p.id)}</span>
-        <div class="window-controls"><span>_</span><span>&#9633;</span><span class="wc-close">&#10005;</span></div>
-      </div>
-      <div class="provider-card-head">
-        <div class="provider-title">
-          ${providerIconHtml(p, 40)}
-          <div class="provider-text">
-            <h3 style="font-size: 1.1rem;">${escapeHtml(p.name)}</h3>
-            <p class="hint">Prefix model <code>${escapeHtml(alias)}/</code> &middot; kategori ${p.category === "custom" ? "Custom" : p.category === "free" ? "Gratis" : p.category === "oauth" ? "OAuth" : p.category === "session" ? "Sesi Browser" : "API Key"}</p>
-          </div>
-        </div>
-        <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: auto; flex-wrap: wrap;">
-          ${noAuthProxyBadge}
-          ${statusPill(p, stats, accounts)}
-        </div>
-      </div>
-      ${p.category === "free" ? `<div class="pill-row">${freeTierPills(p.id)}</div>` : ""}
-      ${
-        !p.noAuth
-          ? `<form action="/dashboard/providers/test-connection" method="POST" style="display:inline;">
-            <input type="hidden" name="provider" value="${id}" />
-            <button type="submit" class="btn btn-sm btn-ghost">Uji Koneksi</button>
-          </form>`
-          : ""
-      }
-      ${p.keyUrl ? `<p class="hint" style="margin-top: 10px;">${keyLink(p, p.noAuth ? "Buat API key (opsional)" : "Buat API key")}</p>` : ""}
-      ${
-        p.isCustom
-          ? `<div style="margin-top: 12px; padding-top: 10px; border-top: var(--bw) solid var(--line);">
-              <form action="/dashboard/providers/custom/delete" method="POST" data-confirm="Hapus custom provider ini beserta semua akun dan modelnya?">
-                <input type="hidden" name="provider" value="${id}" />
-                <button type="submit" class="btn btn-danger btn-sm">Hapus Custom Provider</button>
-              </form>
-            </div>`
-          : ""
-      }
-      <p class="hint" style="margin-top: 6px; font-size: var(--text-xs);">Data traffic & slot difetch pada ${trafficUpdated} WIB. Segarkan halaman untuk memperbarui.</p>
-    </div>
-
     ${
       isSession
-        ? `<div class="notice notice-warning"><span>Akses ini memakai antarmuka web DeepSeek, bukan API resmi. Pemakaian di luar klien resmi bisa melanggar ketentuan layanan mereka dan berisiko pembatasan atau pemblokiran akun. Token setara akses penuh ke akun dan tersimpan sebagai teks biasa di database lokal. Gateway tidak menyediakan akun bersama: provider ini nonaktif sampai Anda menambahkan token sendiri, dan Anda memakai akun tersebut dengan risiko sendiri.</span></div>`
+        ? `<div class="notice notice-warning" style="margin-bottom: 16px;"><span>Akses ini memakai antarmuka web DeepSeek, bukan API resmi. Pemakaian di luar klien resmi bisa melanggar ketentuan layanan mereka dan berisiko pembatasan atau pemblokiran akun. Token setara akses penuh ke akun dan tersimpan sebagai teks biasa di database lokal. Gateway tidak menyediakan akun bersama: provider ini nonaktif sampai Anda menambahkan token sendiri, dan Anda memakai akun tersebut dengan risiko sendiri.</span></div>`
         : ""
     }
 
-    <div class="card" id="akun">
-      <div class="card-head">
-        <h3>Accounts${p.noAuth ? "" : ` (${accounts.length})`}</h3>
-        ${p.noAuth ? "" : `<button class="btn btn-primary btn-sm" onclick="openModal('add-account-modal')">Tambah Akun</button>`}
+    <!-- BENTO 1 & 2 FUSION (CHASSIS + CONCURRENCY / EGRESS CONTROL) -->
+    <div class="fusion-bento-grid" id="ringkasan">
+      <!-- LEFT BENTO: HARDWARE CHASSIS HEADER -->
+      <div class="card provider-chassis-card rack-chassis-card">
+        <div class="hw-screw screw-tl"></div>
+        <div class="hw-screw screw-tr"></div>
+        <div class="hw-screw screw-bl"></div>
+        <div class="hw-screw screw-br"></div>
+
+        <div class="chassis-header-top">
+          <div class="chassis-id-block">
+            <div class="chassis-avatar-bezel">
+              ${providerIconHtml(p, 36)}
+            </div>
+            <div class="chassis-title">
+              <h2>${escapeHtml(p.name)}</h2>
+              <div class="chassis-meta-line">
+                <span>PREFIX: <code>${escapeHtml(alias)}/</code></span>
+                <span>&middot;</span>
+                <span>CATEGORY: ${p.category === "custom" ? "CUSTOM" : p.category === "free" ? "GRATIS" : p.category === "oauth" ? "OAUTH" : p.category === "session" ? "SESI BROWSER" : "API KEY"}</span>
+                <span>&middot;</span>
+                <span class="chassis-node-status">NODE: ${p.noAuth ? "NO-AUTH READY" : `${stats.healthy}/${stats.total} ACTIVE`}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chassis-actions-top" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            ${
+              !p.noAuth
+                ? `<form action="/dashboard/providers/test-connection" method="POST" style="display:inline;margin:0;">
+                  <input type="hidden" name="provider" value="${id}" />
+                  <button type="submit" class="btn-nb">&#9889; Uji Koneksi</button>
+                </form>`
+                : ""
+            }
+            ${p.noAuth ? "" : `<button type="button" class="btn-nb btn-nb-primary" onclick="openModal('add-account-modal')">+ Tambah Akun</button>`}
+            ${
+              p.isCustom
+                ? `<form action="/dashboard/providers/custom/delete" method="POST" style="display:inline;margin:0;" data-confirm="Hapus custom provider ini beserta semua akun dan modelnya?">
+                  <input type="hidden" name="provider" value="${id}" />
+                  <button type="submit" class="btn-nb btn-nb-danger">Hapus Custom Provider</button>
+                </form>`
+                : ""
+            }
+            ${p.keyUrl ? `<a class="btn-nb" href="${escapeHtml(p.keyUrl)}" target="_blank" rel="noopener noreferrer">${p.noAuth ? "API KEY (OPSIONAL)" : "BUAT API KEY"} &#8599;</a>` : ""}
+          </div>
+        </div>
+
+        <!-- 4-CELL TELEMETRY STRIP -->
+        <div class="chassis-telemetry-strip">
+          <div class="telemetry-cell">
+            <div class="telemetry-label">
+              <span>AUTH CHANNELS</span>
+              <span class="led-dot${stats.healthy > 0 || p.noAuth ? "" : " is-down"}"></span>
+            </div>
+            <div class="telemetry-value">
+              ${p.noAuth ? "Siap (No-Auth)" : `${stats.healthy} / ${stats.total} Akun Aktif`}
+            </div>
+          </div>
+
+          <div class="telemetry-cell">
+            <div class="telemetry-label">
+              <span>CONCURRENCY LOAD</span>
+              <span class="telemetry-load-pct">${traffic.cap > 0 ? Math.round((traffic.inFlight / traffic.cap) * 100) : 0}%</span>
+            </div>
+            <div class="telemetry-value telemetry-load-value">
+              ${traffic.inFlight}/${traffic.cap || effectiveConcurrency} dipakai
+            </div>
+          </div>
+
+          <div class="telemetry-cell">
+            <div class="telemetry-label">
+              <span>EGRESS TOPOLOGY</span>
+              <span>${activePoolCount > 0 ? `${activePoolCount} POOLS` : "DIRECT"}</span>
+            </div>
+            <div class="telemetry-value">
+              ${
+                p.noAuth
+                  ? (proxyRotationStrategy !== "off"
+                      ? `Rotasi (${proxyRotationStrategy === "round_robin" ? "Bergiliran" : "Acak"})`
+                      : (boundPools.length > 0 ? `Bound (${escapeHtml(boundPools[0].name)})` : "Direct"))
+                  : (activePoolCount > 0 ? `${activePoolCount} Pools` : "Direct (Tanpa Proxy)")
+              }
+            </div>
+          </div>
+
+          <div class="telemetry-cell">
+            <div class="telemetry-label">
+              <span>MODEL DIRECTORY</span>
+              <span>${p.freeModelSync || p.catalogRefresh ? "SYNCED" : "STATIC"}</span>
+            </div>
+            <div class="telemetry-value">${totalModels} Model</div>
+          </div>
+        </div>
       </div>
+
+      <!-- RIGHT BENTO: RACK CONCURRENCY & LIMITS MODULE -->
+      <div class="card rack-control-module" id="batas">
+        <div class="hw-screw screw-tl"></div>
+        <div class="hw-screw screw-tr"></div>
+        <div class="hw-screw screw-bl"></div>
+        <div class="hw-screw screw-br"></div>
+
+        ${
+          !p.noAuth
+            ? `
+        <div>
+          <div class="module-title-bar">
+            <span>Batas Sesi Paralel</span>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <span class="badge-tag">${escapeHtml(String(effectiveConcurrency))} per akun</span>
+              ${traffic.accounts.length > 0 ? `<span class="badge-tag">${traffic.inFlight}/${traffic.cap} dipakai</span>${traffic.queue > 0 ? ` <span class="badge-tag" style="background:#facc15;color:#000;">${traffic.queue} antre</span>` : ""}` : ""}
+            </div>
+          </div>
+
+          <form action="/dashboard/providers/concurrency" method="POST" id="concurrency-form" style="margin: 0;">
+            <input type="hidden" name="provider" value="${id}" />
+            <div class="stepper-control-box">
+              <div class="stepper-label">Maksimal request serentak per akun</div>
+              <div class="arcade-stepper-row">
+                <button type="button" class="arcade-btn" onclick="stepDownConcurrency()">-</button>
+                <span class="arcade-display-number" id="stepper-val">${effectiveConcurrency}</span>
+                <button type="button" class="arcade-btn" onclick="stepUpConcurrency()">+</button>
+              </div>
+              <input type="number" id="provider-concurrency" name="concurrency" min="1" max="10" step="1" value="${escapeHtml(String(concurrencySetting || effectiveConcurrency))}" placeholder="${escapeHtml(String(concurrencyPlaceholder))}" style="display:none;" />
+            </div>
+
+            <div class="queue-info-card">
+              <strong>FAILOVER TIMEOUT:</strong> ${Math.round((queueTimeoutMs ?? 30000) / 1000)}.00s queue limit. Request di atas batas menunggu antrean router.
+              ${traffic.serialTurns ? "<br/><em>Turn serial: 1 turn bergiliran per akun.</em>" : ""}
+            </div>
+
+            <button type="submit" class="btn-nb btn-nb-concurrency" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 800; text-transform: uppercase; padding: 8px 14px;">
+              SIMPAN BATAS CONCURRENCY
+            </button>
+          </form>
+        </div>`
+            : `
+        <div>
+          <div class="module-title-bar">
+            <span>Rotasi Proxy</span>
+            <span class="badge-tag">NO-AUTH</span>
+          </div>
+
+          ${p.id === "opencode" ? `
+          <form action="/dashboard/providers/proxy-rotation" method="POST" style="margin-bottom: 12px;">
+            <input type="hidden" name="provider" value="opencode" />
+            <div class="stepper-label" style="margin-bottom: 4px;">Kebijakan Egress OpenCode</div>
+            <select id="opencode-egress-policy" name="egress_policy" class="search-cli-input" style="width: 100%; margin-bottom: 6px;">
+              ${["legacy", "direct", "prefer", "require"].map((mode) => `<option value="${mode}" ${getOpencodeEgressPolicy() === mode ? "selected" : ""}>${mode}</option>`).join("")}
+            </select>
+            <div class="stepper-label" style="margin-bottom: 4px;">ID Proxy Pool (Koma)</div>
+            <input id="opencode-pool-ids" name="pool_ids" class="search-cli-input" style="width: 100%; margin-bottom: 8px;" value="${escapeHtml(getOpencodeScopedPoolIds().join(","))}" />
+            <button type="submit" class="btn-nb btn-nb-concurrency" style="width: 100%; justify-content: center; margin-bottom: 8px; font-size: 12px; font-weight: 800; text-transform: uppercase; padding: 8px 14px;">SIMPAN KEBIJAKAN</button>
+          </form>` : ""}
+
+          <form action="/dashboard/providers/proxy-rotation" method="POST" style="margin: 0;">
+            <input type="hidden" name="provider" value="${id}" />
+            <div class="stepper-control-box">
+              <div class="stepper-label" style="margin-bottom: 6px;">Strategi Rotasi Proxy Pool</div>
+              <select id="proxy-rotation-strategy" name="strategy" class="search-cli-input" style="width: 100%;">
+                <option value="off" ${proxyRotationStrategy === "off" ? "selected" : ""}>Tidak aktif</option>
+                <option value="round_robin" ${proxyRotationStrategy === "round_robin" ? "selected" : ""}>Bergiliran</option>
+                <option value="random" ${proxyRotationStrategy === "random" ? "selected" : ""}>Acak</option>
+              </select>
+            </div>
+
+            <div class="queue-info-card">
+              <strong>EGRESS ROUTING:</strong> Saat aktif, setiap request ke provider ini memakai proxy aktif dari Proxy Pool dan failover maksimal 3x per request.
+            </div>
+
+            <button type="submit" class="btn-nb btn-nb-concurrency" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 800; text-transform: uppercase; padding: 8px 14px;">
+              SIMPAN STRATEGI
+            </button>
+          </form>
+        </div>`
+        }
+      </div>
+    </div>
+
+    <!-- SECTION 2: ACCOUNTS ROSTER (CHANNEL STRIPS) -->
+    <div class="card channel-strips-card" id="akun">
+      <div class="hw-screw screw-tl"></div>
+      <div class="hw-screw screw-tr"></div>
+      <div class="hw-screw screw-bl"></div>
+      <div class="hw-screw screw-br"></div>
+
+      <div class="block-header-strip">
+        <div class="block-header-title">
+          <span>AUTHENTICATION ROSTER${p.noAuth ? "" : ` (${accounts.length})`}</span>
+          <span class="badge-tag">PRIORITY STACK</span>
+        </div>
+        <div class="block-header-sub">
+          Prioritas dari atas ke bawah saat jenuh atau cooldown.
+        </div>
+      </div>
+
+      <!-- Hidden accessibility table header for tests and screen readers -->
+      <table class="sr-only" style="display:none;" aria-hidden="true">
+        <thead>
+          <tr>
+            <th>Urutan</th>
+            <th>Nama</th>
+            <th>Auth</th>
+            <th>Proxy</th>
+            <th>Status</th>
+            <th>Slot</th>
+            ${isSession ? "<th>Sesi</th>" : ""}
+            <th></th>
+          </tr>
+        </thead>
+      </table>
+
       ${accountsBody}
     </div>
 
-    ${
-      p.noAuth
-        ? ""
-        : `<div class="card" id="batas">
-      <div class="card-head">
-        <h3>Batas Sesi Paralel</h3>
-        <span class="pill">${escapeHtml(String(effectiveConcurrency))} per akun</span>
-        ${traffic.serialTurns ? `<span class="pill pill-info" title="Upstream hanya melayani satu generasi per akun, jadi turn kedua menunggu turn pertama selesai">1 turn bergiliran</span>` : ""}
-        ${
-          traffic.accounts.length > 0
-            ? `<span class="pill${traffic.inFlight >= traffic.cap ? " pill-warning" : ""}">${traffic.inFlight}/${traffic.cap} dipakai</span>
-        ${traffic.queue > 0 ? `<span class="pill pill-warning">${traffic.queue} antre</span>` : ""}`
-            : ""
-        }
-      </div>
-      <form action="/dashboard/providers/concurrency" method="POST">
-        <input type="hidden" name="provider" value="${id}" />
-        <div class="field">
-          <label for="provider-concurrency">Maksimal request serentak per akun</label>
-          <input id="provider-concurrency" name="concurrency" type="number" min="1" max="10" step="1" value="${escapeHtml(String(concurrencySetting))}" placeholder="${escapeHtml(String(concurrencyPlaceholder))}" />
-        </div>
-        <p class="hint">Batas dihitung per akun, jadi dua akun aktif berarti total dua kali lipat. Request di atas batas menunggu dalam antrean; lewat ${escapeHtml(String(Math.round((queueTimeoutMs ?? 30000) / 1000)))} detik klien menerima 429 dan gateway mencoba akun berikutnya. Panggilan bantu seperti judul sesi menyerah setelah 2 detik agar tidak menahan percakapan. Kosongkan untuk memakai nilai bawaan.${
-          traffic.serialTurns
-            ? " Provider ini menyerialkan turn: angka di atas adalah jumlah percakapan yang tetap hangat di upstream, sedangkan turn yang berjalan bersamaan tetap satu per akun dan sisanya menunggu."
-            : ""
-        }</p>
-        <div class="modal-actions">
-          <button type="submit" class="btn btn-primary">Simpan Batas</button>
-        </div>
-      </form>
-    </div>`
-    }
+    <!-- SECTION 3: MODEL FLEET DIRECTORY -->
+    <div class="card model-fleet-card" id="model">
+      <div class="hw-screw screw-tl"></div>
+      <div class="hw-screw screw-tr"></div>
+      <div class="hw-screw screw-bl"></div>
+      <div class="hw-screw screw-br"></div>
 
-    ${
-      p.noAuth
-        ? `<div class="card" id="batas">
-      <div class="card-head" style="flex-wrap: wrap; gap: 0.5rem;">
-        <h3>Rotasi Proxy</h3>
-        ${noAuthProxyBadge}
-      </div>
-      ${p.id === "opencode" ? `<form action="/dashboard/providers/proxy-rotation" method="POST">
-        <input type="hidden" name="provider" value="opencode" />
-        <label for="opencode-egress-policy">Kebijakan egress OpenCode</label>
-        <select id="opencode-egress-policy" name="egress_policy">${["legacy", "direct", "prefer", "require"].map((mode) => `<option value="${mode}" ${getOpencodeEgressPolicy() === mode ? "selected" : ""}>${mode}</option>`).join("")}</select>
-        <label for="opencode-pool-ids">ID proxy pool yang diizinkan (pisahkan dengan koma)</label>
-        <input id="opencode-pool-ids" name="pool_ids" value="${escapeHtml(getOpencodeScopedPoolIds().join(","))}" />
-        <p class="hint">Require menolak request tanpa proxy aktif dalam daftar. Prefer memakai daftar tersebut, atau langsung jika kosong. Legacy mempertahankan perilaku sebelumnya.</p>
-        <button type="submit" class="btn btn-primary">Simpan Kebijakan</button>
-      </form>` : ""}
-      <form action="/dashboard/providers/proxy-rotation" method="POST">
-        <input type="hidden" name="provider" value="${id}" />
-        <div class="field">
-          <label for="proxy-rotation-strategy">Strategi</label>
-          <select id="proxy-rotation-strategy" name="strategy">
-            <option value="off" ${proxyRotationStrategy === "off" ? "selected" : ""}>Tidak aktif</option>
-            <option value="round_robin" ${proxyRotationStrategy === "round_robin" ? "selected" : ""}>Bergiliran</option>
-            <option value="random" ${proxyRotationStrategy === "random" ? "selected" : ""}>Acak</option>
-          </select>
+      <div class="block-header-strip">
+        <div class="block-header-title">
+          <span>MODEL DIRECTORY (${totalModels} MODELS)</span>
         </div>
-        <p class="hint">Saat aktif, setiap request ke provider ini memakai proxy aktif dari daftar Proxy dan pindah ke proxy berikutnya bila gagal, maksimal tiga percobaan per request. Daftar proxy aktif yang kosong berarti request tetap lewat koneksi langsung.</p>
-        <div class="modal-actions">
-          <button type="submit" class="btn btn-primary">Simpan Strategi</button>
-        </div>
-      </form>
-    </div>`
-        : ""
-    }
-
-    <div class="card" id="model">
-      <div class="card-head">
-        <h3>Model (${totalModels})</h3>
-        <div class="btn-row">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           ${
             hasImported
               ? `<form action="/dashboard/providers/models/import/clear" method="POST" style="margin: 0;" data-confirm="Hapus semua model hasil import?">
             <input type="hidden" name="provider" value="${id}" />
-            <button type="submit" class="btn btn-danger btn-sm">Bersihkan Impor</button>
+            <button type="submit" class="btn-nb btn-nb-danger" style="padding: 5px 12px; font-size: 11px;">Bersihkan Impor</button>
           </form>`
               : ""
           }
@@ -1316,60 +2682,73 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
             p.freeModelSync || p.catalogRefresh
               ? `<form action="/dashboard/providers/models/sync" method="POST" style="margin: 0;">
             <input type="hidden" name="provider" value="${id}" />
-            <button type="submit" class="btn btn-sm">Sinkron Sekarang</button>
+            <button type="submit" class="btn-nb" style="padding: 5px 12px; font-size: 11px;">&#8635; Sinkron Sekarang</button>
           </form>`
               : ""
           }
-          ${importModes.length > 0 ? `<button class="btn btn-sm" onclick="openModal('import-models-modal')">Import Models</button>` : ""}
-          <button class="btn btn-primary btn-sm" onclick="openModal('add-model-modal')">Add Custom Model</button>
+          ${importModes.length > 0 ? `<button type="button" class="btn-nb" style="padding: 5px 12px; font-size: 11px;" onclick="openModal('import-models-modal')">Import Models</button>` : ""}
+          <button type="button" class="btn-nb btn-nb-neon" style="padding: 5px 12px; font-size: 11px;" onclick="openModal('add-model-modal')">+ Add Custom Model</button>
         </div>
       </div>
-      ${p.freeModelSync || p.catalogRefresh ? syncSummary(p) : ""}
+
       ${
-        p.catalogRefresh || p.freeModelSync
-          ? `<p class="hint" style="margin-top: -0.25rem; margin-bottom: 0.85rem; font-size: 0.8rem;">${
-              p.catalogRefresh
-                ? "Sinkron mencocokkan daftar model dengan katalog provider dan menyembunyikan model bawaan yang sudah tidak ada di sana."
-                : "Sinkron mengambil daftar model gratis resmi dari provider."
-            }${importModes.length > 0 ? " Import menambahkan model live dari akun Anda." : ""}</p>`
+        p.freeModelSync || p.catalogRefresh
+          ? `<div class="model-sync-strip">
+              ${syncSummary(p)}
+              <p class="hint" style="margin-top: 0.25rem; font-size: 0.8rem;">${
+                p.catalogRefresh
+                  ? "Sinkron mencocokkan daftar model dengan katalog provider dan menyembunyikan model bawaan yang sudah tidak ada di sana."
+                  : "Sinkron mengambil daftar model gratis resmi dari provider."
+              }${importModes.length > 0 ? " Import menambahkan model live dari akun Anda." : ""}</p>
+            </div>`
           : ""
       }
-      <div class="model-toolbar" style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.85rem;">
-        <div style="flex: 1; min-width: 200px; max-width: 320px;">
-          <input type="text" id="model-search" placeholder="Cari model..." style="margin: 0; padding: 0.35rem 0.65rem; font-size: 0.82rem; height: 32px;" />
+
+      <!-- Live Search & Filter Bar -->
+      <div class="models-toolbar">
+        <div class="models-search-wrap">
+          <input type="text" id="model-filter-input" placeholder="$ filter model route..." class="search-cli-input" style="width: 100%;" oninput="filterModelsTable()" />
         </div>
-        <div class="btn-row" style="margin: 0;">
-          <button type="button" class="btn btn-sm" data-select-mode-toggle="models">Pilih Model</button>
-          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled>Aktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
-          <button type="submit" class="btn btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled>Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
+        <div class="filter-pills-row">
+          <button type="button" class="filter-pill active" data-cat-filter="all" onclick="setCategoryFilter('all', this)">Semua (${totalModels})</button>
+          ${freeCount > 0 ? `<button type="button" class="filter-pill" data-cat-filter="free" onclick="setCategoryFilter('free', this)">Gratis (${freeCount})</button>` : ""}
+          ${thinkingCount > 0 ? `<button type="button" class="filter-pill" data-cat-filter="thinking" onclick="setCategoryFilter('thinking', this)">Reasoning (${thinkingCount})</button>` : ""}
+          ${visionCount > 0 ? `<button type="button" class="filter-pill" data-cat-filter="vision" onclick="setCategoryFilter('vision', this)">Vision (${visionCount})</button>` : ""}
+          ${customCount > 0 ? `<button type="button" class="filter-pill" data-cat-filter="custom" onclick="setCategoryFilter('custom', this)">Kustom (${customCount})</button>` : ""}
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center; margin-left: auto; flex-wrap: wrap;">
+          <button type="button" class="btn-nb" data-select-mode-toggle="models" style="padding: 5px 12px; font-size: 11px;">Pilih Model</button>
+          <button type="submit" class="btn-nb" form="models-bulk-form" formaction="/dashboard/providers/models/enable" data-requires-selection="models" disabled style="padding: 5px 12px; font-size: 11px;">Aktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
+          <button type="submit" class="btn-nb" form="models-bulk-form" formaction="/dashboard/providers/models/disable" data-requires-selection="models" disabled style="padding: 5px 12px; font-size: 11px;">Nonaktifkan Terpilih (<span data-selected-count="models">0</span>)</button>
           ${
             hasImported
-              ? `<button type="submit" class="btn btn-danger btn-sm" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled data-confirm-selected="model_ids" data-confirm-noun="model hasil import">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>`
+              ? `<button type="submit" class="btn-nb btn-nb-danger" form="models-bulk-form" formaction="/dashboard/providers/models/import/delete" data-requires-selection="models" disabled data-confirm-selected="model_ids" data-confirm-noun="model hasil import" style="padding: 5px 12px; font-size: 11px;">Hapus Terpilih (<span data-selected-count="models">0</span>)</button>`
               : ""
           }
         </div>
       </div>
+
       <form id="models-bulk-form" method="POST">
         <input type="hidden" name="provider" value="${id}" />
       </form>
-      <table data-sync-row="models">
-        <thead><tr><th class="select-cell"><input type="checkbox" data-select-all="models" autocomplete="off" aria-label="Pilih semua model" title="Pilih semua model" /></th><th>Model ID</th><th>Name</th><th>Source</th><th>Status</th><th></th></tr></thead>
-        <tbody>${modelRows}</tbody>
-      </table>
-      <script>
-        (function() {
-          var input = document.getElementById('model-search');
-          var rows = document.querySelectorAll('table[data-sync-row="models"] tbody tr.model-row');
-          if (!input || !rows.length) return;
-          input.addEventListener('input', function() {
-            var q = input.value.toLowerCase();
-            rows.forEach(function(row) {
-              var text = row.textContent.toLowerCase();
-              row.style.display = text.includes(q) ? '' : 'none';
-            });
-          });
-        })();
-      </script>
+
+      <div style="overflow-x: auto;">
+        <table class="rack-table" data-sync-row="models">
+          <thead>
+            <tr>
+              <th style="width: 32px;" class="select-cell">
+                <input type="checkbox" data-select-all="models" autocomplete="off" aria-label="Pilih semua model" title="Pilih semua model" class="nb-check" onchange="toggleAllModels(this)" />
+              </th>
+              <th>MODEL ID &amp; CAPABILITIES</th>
+              <th>NAMA RESMI</th>
+              <th>SUMBER</th>
+              <th>STATUS</th>
+              <th style="text-align: right;">SWITCH OPERASIONAL</th>
+            </tr>
+          </thead>
+          <tbody id="models-tbody">${modelRows}</tbody>
+        </table>
+      </div>
     </div>
 
     ${p.noAuth ? "" : renderAddAccountModal(p)}
@@ -1397,6 +2776,55 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
         </form>
       </div>
     </div>
+
+    <script>
+      var currentConcurrency = ${effectiveConcurrency};
+      function stepUpConcurrency() {
+        if (currentConcurrency < 10) {
+          currentConcurrency++;
+          updateConcurrencyUI();
+        }
+      }
+      function stepDownConcurrency() {
+        if (currentConcurrency > 1) {
+          currentConcurrency--;
+          updateConcurrencyUI();
+        }
+      }
+      function updateConcurrencyUI() {
+        var disp = document.getElementById("stepper-val");
+        var input = document.getElementById("provider-concurrency");
+        if (disp) disp.textContent = currentConcurrency;
+        if (input) input.value = currentConcurrency;
+      }
+
+      function filterModelsTable() {
+        var input = document.getElementById("model-filter-input");
+        var q = (input ? input.value : "").toLowerCase();
+        var activePill = document.querySelector(".filter-pills-row .filter-pill.active");
+        var cat = activePill ? (activePill.getAttribute("data-cat-filter") || "all") : "all";
+        var rows = document.querySelectorAll('table[data-sync-row="models"] tbody tr.model-row');
+        rows.forEach(function(r) {
+          var textMatch = r.textContent.toLowerCase().includes(q);
+          var rowCats = (r.getAttribute("data-cat") || "").split(" ");
+          var catMatch = (cat === "all") || rowCats.includes(cat);
+          r.style.display = (textMatch && catMatch) ? "" : "none";
+        });
+      }
+
+      function setCategoryFilter(cat, btn) {
+        document.querySelectorAll(".filter-pills-row .filter-pill").forEach(function(p) { p.classList.remove("active"); });
+        if (btn) btn.classList.add("active");
+        filterModelsTable();
+      }
+
+      function toggleAllModels(master) {
+        document.querySelectorAll('input[data-select-group="models"]').forEach(function(c) {
+          c.checked = master.checked;
+          c.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      }
+    </script>
   `;
 
   return renderLayout({ title: p.name, activeTab: "providers", content, port, lang: currentLang });

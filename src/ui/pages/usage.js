@@ -158,7 +158,7 @@ function renderTopologyPane(topology) {
       }
       .topology-legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 0; margin-right: 6px; border: var(--bw) solid var(--text); vertical-align: -1px; }
       .topology-legend .dot-router { background: var(--text); }
-      .topology-legend .dot-active { background: #ffb3d9; }
+      .topology-legend .dot-active { background: linear-gradient(135deg, #ff6b4a 0%, #38bdf8 50%, #ccff00 100%); }
       .topology-legend .dot-last { background: #fde047; }
       .topology-legend .dot-idle { background: var(--surface-3); }
       .topo-node text { font-family: inherit; }
@@ -328,23 +328,42 @@ function renderTopologyPane(topology) {
         stroke-dasharray: none;
       }
 
-      .connector-wire.active-wire {
-        stroke-width: 4.5px;
-        stroke-dasharray: 10 5;
+      .connector-wire-casing {
+        fill: none;
+        stroke: #0a0a0a;
+        stroke-width: 7px;
+        stroke-dasharray: 8 6;
+        stroke-linecap: round;
         animation: wireMarquee 0.6s linear infinite;
       }
 
-      body:not([data-theme="dark"]) .connector-wire.active-wire {
-        stroke: #000000;
+      [data-theme="dark"] .connector-wire-casing {
+        stroke: var(--wire-color, var(--accent-lime, #ccff00));
+        stroke-width: 10px;
+        stroke-dasharray: none;
+        opacity: 0.24;
+        animation: none;
+        filter: url(#topo-glow-0);
+      }
+
+      .connector-wire.active-wire {
+        stroke-width: 4px;
+        stroke-dasharray: 8 6;
+        stroke-linecap: round;
+        animation: wireMarquee 0.6s linear infinite;
+      }
+
+      :root:not([data-theme="dark"]) .connector-wire.active-wire {
+        stroke: var(--wire-color, #000000);
       }
 
       [data-theme="dark"] .connector-wire.active-wire {
-        stroke: var(--accent-lime, #ccff00);
+        stroke: var(--wire-color, var(--accent-lime, #ccff00));
       }
 
       @keyframes wireMarquee {
         to {
-          stroke-dashoffset: -30;
+          stroke-dashoffset: -28;
         }
       }
 
@@ -473,23 +492,22 @@ function renderTopologyPane(topology) {
         cursor: default;
         --sat-scale: 1;
         --sat-accent: #ccff00;
+        --glow-color: rgba(204, 255, 0, 0.45);
         transform: translate(-50%, -50%) rotate(var(--angle-tilt, 0deg)) scale(var(--sat-scale));
       }
 
-      /* Active Route: Natural animated response */
+      /* Active Route: Dynamic per-provider cyber accent & aura */
       .satellite-card.is-active {
-        background: var(--accent-pink, #ffb3d9) !important;
-        color: #000000 !important;
-        border-color: #000000 !important;
-        box-shadow: 4px 4px 0 var(--shadow-ink) !important;
+        background: color-mix(in srgb, var(--sat-accent, #ccff00) 15%, var(--surface)) !important;
+        color: var(--text) !important;
+        border-color: var(--sat-accent, #ccff00) !important;
         transform: translate(-50%, -50%) rotate(0deg) scale(calc(var(--sat-scale, 1) * 1.04));
         z-index: 12;
-        box-shadow: 6px 6px 0 var(--sat-accent, #ccff00) !important;
-        border-color: var(--sat-accent, #ccff00) !important;
+        box-shadow: 5px 5px 0 var(--sat-accent, #ccff00), 0 0 24px var(--glow-color, rgba(204, 255, 0, 0.45)) !important;
         animation: topo-node-breathe 1.1s ease-in-out infinite;
       }
       [data-theme="dark"] .satellite-card.is-active {
-        background: var(--surface) !important;
+        background: color-mix(in srgb, var(--sat-accent, #ccff00) 12%, var(--surface)) !important;
         color: var(--text) !important;
         border-color: var(--sat-accent, #ccff00) !important;
       }
@@ -499,9 +517,9 @@ function renderTopologyPane(topology) {
         border-color: var(--sat-accent, #ccff00) !important;
       }
       .satellite-card.is-active .pill-chip {
-        background: #000000 !important;
-        color: #ffffff !important;
-        border-color: #000000 !important;
+        background: #0a0a0a !important;
+        color: var(--sat-accent, #ccff00) !important;
+        border-color: var(--sat-accent, #ccff00) !important;
       }
       .satellite-card.is-active .card-icon-box {
         border-color: #000000;
@@ -585,19 +603,32 @@ function renderTopologyPane(topology) {
         font-weight: 800;
       }
 
+      .flow-packet-halo {
+        opacity: 0.34;
+        pointer-events: none;
+      }
+      [data-theme="dark"] .flow-packet-halo {
+        opacity: 0.46;
+      }
       .flow-packet {
         fill: var(--accent-lime);
-        stroke: #000000;
-        stroke-width: 1.5px;
+        stroke: #0a0a0a;
+        stroke-width: 1.6px;
+        stroke-linejoin: round;
+      }
+      .flow-packet-core {
+        fill: #ffffff;
+        stroke: #0a0a0a;
+        stroke-width: 0.8px;
       }
 
       @keyframes topo-node-breathe {
-        0%, 100% { filter: drop-shadow(0 0 2px var(--glow-color, #ffb3d9)); }
-        50% { filter: drop-shadow(0 0 10px var(--glow-color, #ffb3d9)); }
+        0%, 100% { filter: drop-shadow(0 0 3px var(--glow-color, rgba(204, 255, 0, 0.45))); }
+        50% { filter: drop-shadow(0 0 14px var(--glow-color, rgba(204, 255, 0, 0.85))); }
       }
       @keyframes topo-router-pulse {
-        0%, 100% { filter: drop-shadow(0 0 2px rgba(204, 255, 0, 0.4)); }
-        50% { filter: drop-shadow(0 0 14px rgba(204, 255, 0, 0.95)); }
+        0%, 100% { filter: drop-shadow(0 0 3px var(--router-glow, rgba(204, 255, 0, 0.45))); }
+        50% { filter: drop-shadow(0 0 16px var(--router-glow, rgba(204, 255, 0, 0.95))); }
       }
       .topo-router.is-powering .topo-router-core {
         animation: topo-router-pulse 0.9s ease-in-out infinite;
@@ -661,22 +692,22 @@ function renderTopologyPane(topology) {
       }
 
       var PROVIDER_META = {
-        claude: { label: "CLAUDE CODE", model: "claude-3-7-sonnet", lat: "92ms", tier: "Tier 1 Pro", tilt: "0.8deg", icon: "/providers/claude.png" },
-        codex: { label: "OPENAI CODEX", model: "o3-mini / codex", lat: "142ms", tier: "Tier 1 Pro", tilt: "-1deg", icon: "/providers/codex.png" },
-        openai: { label: "OPENAI CODEX", model: "o3-mini / codex", lat: "142ms", tier: "Tier 1 Pro", tilt: "-1deg", icon: "/providers/codex.png" },
-        gemini: { label: "GEMINI", model: "2.0-flash / exp", lat: "84ms", tier: "Tier 1 Free", tilt: "1.2deg", icon: "/providers/antigravity.png" },
-        kiro: { label: "KIRO AI", model: "kiro-reasoning", lat: "210ms", tier: "Tier 2 Cloud", tilt: "-0.8deg", icon: "/providers/kiro.png" },
-        xkiro: { label: "XKIRO", model: "kiro-deep", lat: "195ms", tier: "Tier 2 Cloud", tilt: "0.5deg", icon: "/providers/xkiro.png" },
-        opencode: { label: "OPENCODE FREE", model: "agent-gate 100k", lat: "95ms", tier: "Tier 3 Free", tilt: "1.5deg", icon: "/providers/opencode.png" },
-        mimo: { label: "MIMO CODE FREE", model: "mimo-coder-7b", lat: "110ms", tier: "Tier 3 Free", tilt: "-1.5deg", icon: "/providers/commandcode.png" },
-        cloudflare: { label: "CLOUDFLARE", model: "workers-ai / qwen", lat: "62ms", tier: "Tier 3 Edge", tilt: "0.8deg", icon: "/providers/cline.png" },
-        antigravity: { label: "ANTIGRAVITY", model: "local agent mesh", lat: "14ms", tier: "Local Mesh", tilt: "-1.2deg", icon: "/providers/antigravity.png" },
-        ollama: { label: "OLLAMA CLOUD", model: "deepseek-r1:14b", lat: "38ms", tier: "Tier 2 Local", tilt: "1deg", icon: "/providers/ollama.png" },
-        nvidia: { label: "NVIDIA NIM", model: "llama-3.3-70b", lat: "128ms", tier: "Tier 2 Cloud", tilt: "-0.7deg", icon: "/providers/nvidia.png" },
-        openrouter: { label: "OPENROUTER", model: "auto-fallback-pool", lat: "160ms", tier: "Tier 2 Fallback", tilt: "1.4deg", icon: "/providers/openrouter.png" },
+        claude: { label: "CLAUDE CODE", model: "claude-3-7-sonnet", lat: "92ms", tier: "Tier 1 Pro", tilt: "0.8deg", icon: "/providers/claude.png", color: "#ff6b4a" },
+        codex: { label: "OPENAI CODEX", model: "o3-mini / codex", lat: "142ms", tier: "Tier 1 Pro", tilt: "-1deg", icon: "/providers/codex.png", color: "#10b981" },
+        openai: { label: "OPENAI CODEX", model: "o3-mini / codex", lat: "142ms", tier: "Tier 1 Pro", tilt: "-1deg", icon: "/providers/codex.png", color: "#00f5ff" },
+        gemini: { label: "GEMINI", model: "2.0-flash / exp", lat: "84ms", tier: "Tier 1 Free", tilt: "1.2deg", icon: "/providers/antigravity.png", color: "#38bdf8" },
+        kiro: { label: "KIRO AI", model: "kiro-reasoning", lat: "210ms", tier: "Tier 2 Cloud", tilt: "-0.8deg", icon: "/providers/kiro.png", color: "#f43f5e" },
+        xkiro: { label: "XKIRO", model: "kiro-deep", lat: "195ms", tier: "Tier 2 Cloud", tilt: "0.5deg", icon: "/providers/xkiro.png", color: "#f43f5e" },
+        opencode: { label: "OPENCODE FREE", model: "agent-gate 100k", lat: "95ms", tier: "Tier 3 Free", tilt: "1.5deg", icon: "/providers/opencode.png", color: "#ccff00" },
+        mimo: { label: "MIMO CODE FREE", model: "mimo-coder-7b", lat: "110ms", tier: "Tier 3 Free", tilt: "-1.5deg", icon: "/providers/commandcode.png", color: "#2dd4bf" },
+        cloudflare: { label: "CLOUDFLARE", model: "workers-ai / qwen", lat: "62ms", tier: "Tier 3 Edge", tilt: "0.8deg", icon: "/providers/cline.png", color: "#06b6d4" },
+        antigravity: { label: "ANTIGRAVITY", model: "local agent mesh", lat: "14ms", tier: "Local Mesh", tilt: "-1.2deg", icon: "/providers/antigravity.png", color: "#a855f7" },
+        ollama: { label: "OLLAMA CLOUD", model: "deepseek-r1:14b", lat: "38ms", tier: "Tier 2 Local", tilt: "1deg", icon: "/providers/ollama.png", color: "#facc15" },
+        nvidia: { label: "NVIDIA NIM", model: "llama-3.3-70b", lat: "128ms", tier: "Tier 2 Cloud", tilt: "-0.7deg", icon: "/providers/nvidia.png", color: "#76b900" },
+        openrouter: { label: "OPENROUTER", model: "auto-fallback-pool", lat: "160ms", tier: "Tier 2 Fallback", tilt: "1.4deg", icon: "/providers/openrouter.png", color: "#ec4899" },
         glm: { label: "GLM CODING", model: "glm-4-flash", lat: "105ms", tier: "Tier 2 Cloud", tilt: "-0.9deg", icon: "/providers/glm.png" },
-        github: { label: "GITHUB COPILOT", model: "claude-3.5-sonnet", lat: "115ms", tier: "Tier 1 Pro", tilt: "1.1deg", icon: "/providers/github.png" },
-        cline: { label: "CLINE", model: "cline-agent", lat: "72ms", tier: "Tier 3 Edge", tilt: "-1.1deg", icon: "/providers/cline.png" },
+        github: { label: "GITHUB COPILOT", model: "claude-3.5-sonnet", lat: "115ms", tier: "Tier 1 Pro", tilt: "1.1deg", icon: "/providers/github.png", color: "#60a5fa" },
+        cline: { label: "CLINE", model: "cline-agent", lat: "72ms", tier: "Tier 3 Edge", tilt: "-1.1deg", icon: "/providers/cline.png", color: "#06b6d4" },
         together: { label: "TOGETHER AI", model: "llama-3.3-70b", lat: "135ms", tier: "Tier 2 Cloud", tilt: "0.6deg", icon: "/providers/together.png" },
         nous: { label: "NOUS RESEARCH", model: "hermes-3-70b", lat: "145ms", tier: "Tier 2 Cloud", tilt: "-0.6deg", icon: "/providers/nous.png" },
         commandcode: { label: "COMMAND CODE", model: "command-r-plus", lat: "120ms", tier: "Tier 2 Cloud", tilt: "1.3deg", icon: "/providers/commandcode.png" },
@@ -722,48 +753,133 @@ function renderTopologyPane(topology) {
         ];
       }
 
-      // Palet neon per tier (tema gelap). Provider dalam tier yang sama bergantian warna.
+      // Palet aksen cyber neon khas per provider/tier dengan rotasi fallback vibrant.
       var TIER_PALETTE = [
-        { re: /local/i, colors: ["#00f5ff"] },
-        { re: /tier\s*1/i, colors: ["#facc15", "#fb923c"] },
-        { re: /tier\s*2/i, colors: ["#ff2a85", "#c084fc"] },
-        { re: /tier\s*3|free|edge/i, colors: ["#ccff00", "#34d399"] }
+        { re: /local/i, colors: ["#a855f7", "#00f5ff", "#2dd4bf"] },
+        { re: /tier\s*1/i, colors: ["#ff6b4a", "#10b981", "#38bdf8", "#60a5fa", "#facc15"] },
+        { re: /tier\s*2/i, colors: ["#c084fc", "#fb923c", "#34d399", "#f43f5e", "#ec4899"] },
+        { re: /tier\s*3|free|edge/i, colors: ["#ccff00", "#34d399", "#2dd4bf", "#06b6d4", "#00f5ff"] }
       ];
-      var FALLBACK_COLORS = ["#ccff00"];
+      var FALLBACK_COLORS = ["#c084fc", "#fb923c", "#34d399", "#f43f5e", "#00f5ff"];
+      function providerSignatureColor(sat) {
+        var key = String((sat && sat.id) || "").toLowerCase();
+        var meta = PROVIDER_META[key] || {};
+        if (meta.color) return meta.color;
+        if (/claude/.test(key)) return "#ff6b4a";
+        if (/codex/.test(key)) return "#10b981";
+        if (/openai/.test(key)) return "#00f5ff";
+        if (/gemini/.test(key)) return "#38bdf8";
+        if (/kiro/.test(key)) return "#f43f5e";
+        if (/antigravity/.test(key)) return "#a855f7";
+        if (/opencode|^free$/.test(key)) return "#ccff00";
+        if (/mimo/.test(key)) return "#2dd4bf";
+        if (/nvidia/.test(key)) return "#76b900";
+        if (/ollama/.test(key)) return "#facc15";
+        if (/openrouter/.test(key)) return "#ec4899";
+        if (/github|copilot/.test(key)) return "#60a5fa";
+        if (/cline|edge|cloudflare/.test(key)) return "#06b6d4";
+        return null;
+      }
       function accentFor(sat, idx) {
-        var tier = String(sat.tier || "");
+        var sig = providerSignatureColor(sat);
+        if (sig) return sig;
+        var tier = String((sat && sat.tier) || "");
         var entry = null;
         for (var t = 0; t < TIER_PALETTE.length; t++) {
           if (TIER_PALETTE[t].re.test(tier)) { entry = TIER_PALETTE[t]; break; }
         }
         var colors = entry ? entry.colors : FALLBACK_COLORS;
-        return colors[idx % colors.length];
+        return colors[Math.abs(Number(idx || 0)) % colors.length];
+      }
+
+      // Pemetaan warna kontras komplementer antara dots line kabel aktif dan partikel beacon.
+      var PACKET_CONTRAST_MAP = {
+        "#00f5ff": "#ff7a00",
+        "#38bdf8": "#ff7a00",
+        "#60a5fa": "#facc15",
+        "#06b6d4": "#ff7a00",
+        "#2dd4bf": "#ff2a85",
+        "#ccff00": "#ff2a85",
+        "#10b981": "#ff2a85",
+        "#76b900": "#00f5ff",
+        "#34d399": "#ff2a85",
+        "#ff6b4a": "#00f5ff",
+        "#f43f5e": "#34d399",
+        "#ec4899": "#ccff00",
+        "#fb923c": "#00f5ff",
+        "#a855f7": "#ccff00",
+        "#c084fc": "#ccff00",
+        "#facc15": "#00f5ff"
+      };
+      function packetColorForWire(wireColor) {
+        var key = String(wireColor || "").trim().toLowerCase();
+        if (PACKET_CONTRAST_MAP[key]) return PACKET_CONTRAST_MAP[key];
+        var m = /^#([0-9a-f]{6})$/.exec(key);
+        if (!m) return "#ff2a85";
+        var n = parseInt(m[1], 16);
+        var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+        var max = Math.max(r, g, b), min = Math.min(r, g, b);
+        var d = max - min;
+        var h = 0;
+        if (d > 0) {
+          if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+          else if (max === g) h = ((b - r) / d + 2) * 60;
+          else h = ((r - g) / d + 4) * 60;
+        }
+        if (h >= 165 && h < 255) return "#ff7a00";
+        if (h >= 65 && h < 165) return "#ff2a85";
+        if (h >= 255 && h < 315) return "#ccff00";
+        return "#00f5ff";
       }
 
       var SVG_NS = "http://www.w3.org/2000/svg";
-      // Tiga kubus data dengan ukuran dan jeda bertingkat (0s, 0.35s, 0.7s).
+      // Tiga beacon diamond berputar (diameter 9.6-11.2px) dengan jeda bertingkat.
       var PACKETS = [
-        { size: 8, delay: 0 },
-        { size: 11, delay: 0.35 },
-        { size: 8, delay: 0.7 }
+        { radius: 4.8, delay: 0 },
+        { radius: 5.6, delay: 0.35 },
+        { radius: 4.8, delay: 0.7 }
       ];
-      function addPackets(pathData, color) {
+      function addPackets(pathData, wireColor) {
+        var packetColor = packetColorForWire(wireColor);
         PACKETS.forEach(function (pk) {
-          var p = document.createElementNS(SVG_NS, "rect");
-          p.setAttribute("width", String(pk.size));
-          p.setAttribute("height", String(pk.size));
-          p.setAttribute("class", "flow-packet");
-          p.style.fill = color;
-          p.setAttribute("x", String(-pk.size / 2));
-          p.setAttribute("y", String(-pk.size / 2));
+          var g = document.createElementNS(SVG_NS, "g");
+          g.setAttribute("class", "flow-packet-beacon");
+
+          var halo = document.createElementNS(SVG_NS, "circle");
+          halo.setAttribute("r", String(pk.radius + 3.2));
+          halo.setAttribute("class", "flow-packet-halo");
+          halo.style.fill = packetColor;
+
+          var r = pk.radius;
+          var diamond = document.createElementNS(SVG_NS, "polygon");
+          diamond.setAttribute("points", "0," + (-r) + " " + r + ",0 0," + r + " " + (-r) + ",0");
+          diamond.setAttribute("class", "flow-packet");
+          diamond.style.fill = packetColor;
+
+          var spin = document.createElementNS(SVG_NS, "animateTransform");
+          spin.setAttribute("attributeName", "transform");
+          spin.setAttribute("type", "rotate");
+          spin.setAttribute("from", "0");
+          spin.setAttribute("to", "360");
+          spin.setAttribute("dur", "1.4s");
+          spin.setAttribute("repeatCount", "indefinite");
+          diamond.appendChild(spin);
+
+          var core = document.createElementNS(SVG_NS, "circle");
+          core.setAttribute("r", "1.8");
+          core.setAttribute("class", "flow-packet-core");
 
           var anim = document.createElementNS(SVG_NS, "animateMotion");
           anim.setAttribute("path", pathData);
-          anim.setAttribute("dur", "1.2s");
+          anim.setAttribute("dur", "1.15s");
           if (pk.delay > 0) anim.setAttribute("begin", pk.delay + "s");
           anim.setAttribute("repeatCount", "indefinite");
-          p.appendChild(anim);
-          svgLayer.appendChild(p);
+
+          g.appendChild(halo);
+          g.appendChild(diamond);
+          g.appendChild(core);
+          g.appendChild(anim);
+          svgLayer.appendChild(g);
         });
       }
 
@@ -798,6 +914,9 @@ function renderTopologyPane(topology) {
         var radiusY = Math.max(0, Math.min(height * 0.40, height / 2 - cardH / 2 - pad));
         var step = 2 * Math.PI / n;
 
+        var firstActiveAccent = null;
+        var activePackets = [];
+
         SATELLITES.forEach(function (sat, i) {
           var angle = (i * step) - (Math.PI / 10);
           var x = centerX + radiusX * Math.cos(angle);
@@ -813,16 +932,25 @@ function renderTopologyPane(topology) {
           var isActive = !!activeSet[sat.id];
           var isLast = !isActive && sat.id === lastProvider;
           var accent = accentFor(sat, i);
+          if (isActive && !firstActiveAccent) firstActiveAccent = accent;
+
+          if (isActive) {
+            var casing = document.createElementNS(SVG_NS, "path");
+            casing.setAttribute("d", d);
+            casing.setAttribute("class", "connector-wire-casing");
+            casing.style.setProperty("--wire-color", accent);
+            svgLayer.appendChild(casing);
+          }
 
           var wireCls = "connector-wire" + (isActive ? " active-wire" : (isLast ? " last-wire" : ""));
           var path = document.createElementNS(SVG_NS, "path");
           path.setAttribute("d", d);
           path.setAttribute("class", wireCls);
           path.setAttribute("id", "wire-" + sat.id);
-          if (isActive) path.style.stroke = accent;
+          if (isActive) path.style.setProperty("--wire-color", accent);
           svgLayer.appendChild(path);
 
-          if (isActive) addPackets(d, accent);
+          if (isActive) activePackets.push({ d: d, accent: accent });
 
           var cardCls = "satellite-card topo-node" + (isActive ? " is-active" : (isLast ? " is-last" : ""));
           var card = document.createElement("div");
@@ -862,6 +990,15 @@ function renderTopologyPane(topology) {
           }
           stage.appendChild(card);
         });
+
+        activePackets.forEach(function (pkt) {
+          addPackets(pkt.d, pkt.accent);
+        });
+        if (firstActiveAccent) {
+          hubContainer.style.setProperty("--router-glow", firstActiveAccent);
+        } else {
+          hubContainer.style.removeProperty("--router-glow");
+        }
       }
 
       function computeActive() {

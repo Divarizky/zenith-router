@@ -234,25 +234,6 @@ function renderTopologyPane(topology) {
         margin-top: 1.25rem;
       }
 
-      /* Corner Crop Marks */
-      .crop-mark-box {
-        position: relative;
-      }
-      .cm-corner {
-        position: absolute;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 10px;
-        color: var(--text-subtle);
-        opacity: 0.4;
-        pointer-events: none;
-        user-select: none;
-        line-height: 1;
-        z-index: 2;
-      }
-      .cm-tl { top: -8px; left: -2px; }
-      .cm-tr { top: -8px; right: -2px; }
-      .cm-bl { bottom: -8px; left: -2px; }
-      .cm-br { bottom: -8px; right: -2px; }
 
       /* Duct-Tape Tags & Cargo Tags */
       .duct-tape-tag {
@@ -777,13 +758,8 @@ function renderTopologyPane(topology) {
       /* Section 3: Editorial Ledger Tables */
       .ledgers-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 16px;
-      }
-      @media (max-width: 820px) {
-        .ledgers-grid {
-          grid-template-columns: minmax(0, 1fr);
-        }
       }
       .ledger-card {
         background: var(--surface);
@@ -2154,7 +2130,7 @@ function renderQuotaCard(s, antigravityInventory = null, index = 0) {
       : "");
 
   const updated = q?.updated_at ? `<span>Updated ${relWhen(q.updated_at)}</span>` : "<span>Not synced yet</span>";
-  const chRef = `CH.${String(index + 1).padStart(2, "0")}`;
+  const acctRef = `ACCOUNT #${String(index + 1).padStart(2, "0")}`;
   const providerUpper = escapeHtml(String(s.provider || "GEN").toUpperCase());
 
   return `
@@ -2165,7 +2141,7 @@ function renderQuotaCard(s, antigravityInventory = null, index = 0) {
       <div class="hw-screw hw-screw-br"></div>
       <div class="q-meta-bar">
         <div class="q-meta-bar-left">
-          <span class="cargo-tag">[${chRef} // ${providerUpper}]</span>
+          <span class="cargo-tag">[${acctRef} · ${providerUpper}]</span>
         </div>
         <div class="q-meta-bar-right">
           ${planPillHtml}
@@ -2238,17 +2214,12 @@ function renderQuotaCard(s, antigravityInventory = null, index = 0) {
       </div>
     </div>
 
-    <!-- Section 1: Usage Telemetry Strip [SYS.01] -->
-    <div class="editorial-section crop-mark-box">
-      <span class="cm-corner cm-tl">+ 00:00</span>
-      <span class="cm-corner cm-tr">+ 10:00</span>
-      <span class="cm-corner cm-bl">+ 00:99</span>
-      <span class="cm-corner cm-br">+ 10:99</span>
+    <!-- Section 1: Usage Telemetry Strip -->
+    <div class="editorial-section">
       <div class="telemetry-strip">
         <div class="telemetry-strip-header">
           <div class="telemetry-strip-header-left">
             <span class="duct-tape-tag">USAGE TELEMETRY // 30D</span>
-            <span class="cargo-tag">[SYS.01]</span>
           </div>
           <div class="mini-barcode" aria-hidden="true">
             <i class="w"></i><i></i><i class="m"></i><i></i><i class="w"></i><i></i><i class="m"></i><i class="w"></i><i></i>
@@ -2287,12 +2258,8 @@ function renderQuotaCard(s, antigravityInventory = null, index = 0) {
       </div>
     </div>
 
-    <!-- Section 2: Quota Channel Modules [CH.xx // PROVIDER] -->
-    <div class="editorial-section crop-mark-box">
-      <span class="cm-corner cm-tl">+ 00:00</span>
-      <span class="cm-corner cm-tr">+ 10:00</span>
-      <span class="cm-corner cm-bl">+ 00:99</span>
-      <span class="cm-corner cm-br">+ 10:99</span>
+    <!-- Section 2: Quota Channel Modules [ACCOUNT #xx · PROVIDER] -->
+    <div class="editorial-section">
       <div class="channels-section">
         <div class="channels-header">
           <div class="channels-header-left">
@@ -2317,18 +2284,13 @@ function renderQuotaCard(s, antigravityInventory = null, index = 0) {
       </div>
     </div>
 
-    <!-- Section 3: Editorial Ledger Tables [LEDGER.01 & LEDGER.02] -->
-    <div class="editorial-section crop-mark-box">
-      <span class="cm-corner cm-tl">+ 00:00</span>
-      <span class="cm-corner cm-tr">+ 10:00</span>
-      <span class="cm-corner cm-bl">+ 00:99</span>
-      <span class="cm-corner cm-br">+ 10:99</span>
+    <!-- Section 3: Editorial Ledger Tables -->
+    <div class="editorial-section">
       <div class="ledgers-grid">
         <div class="ledger-card">
           <div class="ledger-header">
             <div class="ledger-header-left">
               <span class="duct-tape-tag">TOKEN BY MODEL</span>
-              <span class="cargo-tag">[LEDGER.01]</span>
             </div>
             <span class="ledger-title">${escapeHtml(t("usage.token_by_model", {}, currentLang))}</span>
           </div>
@@ -2374,7 +2336,6 @@ function renderQuotaCard(s, antigravityInventory = null, index = 0) {
           <div class="ledger-header">
             <div class="ledger-header-left">
               <span class="duct-tape-tag">TOKEN BY ACCOUNT</span>
-              <span class="cargo-tag">[LEDGER.02]</span>
             </div>
             <span class="ledger-title">${escapeHtml(t("usage.token_by_account", {}, currentLang))}</span>
           </div>

@@ -105,7 +105,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     ::selection { background: var(--accent); color: #ffffff; }
     :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
     /* Shared editorial hardware language: square geometry, readable labels, tactile controls. */
-    .duct-tape { display: inline-block; padding: 0.2rem 0.65rem; background: #ccff00; color: #09090b; border: 2px solid #09090b; box-shadow: 3px 3px 0 var(--shadow-ink); transform: rotate(-1deg); font: 900 var(--text-xs)/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }
+    .duct-tape { display: inline-block; width: fit-content; max-width: 100%; margin-bottom: 0.15rem; padding: 0.2rem 0.65rem; background: #ccff00; color: #09090b; border: 2px solid #09090b; box-shadow: 3px 3px 0 var(--shadow-ink); transform: rotate(-1deg); font: 900 var(--text-xs)/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }
     .z-dashed { border: 2px dashed var(--border-subtle); background: var(--surface-2); padding: .65rem .8rem; overflow-wrap: anywhere; }
     .hw-screw { position: absolute; width: 9px; height: 9px; border: 2px solid var(--text-subtle); background: var(--surface-3); border-radius: 50%; }
     .hw-screw::after { content: ''; position: absolute; width: 5px; height: 1px; background: var(--text-subtle); left: 0; top: 2px; transform: rotate(-35deg); }
@@ -355,7 +355,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     .main-header-title {
       display: flex;
       flex-direction: column;
-      gap: 0.2rem;
+      align-items: flex-start;
+      gap: 0.45rem;
       min-width: 0;
       flex: 1 1 auto;
     }
@@ -536,7 +537,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     /* ===== Provider & combo ===== */
     .provider-card {
       display: flex;
-      flex-direction: row;
+      flex-direction: column;
       align-items: stretch;
       border: 2px solid #000000;
       border-radius: 0px;
@@ -551,14 +552,18 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     }
     .provider-card:hover {
       border-color: #000000;
-      background: var(--surface-2);
+      background: var(--surface);
       transform: translate(-2px, -2px);
       box-shadow: 6px 6px 0 #000000;
     }
-    .provider-card.is-active { border-color: #ccff00; box-shadow: 0 0 0 2px rgba(204,255,0,.24), 0 0 22px rgba(204,255,0,.3), 4px 4px 0 var(--shadow-ink); }
-    .provider-card .satellite-label { display: flex; justify-content: space-between; gap: .5rem; color: var(--text-muted); font: 800 var(--text-xs)/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; }
-    .provider-card .provider-matrix-right { gap: .5rem; }
-    .proxy-row.is-active { border-left: 4px solid var(--success-text); padding-left: .75rem; box-shadow: -4px 0 0 rgba(110,231,183,.22); }
+    .provider-card.is-active {
+      border: 2px solid #09090b;
+      box-shadow: inset 3px 0 0 #047857, 4px 4px 0 #09090b;
+    }
+    .provider-card.is-active:hover {
+      border-color: #09090b;
+      box-shadow: inset 3px 0 0 #047857, 6px 6px 0 #09090b;
+    }
     [data-theme="dark"] .provider-card {
       border: 2px solid var(--border);
       box-shadow: 4px 4px 0 var(--shadow-ink);
@@ -567,6 +572,176 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       border-color: var(--border);
       box-shadow: 6px 6px 0 var(--shadow-ink);
     }
+    [data-theme="dark"] .provider-card.is-active {
+      border-color: #6ee7b7;
+      box-shadow: 0 0 0 1px rgba(110,231,183,.35), 0 0 16px rgba(110,231,183,.2), 4px 4px 0 var(--shadow-ink);
+    }
+    [data-theme="dark"] .provider-card.is-active:hover {
+      border-color: #6ee7b7;
+      box-shadow: 0 0 0 1px rgba(110,231,183,.45), 0 0 20px rgba(110,231,183,.3), 6px 6px 0 var(--shadow-ink);
+    }
+
+    /* Rack Cartridge: 1. Header Strip */
+    .provider-card-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 7px 14px;
+      background: var(--surface-2);
+      border-bottom: 2px solid var(--border);
+    }
+    .provider-strip-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .provider-status-led {
+      width: 8px;
+      height: 8px;
+      min-width: 8px;
+      flex-shrink: 0;
+      border: 1.5px solid #09090b;
+      border-radius: 0;
+      display: inline-block;
+    }
+    .provider-status-led.is-online {
+      background: #6ee7b7;
+      box-shadow: 0 0 6px rgba(110, 231, 183, 0.7);
+    }
+    .provider-status-led.is-standby {
+      background: var(--surface-3);
+    }
+    .provider-strip-meta {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      line-height: 1.2;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .provider-strip-meta code {
+      font-family: inherit;
+      font-size: inherit;
+      font-weight: inherit;
+      background: transparent;
+      padding: 0;
+      border: none;
+      color: inherit;
+    }
+    .provider-strip-right {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+    }
+    .provider-model-count {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      color: var(--text-muted);
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+
+    /* Rack Cartridge: 2. Body */
+    .provider-card-body {
+      padding: 14px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .provider-icon-box {
+      width: 38px;
+      height: 38px;
+      min-width: 38px;
+      flex-shrink: 0;
+      border: 2px solid var(--border);
+      border-radius: 0;
+      background: var(--surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .provider-icon-box .provider-icon {
+      border: none;
+      background: transparent;
+    }
+    .provider-body-content {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .provider-name {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      overflow-wrap: break-word;
+      color: var(--text);
+      line-height: 1.25;
+    }
+    .provider-body-pills {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
+    /* Rack Cartridge: 3. Footer */
+    .provider-card-foot {
+      margin-top: auto;
+      padding: 8px 14px;
+      border-top: 1.5px dashed var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--text-xs);
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .provider-slot-tag {
+      color: var(--text-muted);
+    }
+    .provider-action-label {
+      text-transform: uppercase;
+      font-weight: 900;
+    }
+    .provider-action-label.is-ready {
+      color: var(--success-text);
+    }
+    .provider-action-label.is-pending {
+      color: var(--text-muted);
+    }
+
+    /* Legacy compatibility classes for external references if any */
+    .provider-card .satellite-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .5rem;
+      color: var(--text-muted);
+      font: 800 var(--text-xs)/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: .06em;
+      white-space: nowrap;
+    }
+    .provider-card .satellite-label span {
+      white-space: nowrap;
+    }
+    .provider-card .provider-matrix-right { gap: .5rem; }
+    .proxy-row.is-active { border-left: 4px solid var(--success-text); padding-left: .75rem; box-shadow: -4px 0 0 rgba(110,231,183,.22); }
     .provider-matrix-left {
       width: 90px;
       min-width: 90px;
@@ -628,7 +803,7 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       gap: 0.5rem;
       flex-wrap: wrap;
     }
-    .provider-matrix-head h3, .provider-name {
+    .provider-matrix-head h3 {
       margin: 0;
       font-size: 0.95rem;
       font-weight: 800;
@@ -636,14 +811,6 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       letter-spacing: 0.04em;
       overflow-wrap: break-word;
       color: var(--text);
-    }
-    .provider-model-count {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: var(--text-xs);
-      font-weight: 800;
-      color: var(--text-muted);
-      white-space: nowrap;
-      text-transform: uppercase;
     }
     .provider-matrix-meta {
       display: flex;

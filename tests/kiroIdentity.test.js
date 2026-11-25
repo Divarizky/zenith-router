@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { initDb, addConnection } from "../src/db/index.js";
 import { deleteSetting, setSetting } from "../src/services/settings.js";
-import { KIRO_IDE_VERSION, buildKiroIdentityHeaders } from "../src/services/kiroIdentity.js";
+import { KIRO_IDE_VERSION, buildKiroIdentityHeaders, kiroMachineId } from "../src/services/kiroIdentity.js";
 import kiroProvider from "../src/providers/registry/kiro.js";
 import { KiroExecutor } from "../src/executors/kiro.js";
 import { setOAuthFetch } from "../src/services/oauth/providers.js";
@@ -36,14 +36,29 @@ test("Kiro identity is deterministic and all paths use the setting override", as
   });
   deleteSetting("kiro_ide_version");
 
-  assert.equal(KIRO_IDE_VERSION, "1.0.0");
+  assert.equal(KIRO_IDE_VERSION, "1.4.154");
+  // The suffix has no account-state input: rotating an external value cannot change it.
+  assert.equal(kiroMachineId("connection-a"), kiroMachineId("connection-a"));
+  assert.equal(
+    buildKiroIdentityHeaders({ kind: "executor", connectionId: "connection-a" })["X-Amz-User-Agent"],
+    buildKiroIdentityHeaders({ kind: "executor", connectionId: "connection-a" })["X-Amz-User-Agent"]
+  );
+  assert.notEqual(kiroMachineId("connection-a"), kiroMachineId("connection-b"));
+  assert.equal(
+    buildKiroIdentityHeaders({ kind: "executor", connectionId: "connection-a" })["X-Amz-User-Agent"],
+    buildKiroIdentityHeaders({ kind: "executor", connectionId: "connection-a" })["X-Amz-User-Agent"]
+  );
+  assert.notEqual(
+    buildKiroIdentityHeaders({ kind: "executor", connectionId: "connection-a" })["X-Amz-User-Agent"],
+    buildKiroIdentityHeaders({ kind: "executor", connectionId: "connection-b" })["X-Amz-User-Agent"]
+  );
   const defaultHeaders = buildKiroIdentityHeaders({ kind: "transport" });
   const defaultQuotaHeaders = buildKiroIdentityHeaders({ kind: "quota" });
   const defaultRefreshHeaders = buildKiroIdentityHeaders({ kind: "refresh" });
   assert.deepStrictEqual(defaultHeaders, buildKiroIdentityHeaders({ kind: "executor" }));
   assert.deepStrictEqual(defaultHeaders, {
-    "User-Agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-    "X-Amz-User-Agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
+    "User-Agent": "aws-sdk-js/1.0.0 ua/2.1 os/windows#10.0.26200 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.0 m/E KiroIDE-1.4.154-ae57d0f66705dfc8b3d212a7a7b492f68978c399db299b8b506753fc36feca1a",
+    "X-Amz-User-Agent": "aws-sdk-js/1.0.0 KiroIDE-1.4.154-ae57d0f66705dfc8b3d212a7a7b492f68978c399db299b8b506753fc36feca1a",
   });
   assert.deepStrictEqual(defaultQuotaHeaders, {
     "User-Agent": "aws-sdk-js/1.0.0 KiroIDE",
@@ -58,8 +73,8 @@ test("Kiro identity is deterministic and all paths use the setting override", as
 
   setSetting("kiro_ide_version", "7.8.9");
   const expected = {
-    "User-Agent": "AWS-SDK-JS/3.0.0 kiro-ide/7.8.9",
-    "X-Amz-User-Agent": "aws-sdk-js/3.0.0 kiro-ide/7.8.9",
+    "User-Agent": "aws-sdk-js/1.0.0 ua/2.1 os/windows#10.0.26200 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.0 m/E KiroIDE-7.8.9-ae57d0f66705dfc8b3d212a7a7b492f68978c399db299b8b506753fc36feca1a",
+    "X-Amz-User-Agent": "aws-sdk-js/1.0.0 KiroIDE-7.8.9-ae57d0f66705dfc8b3d212a7a7b492f68978c399db299b8b506753fc36feca1a",
   };
   const expectedQuota = {
     "User-Agent": "aws-sdk-js/7.8.9 KiroIDE",

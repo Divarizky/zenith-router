@@ -13,10 +13,10 @@ export function kiroBaseUrls(credentials = {}) {
   ];
 }
 
-export function kiroHeadersForUrl(baseHeaders = {}, credentials = {}, url = "") {
+export function kiroHeadersForUrl(baseHeaders = {}, credentials = {}, url = "", connectionId) {
   const headers = {
     ...baseHeaders,
-    ...buildKiroIdentityHeaders({ kind: "executor" }),
+    ...buildKiroIdentityHeaders({ kind: "executor", connectionId }),
     "Amz-Sdk-Invocation-Id": randomUUID(),
     "Amz-Sdk-Request": "attempt=1; max=3",
     "x-amzn-kiro-agent-mode": "spec",
@@ -40,7 +40,7 @@ export class KiroExecutor extends BaseExecutor {
   async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection }) {
     const credentials = connection?.credentials || {};
     const finalUrl = credentials.auth_method ? kiroBaseUrls(credentials)[0] : url;
-    const kiroHeaders = kiroHeadersForUrl(headers, credentials, finalUrl);
+    const kiroHeaders = kiroHeadersForUrl(headers, credentials, finalUrl, connection?.id);
 
     const res = await super.execute({
       url: finalUrl,

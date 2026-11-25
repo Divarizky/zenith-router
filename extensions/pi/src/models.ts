@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /** Dipakai hanya bila gateway mati dan belum pernah ada cache. Contoh id dari README gateway. */
-export const FALLBACK_MODEL_IDS: readonly string[] = ["dsw/deepseek-chat"];
+export const FALLBACK_MODEL_IDS: readonly string[] = ["glm/glm-4.5-air"];
 
 export type ModelSource = "live" | "cache" | "fallback";
 

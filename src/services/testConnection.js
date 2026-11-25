@@ -5,7 +5,6 @@ import { applyConnectionAuth } from "./auth.js";
 import { requireResolvedProxy } from "./proxyPools.js";
 import { fetchLiveQuota, hasQuotaFetcher } from "./quota/index.js";
 import { getImporter, fetchProviderModels } from "./modelImport.js";
-import { checkSessionHealth } from "./deepseekWeb/turns.js";
 import { proxyFetch } from "../executors/proxy.js";
 import { getExecutor, BaseExecutor } from "../executors/base.js";
 
@@ -38,19 +37,6 @@ export async function testConnection(providerId, options = {}) {
   }
 
   try {
-    // 1. Provider berbasis session web (DeepSeek Web)
-    if (provider.id === "deepseek-web" || provider.category === "session") {
-      if (!connection) return { ok: false, error: "Akun sesi tidak ditemukan." };
-      const health = await checkSessionHealth(connection);
-      if (health.status === "ok") {
-        return { ok: true, details: "Sesi browser aktif dan valid." };
-      }
-      return {
-        ok: false,
-        error: health.message || (health.status === "expired" ? "Sesi kedaluwarsa" : "Gagal memeriksa sesi"),
-      };
-    }
-
     // 2. Provider yang memiliki kuota live (Codex, Claude, GitHub, Kiro, Antigravity, GLM, OpenRouter, dll)
     if (hasQuotaFetcher(provider.id) && connection) {
       const quota = await fetchLiveQuota(connection);

@@ -163,18 +163,15 @@ test("Traffic Guard - enforces minimum throttle cool-off between requests on sam
   rel2();
 });
 
-test("Traffic Guard - serialTurns pins one slot and queues the second turn", async () => {
+test("Traffic Guard - per-account concurrency pins one slot and queues the second turn", async () => {
   initDb(":memory:");
   resetTrafficGuardState();
   setSetting("traffic_guard_enabled", "true");
   setSetting("request_jitter_enabled", "false");
   setSetting("max_account_concurrency", "8");
-  setSetting("provider_throttle_ms:deepseek-web", "0");
 
-  // deepseek-web declares concurrency: 2 but serialTurns: true, because the web
-  // chat serves one generation per account. Without the pin, the second turn is
-  // dispatched while the first still streams and upstream answers "too frequent".
-  const conn = { id: 106, provider: "deepseek-web", auth_type: "session" };
+  setSetting("provider_concurrency:glm", "1");
+  const conn = { id: 106, provider: "glm", auth_type: "session" };
   const events = [];
 
   const rel1 = await acquireAccountSlot(conn);
@@ -201,20 +198,20 @@ test("Traffic Guard - serialTurns pins one slot and queues the second turn", asy
   resetTrafficGuardState();
 });
 
-test("Traffic Guard - a serial provider queue survives longer than the generic 30s ceiling", async () => {
+test("Traffic Guard - a provider queue timeout is honored", async () => {
   initDb(":memory:");
   resetTrafficGuardState();
   setSetting("traffic_guard_enabled", "true");
   setSetting("request_jitter_enabled", "false");
-  setSetting("provider_throttle_ms:deepseek-web", "0");
 
-  const conn = { id: 107, provider: "deepseek-web", auth_type: "session" };
+  setSetting("provider_concurrency:glm", "1");
+  const conn = { id: 107, provider: "glm", auth_type: "session" };
   const held = await acquireAccountSlot(conn);
 
   // The registry declares queueTimeoutMs: 180000. Shrinking the declared value
   // through the setting proves the timeout is read from the provider, not the
   // hardcoded QUEUE_TIMEOUT_MS constant.
-  setSetting("provider_queue_timeout_ms:deepseek-web", "40");
+  setSetting("provider_queue_timeout_ms:glm", "40");
   const rejected = assert.rejects(acquireAccountSlot(conn), /queue timeout \(0\.04s\)/);
   await rejected;
   held();

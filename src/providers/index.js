@@ -18,7 +18,6 @@ import nous from "./registry/nous.js";
 import commandcode from "./registry/commandcode.js";
 import ovhcloud from "./registry/ovhcloud.js";
 import xkiro from "./registry/xkiro.js";
-import deepseekWeb from "./registry/deepseek-web.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled, listRetiredModels } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
 import { codexThinkingLevelsFor } from "./codexTiers.js";
@@ -165,7 +164,6 @@ const REGISTRY = [
   commandcode,
   ovhcloud,
   xkiro,
-  deepseekWeb,
   antigravityAcp,
 ];
 

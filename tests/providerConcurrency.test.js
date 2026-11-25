@@ -19,12 +19,11 @@ function setup(settings = {}) {
   setSetting("traffic_guard_enabled", "true");
   setSetting("request_jitter_enabled", "false");
   setSetting("max_account_concurrency", "8");
-  setSetting("provider_throttle_ms:deepseek-web", "0");
   for (const [key, value] of Object.entries(settings)) setSetting(key, value);
 }
 
 // A provider with no registry entry of its own, so a test about the slot cap is
-// not silently rewritten by a registry field like deepseek-web's serialTurns.
+// not silently rewritten by a provider-specific registry field.
 const account = (id, provider = "cap-provider") => ({ id, provider, auth_type: "session" });
 
 const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));

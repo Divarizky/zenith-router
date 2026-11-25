@@ -1311,7 +1311,6 @@ function renderTopologyPane(topology) {
         kilocode: { label: "KILO CODE", model: "kilo-v1", lat: "125ms", tier: "Tier 2 Cloud", tilt: "-0.5deg", icon: "/providers/kilocode.png" },
         'kilo-free': { label: "KILO FREE", model: "kilo-free-v1", lat: "98ms", tier: "Tier 3 Free", tilt: "1.0deg", icon: "/providers/kilo-free.png" },
         llm7: { label: "LLM7 FREE", model: "llm7-base", lat: "90ms", tier: "Tier 3 Free", tilt: "-1.0deg", icon: "/providers/llm7.png" },
-        'deepseek-web': { label: "DEEPSEEK WEB", model: "deepseek-v3", lat: "150ms", tier: "Tier 2 Cloud", tilt: "0.7deg", icon: "/providers/deepseek-web.png" }
       };
 
       var TILTS = ["-1deg", "1.2deg", "-0.8deg", "1.5deg", "-1.5deg", "0.8deg", "-1.2deg", "1deg", "-0.7deg", "1.4deg"];

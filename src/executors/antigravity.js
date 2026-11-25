@@ -67,6 +67,58 @@ function missingProjectResponse() {
   );
 }
 
+export function isAntigravityPromptRejection(status, bodyText) {
+  if (status !== 429 || typeof bodyText !== "string") return false;
+  let json;
+  try {
+    json = JSON.parse(bodyText);
+  } catch {
+    return false;
+  }
+  if (!json || typeof json !== "object") return false;
+  const err = json.error && typeof json.error === "object" ? json.error : json;
+  const code = err.status ?? json.status;
+  if (code !== "RESOURCE_EXHAUSTED") return false;
+  if (typeof err.message !== "string" || !/resource has been exhausted/i.test(err.message)) return false;
+  const details = err.details ?? json.details;
+  return details === undefined || details === null || (Array.isArray(details) && details.length === 0);
+}
+
+export function moveSystemInstructionToContents(request) {
+  const sys = request?.systemInstruction;
+  if (!sys) return request;
+  const moved = (Array.isArray(sys.parts) ? sys.parts : []).filter((p) => typeof p?.text === "string").map((p) => ({ text: p.text }));
+  const { systemInstruction, ...rest } = request;
+  const contents = Array.isArray(request.contents) ? [...request.contents] : [];
+  if (!moved.length) return { ...rest, contents };
+  const idx = contents.findIndex((c) => c?.role === "user");
+  if (idx === -1) {
+    contents.unshift({ role: "user", parts: moved });
+  } else {
+    const turn = contents[idx];
+    contents[idx] = { ...turn, parts: [...moved, ...(Array.isArray(turn.parts) ? turn.parts : [])] };
+  }
+  return { ...rest, contents };
+}
+
+function promptRejectedResponse() {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: 400,
+        status: "INVALID_ARGUMENT",
+        message: "Antigravity rejected the prompt content. This is not a quota error.",
+        reason: "antigravity_prompt_rejected",
+      },
+    }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
+
+function rebuild(response, text) {
+  return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
 export class AntigravityExecutor extends BaseExecutor {
   async execute({ url, method = "POST", headers = {}, body, signal, timeoutMs, proxyUrl, connection, stream = false, targetModel, effort, sessionKey = null, sessionSource = null }) {
     let parsed = null;
@@ -111,15 +163,34 @@ export class AntigravityExecutor extends BaseExecutor {
       Accept: stream ? "text/event-stream" : "application/json",
     };
 
-    return super.execute({
-      url: finalUrl,
-      method,
-      headers: antigravityHeaders,
-      body: JSON.stringify(wrapped),
-      signal,
-      timeoutMs,
-      proxyUrl,
+    const send = (payload) =>
+      super.execute({
+        url: finalUrl,
+        method,
+        headers: antigravityHeaders,
+        body: JSON.stringify(payload),
+        signal,
+        timeoutMs,
+        proxyUrl,
+      });
+
+    const response = await send(wrapped);
+    if (response?.status !== 429) return response;
+
+    const text = await response.text();
+    if (!isAntigravityPromptRejection(response.status, text)) return rebuild(response, text);
+    if (!upstreamRequest?.systemInstruction) return promptRejectedResponse();
+
+    captureLine(`[ANTIGRAVITY] model=${model} prompt rejected, retrying with system text in first user turn`);
+    const retry = await send({
+      ...wrapped,
+      requestId: `agent-${randomUUID()}`,
+      request: moveSystemInstructionToContents(upstreamRequest),
     });
+    if (retry?.status !== 429) return retry;
+    const retryText = await retry.text();
+    if (!isAntigravityPromptRejection(retry.status, retryText)) return rebuild(retry, retryText);
+    return promptRejectedResponse();
   }
 }
 

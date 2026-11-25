@@ -223,38 +223,657 @@ function renderTopologyPane(topology) {
         .topology-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .topology-canvas { min-width: 620px; }
       }
-      .quota-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: 3px 3px 0 var(--shadow-ink); }
-      .q-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      .q-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 0; display: flex; align-items: center; justify-content: center; background: var(--logo-tile); border: var(--bw) solid var(--line); font-size: var(--text-xs); font-weight: 800; color: var(--text); }
-      .q-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; flex: 1; }
-      .q-name strong { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .q-body { display: flex; flex-direction: column; gap: 0.5rem; }
-      .q-row { display: flex; flex-direction: column; gap: 3px; }
-      .q-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--text-xs); }
-      .q-label { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .q-meta { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
-      .q-pct { font-size: var(--text-xs); font-weight: 600; }
-      .q-pct.q-ok { color: var(--text); }
-      .q-pct.q-warn { color: var(--text); }
-      .q-pct.q-bad { color: var(--text); }
-      .q-bar { height: 8px; border-radius: 0; background: var(--surface-2); border: var(--bw) solid var(--text); overflow: hidden; }
-      .q-bar i { display: block; height: 100%; border-radius: 0; transition: width 0.3s ease; }
-      .q-bar i.q-ok { background: var(--success); }
-      .q-bar i.q-warn { background: var(--warning); }
-      .q-bar i.q-bad { background: var(--danger); }
-      .q-more { font-size: var(--text-xs); }
-      .q-more summary { cursor: pointer; color: var(--text-muted); list-style: none; padding: 2px 0; }
+
+      /* ==========================================================================
+         Industrial Telemetry Rack & Swiss Punk Neo-brutalism Components
+         Dual-theme calibrated: Obsidian Dark & Crisp White
+         ========================================================================== */
+
+      .editorial-section {
+        position: relative;
+        margin-top: 1.25rem;
+      }
+
+      /* Corner Crop Marks */
+      .crop-mark-box {
+        position: relative;
+      }
+      .cm-corner {
+        position: absolute;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 10px;
+        color: var(--text-subtle);
+        opacity: 0.4;
+        pointer-events: none;
+        user-select: none;
+        line-height: 1;
+        z-index: 2;
+      }
+      .cm-tl { top: -8px; left: -2px; }
+      .cm-tr { top: -8px; right: -2px; }
+      .cm-bl { bottom: -8px; left: -2px; }
+      .cm-br { bottom: -8px; right: -2px; }
+
+      /* Duct-Tape Tags & Cargo Tags */
+      .duct-tape-tag {
+        display: inline-flex;
+        align-items: center;
+        background: #09090b;
+        color: #ffffff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: var(--text-xs);
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 2px 7px;
+        border: 1px solid #09090b;
+        box-shadow: 1px 1px 0 var(--shadow-ink);
+        white-space: nowrap;
+      }
+      [data-theme="dark"] .duct-tape-tag {
+        background: #f4f4f6;
+        color: #09090b;
+        border-color: #f4f4f6;
+        box-shadow: 1px 1px 0 #000000;
+      }
+
+      .cargo-tag {
+        display: inline-flex;
+        align-items: center;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: var(--text-xs);
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        color: var(--text-subtle);
+        background: var(--surface-2);
+        border: 1px solid var(--border-subtle);
+        padding: 2px 6px;
+        white-space: nowrap;
+      }
+
+      /* Mini Barcode Graphic */
+      .mini-barcode {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        height: 12px;
+        opacity: 0.55;
+      }
+      .mini-barcode i {
+        display: inline-block;
+        height: 100%;
+        background: currentColor;
+        color: var(--text);
+        width: 1px;
+      }
+      .mini-barcode i.w { width: 2.5px; }
+      .mini-barcode i.m { width: 1.5px; }
+
+      /* Hardware Screws */
+      .hw-screw {
+        position: absolute;
+        width: 7px;
+        height: 7px;
+        background: var(--surface-3);
+        border: 1px solid var(--border);
+        box-sizing: border-box;
+        z-index: 3;
+      }
+      .hw-screw::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 1px;
+        right: 1px;
+        height: 1px;
+        background: var(--border);
+      }
+      .hw-screw-tl { top: 4px; left: 4px; }
+      .hw-screw-tr { top: 4px; right: 4px; }
+      .hw-screw-bl { bottom: 4px; left: 4px; }
+      .hw-screw-br { bottom: 4px; right: 4px; }
+
+      /* Section 1: Telemetry Rack Strip */
+      .telemetry-strip {
+        background: var(--surface);
+        border: var(--bw) solid var(--text);
+        box-shadow: 4px 4px 0 var(--shadow-ink);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .telemetry-strip-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 12px;
+        background: var(--surface-2);
+        border-bottom: var(--bw) solid var(--text);
+      }
+      .telemetry-strip-header-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .telemetry-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        background: transparent;
+      }
+      .telemetry-cell {
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border-right: 1.5px dashed var(--border-subtle);
+        min-width: 0;
+        position: relative;
+        background: var(--surface);
+      }
+      .telemetry-cell:last-child {
+        border-right: none;
+      }
+      .telemetry-cell-label {
+        font-size: var(--text-xs);
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .telemetry-cell-value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 1.45rem;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        line-height: 1.15;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .telemetry-cell-sub {
+        font-size: var(--text-xs);
+        color: var(--text-subtle);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .telemetry-cell.is-highlight {
+        background: var(--surface-2);
+      }
+      .telemetry-cell.is-highlight .telemetry-cell-value {
+        color: #047857;
+      }
+      [data-theme="dark"] .telemetry-cell.is-highlight .telemetry-cell-value {
+        color: #6ee7b7;
+      }
+      .hit-tag {
+        display: inline-flex;
+        align-items: center;
+        background: #ccff00;
+        color: #09090b;
+        border: 1px solid #09090b;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.65rem;
+        font-weight: 900;
+        letter-spacing: 0.04em;
+        padding: 1px 5px;
+        box-shadow: 1px 1px 0 #09090b;
+        line-height: 1.2;
+      }
+
+      @media (max-width: 900px) {
+        .telemetry-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .telemetry-cell:nth-child(2) {
+          border-right: none;
+        }
+        .telemetry-cell:nth-child(1),
+        .telemetry-cell:nth-child(2),
+        .telemetry-cell:nth-child(3),
+        .telemetry-cell:nth-child(4) {
+          border-bottom: 1.5px dashed var(--border-subtle);
+        }
+        .telemetry-cell:nth-child(5) {
+          grid-column: span 2;
+          border-right: none;
+        }
+      }
+
+      /* Section 2: Quota Channel Rack */
+      .channels-section {
+        background: var(--surface);
+        border: var(--bw) solid var(--text);
+        box-shadow: 4px 4px 0 var(--shadow-ink);
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .channels-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding-bottom: 10px;
+        border-bottom: 1.5px dashed var(--border-subtle);
+      }
+      .channels-header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .channels-title-row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .channels-title-row h3 {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 900;
+        letter-spacing: -0.01em;
+        text-transform: uppercase;
+      }
+      .btn-sync-all {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #ccff00;
+        color: #09090b;
+        border: 2px solid #09090b;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: var(--text-xs);
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding: 5px 12px;
+        box-shadow: 2px 2px 0 var(--shadow-ink);
+        cursor: pointer;
+        transition: transform 0.05s ease, box-shadow 0.05s ease;
+      }
+      .btn-sync-all:hover {
+        background: #bbf400;
+      }
+      .btn-sync-all:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+      }
+
+      .quota-card {
+        position: relative;
+        background: var(--surface);
+        border: var(--bw) solid var(--text);
+        border-radius: 0;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        box-shadow: 4px 4px 0 var(--shadow-ink);
+      }
+      .q-meta-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding-bottom: 4px;
+      }
+      .q-meta-bar-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .q-meta-bar-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .q-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1.5px dashed var(--border-subtle);
+      }
+      .q-head-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
+      }
+      .q-icon {
+        width: 34px;
+        height: 34px;
+        flex-shrink: 0;
+        border-radius: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--logo-tile);
+        border: var(--bw) solid var(--border);
+        font-size: var(--text-xs);
+        font-weight: 900;
+        color: var(--text);
+      }
+      .q-name {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+        flex: 1;
+      }
+      .q-name strong {
+        font-size: 0.95rem;
+        font-weight: 900;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        letter-spacing: -0.01em;
+      }
+      .q-name-badges {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      /* Segmented Physical VU Meter */
+      .q-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .q-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 4px 0;
+      }
+      .q-row-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: var(--text-xs);
+      }
+      .q-label {
+        font-weight: 700;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .q-meta {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: var(--text-xs);
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex-shrink: 1;
+        min-width: 0;
+      }
+      .vu-meter {
+        display: grid;
+        grid-template-columns: repeat(14, 1fr);
+        gap: 3px;
+        height: 11px;
+        width: 100%;
+        margin-top: 1px;
+        margin-bottom: 2px;
+      }
+      .vu-seg {
+        height: 100%;
+        background: var(--surface-2);
+        border: 1px solid var(--border-subtle);
+        box-sizing: border-box;
+      }
+      .vu-seg.on.tone-ok {
+        background: #10b981;
+        border-color: #09090b;
+      }
+      [data-theme="dark"] .vu-seg.on.tone-ok {
+        background: #6ee7b7;
+        border-color: #71717a;
+      }
+      .vu-seg.on.tone-warn {
+        background: #eab308;
+        border-color: #09090b;
+      }
+      [data-theme="dark"] .vu-seg.on.tone-warn {
+        background: #fde047;
+        border-color: #71717a;
+      }
+      .vu-seg.on.tone-bad {
+        background: #ef4444;
+        border-color: #09090b;
+      }
+      [data-theme="dark"] .vu-seg.on.tone-bad {
+        background: #ff6b4a;
+        border-color: #71717a;
+      }
+
+      /* Fallback bar */
+      .q-bar {
+        height: 10px;
+        border-radius: 0;
+        background: var(--surface-2);
+        border: var(--bw) solid var(--text);
+        overflow: hidden;
+      }
+      .q-bar i {
+        display: block;
+        height: 100%;
+        border-radius: 0;
+        transition: width 0.3s ease;
+      }
+      .q-bar i.q-ok { background: #10b981; }
+      [data-theme="dark"] .q-bar i.q-ok { background: #6ee7b7; }
+      .q-bar i.q-warn { background: #eab308; }
+      [data-theme="dark"] .q-bar i.q-warn { background: #fde047; }
+      .q-bar i.q-bad { background: #ef4444; }
+      [data-theme="dark"] .q-bar i.q-bad { background: #ff6b4a; }
+
+      .q-more {
+        font-size: var(--text-xs);
+        margin-top: 4px;
+      }
+      .q-more summary {
+        cursor: pointer;
+        font-weight: 700;
+        color: var(--text-muted);
+        list-style: none;
+        padding: 4px 6px;
+        background: var(--surface-2);
+        border: 1px dashed var(--border-subtle);
+      }
       .q-more summary::-webkit-details-marker { display: none; }
-      .q-more summary::before { content: "+ "; font-weight: 700; }
+      .q-more summary::before { content: "+ "; font-weight: 900; }
       .q-more[open] summary::before { content: "\\2212 "; }
-      .q-more summary:hover { color: var(--text); }
-      .q-more .q-rows { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.5rem; }
-      .q-levels { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: var(--text-xs); color: var(--text-subtle); }
-      .q-levels span { white-space: nowrap; }
-      .q-levels b { font-weight: 600; color: var(--text-muted); }
-      .q-levels b.q-bad { color: var(--text); }
-      .q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
-      .q-updated { font-size: var(--text-xs); color: var(--text-subtle); }
+      .q-more summary:hover { color: var(--text); background: var(--bg-hover); }
+      .q-more .q-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-top: 8px;
+      }
+      .q-levels {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px 8px;
+        font-size: var(--text-xs);
+        color: var(--text-subtle);
+        margin-top: 2px;
+      }
+      .q-levels span {
+        white-space: nowrap;
+        background: var(--surface-2);
+        padding: 1px 5px;
+        border: 1px solid var(--border-subtle);
+      }
+      .q-levels b {
+        font-weight: 700;
+        color: var(--text);
+      }
+      .q-levels b.q-bad {
+        color: #ef4444;
+      }
+      [data-theme="dark"] .q-levels b.q-bad {
+        color: #ff6b4a;
+      }
+
+      .q-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: auto;
+        padding-top: 8px;
+        border-top: 1.5px dashed var(--border-subtle);
+      }
+      .q-updated {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: var(--text-xs);
+        color: var(--text-subtle);
+      }
+      .btn-sync-channel {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--surface);
+        color: var(--text);
+        border: var(--bw) solid var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: var(--text-xs);
+        font-weight: 900;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 4px 9px;
+        box-shadow: 2px 2px 0 var(--shadow-ink);
+        cursor: pointer;
+        transition: transform 0.05s ease, box-shadow 0.05s ease;
+      }
+      .btn-sync-channel:hover {
+        background: var(--surface-2);
+      }
+      .btn-sync-channel:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+      }
+
+      /* Section 3: Editorial Ledger Tables */
+      .ledgers-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      @media (max-width: 820px) {
+        .ledgers-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      .ledger-card {
+        background: var(--surface);
+        border: var(--bw) solid var(--text);
+        box-shadow: 4px 4px 0 var(--shadow-ink);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .ledger-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--surface-2);
+        border-bottom: var(--bw) solid var(--text);
+      }
+      .ledger-header-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .ledger-title {
+        font-size: 0.88rem;
+        font-weight: 900;
+        letter-spacing: -0.01em;
+        text-transform: uppercase;
+        color: var(--text);
+      }
+      .ledger-table-wrap {
+        overflow-x: auto;
+      }
+      .ledger-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .ledger-table th {
+        font-size: var(--text-xs);
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-subtle);
+        background: var(--surface);
+        border-bottom: var(--bw) solid var(--text);
+        padding: 7px 10px;
+        text-align: left;
+      }
+      .ledger-table th.num,
+      .ledger-table td.num {
+        text-align: right;
+      }
+      .ledger-table td {
+        padding: 8px 10px;
+        border-bottom: 1px dashed var(--border-subtle);
+        font-size: var(--text-xs);
+        vertical-align: middle;
+      }
+      .ledger-table tr:last-child td {
+        border-bottom: none;
+      }
+      .ledger-tokens-cell {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .sparkbar-track {
+        width: 54px;
+        height: 7px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .sparkbar-fill {
+        height: 100%;
+        background: #10b981;
+      }
+      [data-theme="dark"] .sparkbar-fill {
+        background: #6ee7b7;
+      }
+      .sparkbar-fill.fill-acct {
+        background: #0284c7;
+      }
+      [data-theme="dark"] .sparkbar-fill.fill-acct {
+        background: #38bdf8;
+      }
+
 
       /* Deconstructivist Editorial Topology Stage */
       .canvas-stage {
@@ -1176,6 +1795,28 @@ function fmtCountdown(resetTime) {
   }
 }
 
+/** Render a 14-segment physical VU meter */
+function renderVuMeter(pct, isExhausted = false) {
+  if (pct == null) return "";
+  const TOTAL_SEGMENTS = 14;
+  let activeSegments = Math.round((Math.max(0, Math.min(100, pct)) / 100) * TOTAL_SEGMENTS);
+  if (activeSegments === 0 && (pct > 0 || isExhausted)) {
+    activeSegments = 1;
+  }
+  let toneClass = "tone-ok";
+  if (pct < 25 || isExhausted) {
+    toneClass = "tone-bad";
+  } else if (pct < 60) {
+    toneClass = "tone-warn";
+  }
+  const segs = [];
+  for (let i = 0; i < TOTAL_SEGMENTS; i++) {
+    const isActive = i < activeSegments;
+    segs.push(`<div class="vu-seg${isActive ? ` on ${toneClass}` : ""}"></div>`);
+  }
+  return `<div class="vu-meter">${segs.join("")}</div>`;
+}
+
 function fmtUsd(n) {
   return "$" + (Number(n) || 0).toFixed(2);
 }
@@ -1450,7 +2091,7 @@ function antigravityPoolRows(q) {
 }
 
 /** Quota card for one account. */
-function renderQuotaCard(s, antigravityInventory = null) {
+function renderQuotaCard(s, antigravityInventory = null, index = 0) {
   const q = s.quota;
   // Antigravity: pool 5 jam/mingguan lalu baris per keluarga; provider lain tetap memakai bucketnya.
   const rows =
@@ -1486,13 +2127,16 @@ function renderQuotaCard(s, antigravityInventory = null) {
     if (!unlimited) parts.push(`${toneEmoji(r.remaining)} ${pct}%`);
     if (countdown) parts.push(`Reset ${countdown}`);
     const meta = parts.join(" · ");
+    const isExhausted = s.is_exhausted || isExhaustedNow(r.remaining, r.reset);
+    const vuMeterHtml = unlimited ? "" : renderVuMeter(pct, isExhausted);
     return `
         <div class="q-row">
           <div class="q-row-top">
             <span class="q-label">${escapeHtml(r.label)}</span>
             <span class="q-meta" title="${escapeHtml(meta)}">${escapeHtml(meta)}</span>
           </div>
-          ${unlimited ? "" : `<div class="q-bar"><i class="${tone}" style="width: ${pct}%"></i></div>`}
+          ${vuMeterHtml}
+          ${unlimited ? "" : `<div class="q-bar" style="display:none;"><i class="${tone}" style="width: ${pct}%"></i></div>`}
           ${r.levelsHtml ? `<div class="q-levels">${r.levelsHtml}</div>` : ""}
         </div>`;
   };
@@ -1510,24 +2154,47 @@ function renderQuotaCard(s, antigravityInventory = null) {
       : "");
 
   const updated = q?.updated_at ? `<span>Updated ${relWhen(q.updated_at)}</span>` : "<span>Not synced yet</span>";
+  const chRef = `CH.${String(index + 1).padStart(2, "0")}`;
+  const providerUpper = escapeHtml(String(s.provider || "GEN").toUpperCase());
 
   return `
     <div class="quota-card">
-      <div class="q-head">
-        <div class="q-icon">${iconHtml}</div>
-        <div class="q-name">
-          <strong>${escapeHtml(s.name || s.provider)}</strong>
-          <span class="pill">${escapeHtml(s.provider)}</span>
-          ${planPillHtml}
+      <div class="hw-screw hw-screw-tl"></div>
+      <div class="hw-screw hw-screw-tr"></div>
+      <div class="hw-screw hw-screw-bl"></div>
+      <div class="hw-screw hw-screw-br"></div>
+      <div class="q-meta-bar">
+        <div class="q-meta-bar-left">
+          <span class="cargo-tag">[${chRef} // ${providerUpper}]</span>
         </div>
-        ${statusPill}
+        <div class="q-meta-bar-right">
+          ${planPillHtml}
+          ${statusPill}
+        </div>
+      </div>
+      <div class="q-head">
+        <div class="q-head-left">
+          <div class="q-icon">${iconHtml}</div>
+          <div class="q-name">
+            <strong>${escapeHtml(s.name || s.provider)}</strong>
+            <div class="q-name-badges">
+              <span class="pill">${escapeHtml(s.provider)}</span>
+            </div>
+          </div>
+        </div>
+        <div class="mini-barcode" aria-hidden="true">
+          <i></i><i class="w"></i><i></i><i class="m"></i><i></i><i class="w"></i><i></i>
+        </div>
       </div>
       <div class="q-body">${body}</div>
       <div class="q-foot">
         <span class="q-updated">${updated}</span>
         <form action="/dashboard/quota/sync" method="POST" style="margin: 0;">
           <input type="hidden" name="id" value="${Number(s.id) || 0}" />
-          <button type="submit" class="btn btn-sm">Sync</button>
+          <button type="submit" class="btn-sync-channel">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Sync</span>
+          </button>
         </form>
       </div>
     </div>`;
@@ -1542,18 +2209,18 @@ function renderQuotaCard(s, antigravityInventory = null) {
   const autoSyncLabel = syncIntervalMs
     ? t("usage.auto_sync_every", { minutes: Math.round(syncIntervalMs / 60000) }, currentLang)
     : t("usage.auto_sync_off", {}, currentLang);
-  const quotaHeader = `
-      <div class="card-head">
-        <div>
-          <h3>${escapeHtml(t("usage.quotas_title", {}, currentLang))}</h3>
-          <p class="hint" style="margin-top: 0.25rem;">${autoSyncLabel}. ${currentLang === "en" ? "Icon button refreshes all accounts now." : "Tombol ikon menyegarkan semua akun sekarang."}</p>
-        </div>
-        <form action="/dashboard/quota/sync/all" method="POST" style="margin: 0;">
-          <button type="submit" class="btn btn-sm btn-icon" title="${escapeHtml(t("usage.sync_all_title", {}, currentLang))}" aria-label="${escapeHtml(t("usage.sync_all_title", {}, currentLang))}">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 4v4h-4"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 20v-4h4"/></svg>
-          </button>
-        </form>
-      </div>`;
+
+  const inputTokensVal = Number(stats.summary.total_input_tokens) || 0;
+  const cacheReadTokensVal = Number(stats.summary.total_cache_read_tokens) || 0;
+  const cacheHitPct = inputTokensVal > 0 ? (cacheReadTokensVal / inputTokensVal) * 100 : null;
+  const hitBadgeHtml = cacheHitPct != null
+    ? `<span class="hit-tag">${cacheHitPct.toFixed(1)}% HIT</span>`
+    : `<span class="cargo-tag">NO CACHE HITS</span>`;
+
+  // Maximum tokens for model & account sparkbars
+  const maxModelTokens = Math.max(1, ...(stats.by_model || []).map((m) => Number(m.total_tokens) || 0));
+  const maxAccountTokens = Math.max(1, ...(stats.by_account || []).map((a) => Number(a.total_tokens) || 0));
+
   const content = `
     ${syncedNotice}
     <div class="card">
@@ -1571,93 +2238,183 @@ function renderQuotaCard(s, antigravityInventory = null) {
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card stat">
-        <div class="label">${escapeHtml(t("usage.stat_total_requests", {}, currentLang))}</div>
-        <div class="value">${stats.summary.total_requests}</div>
-        <div class="sub">${t("usage.stat_avg_duration", { duration: stats.summary.avg_duration_ms }, currentLang)}</div>
-      </div>
-      <div class="card stat">
-        <div class="label">${escapeHtml(t("usage.stat_input_tokens", {}, currentLang))}</div>
-        <div class="value">${stats.summary.total_input_tokens.toLocaleString()}</div>
-        <div class="sub">${escapeHtml(t("usage.stat_input_sub", {}, currentLang))}</div>
-      </div>
-      <div class="card stat">
-        <div class="label">${escapeHtml(t("usage.stat_output_tokens", {}, currentLang))}</div>
-        <div class="value">${stats.summary.total_output_tokens.toLocaleString()}</div>
-        <div class="sub">${escapeHtml(t("usage.stat_output_sub", {}, currentLang))}</div>
-      </div>
-      <div class="card stat">
-        <div class="label">${escapeHtml(t("usage.stat_combined_tokens", {}, currentLang))}</div>
-        <div class="value">${stats.summary.total_tokens.toLocaleString()}</div>
-        <div class="sub">${escapeHtml(t("usage.stat_combined_sub", {}, currentLang))}</div>
-      </div>
-      <div class="card stat">
-        <div class="label">${escapeHtml(t("usage.stat_cache_tokens", {}, currentLang))}</div>
-        <div class="value">${stats.summary.total_cache_read_tokens.toLocaleString()}</div>
-        <div class="sub">${cacheHitLabel(stats.summary)}</div>
+    <!-- Section 1: Usage Telemetry Strip [SYS.01] -->
+    <div class="editorial-section crop-mark-box">
+      <span class="cm-corner cm-tl">+ 00:00</span>
+      <span class="cm-corner cm-tr">+ 10:00</span>
+      <span class="cm-corner cm-bl">+ 00:99</span>
+      <span class="cm-corner cm-br">+ 10:99</span>
+      <div class="telemetry-strip">
+        <div class="telemetry-strip-header">
+          <div class="telemetry-strip-header-left">
+            <span class="duct-tape-tag">USAGE TELEMETRY // 30D</span>
+            <span class="cargo-tag">[SYS.01]</span>
+          </div>
+          <div class="mini-barcode" aria-hidden="true">
+            <i class="w"></i><i></i><i class="m"></i><i></i><i class="w"></i><i></i><i class="m"></i><i class="w"></i><i></i>
+          </div>
+        </div>
+        <div class="telemetry-grid">
+          <div class="telemetry-cell">
+            <div class="telemetry-cell-label">${escapeHtml(t("usage.stat_total_requests", {}, currentLang))}</div>
+            <div class="telemetry-cell-value">${Number(stats.summary.total_requests || 0).toLocaleString()}</div>
+            <div class="telemetry-cell-sub">${t("usage.stat_avg_duration", { duration: stats.summary.avg_duration_ms }, currentLang)}</div>
+          </div>
+          <div class="telemetry-cell">
+            <div class="telemetry-cell-label">${escapeHtml(t("usage.stat_input_tokens", {}, currentLang))}</div>
+            <div class="telemetry-cell-value">${Number(stats.summary.total_input_tokens || 0).toLocaleString()}</div>
+            <div class="telemetry-cell-sub">Prompt ingress &middot; ${escapeHtml(t("usage.stat_input_sub", {}, currentLang))}</div>
+          </div>
+          <div class="telemetry-cell">
+            <div class="telemetry-cell-label">${escapeHtml(t("usage.stat_output_tokens", {}, currentLang))}</div>
+            <div class="telemetry-cell-value">${Number(stats.summary.total_output_tokens || 0).toLocaleString()}</div>
+            <div class="telemetry-cell-sub">Completion egress &middot; ${escapeHtml(t("usage.stat_output_sub", {}, currentLang))}</div>
+          </div>
+          <div class="telemetry-cell">
+            <div class="telemetry-cell-label">${escapeHtml(t("usage.stat_combined_tokens", {}, currentLang))}</div>
+            <div class="telemetry-cell-value">${Number(stats.summary.total_tokens || 0).toLocaleString()}</div>
+            <div class="telemetry-cell-sub">Total throughput &middot; ${escapeHtml(t("usage.stat_combined_sub", {}, currentLang))}</div>
+          </div>
+          <div class="telemetry-cell is-highlight">
+            <div class="telemetry-cell-label">
+              <span>${escapeHtml(t("usage.stat_cache_tokens", {}, currentLang))}</span>
+              ${hitBadgeHtml}
+            </div>
+            <div class="telemetry-cell-value">${Number(stats.summary.total_cache_read_tokens || 0).toLocaleString()}</div>
+            <div class="telemetry-cell-sub">${cacheHitLabel(stats.summary)}</div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      ${quotaHeader}
-      ${
-        quotas.length === 0
-          ? `<div class="empty"><p class="big">${escapeHtml(t("usage.empty_quotas", {}, currentLang))}</p><p>${escapeHtml(t("usage.empty_quotas_hint", {}, currentLang))}</p></div>`
-          : `<div class="quota-grid">${quotas.map((q) => renderQuotaCard(q, antigravityInventory)).join("")}</div>`
-      }
+    <!-- Section 2: Quota Channel Modules [CH.xx // PROVIDER] -->
+    <div class="editorial-section crop-mark-box">
+      <span class="cm-corner cm-tl">+ 00:00</span>
+      <span class="cm-corner cm-tr">+ 10:00</span>
+      <span class="cm-corner cm-bl">+ 00:99</span>
+      <span class="cm-corner cm-br">+ 10:99</span>
+      <div class="channels-section">
+        <div class="channels-header">
+          <div class="channels-header-left">
+            <span class="duct-tape-tag">QUOTA CHANNELS</span>
+            <div class="channels-title-row">
+              <h3>${escapeHtml(t("usage.quotas_title", {}, currentLang))}</h3>
+              <span class="cargo-tag">${autoSyncLabel}</span>
+            </div>
+          </div>
+          <form action="/dashboard/quota/sync/all" method="POST" style="margin: 0;">
+            <button type="submit" class="btn-sync-all" title="${escapeHtml(t("usage.sync_all_title", {}, currentLang))}" aria-label="${escapeHtml(t("usage.sync_all_title", {}, currentLang))}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>SYNC ALL</span>
+            </button>
+          </form>
+        </div>
+        ${
+          quotas.length === 0
+            ? `<div class="empty"><p class="big">${escapeHtml(t("usage.empty_quotas", {}, currentLang))}</p><p>${escapeHtml(t("usage.empty_quotas_hint", {}, currentLang))}</p></div>`
+            : `<div class="quota-grid">${quotas.map((q, idx) => renderQuotaCard(q, antigravityInventory, idx)).join("")}</div>`
+        }
+      </div>
     </div>
 
-    <div class="card">
-      <h3>${escapeHtml(t("usage.token_by_model", {}, currentLang))}</h3>
-      ${
-        stats.by_model.length === 0
-          ? `<div class="empty"><p class="big">${escapeHtml(t("usage.empty_usage", {}, currentLang))}</p><p>${escapeHtml(t("usage.empty_usage_hint", {}, currentLang))}</p></div>`
-          : `<table>
-        <thead>
-          <tr><th>${escapeHtml(t("usage.col_model", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_requests", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_total_tokens", {}, currentLang))}</th></tr>
-        </thead>
-        <tbody>
-          ${stats.by_model
-            .map(
-              (m) => `
-            <tr>
-              <td><code>${escapeHtml(m.model)}</code></td>
-              <td>${m.count}</td>
-              <td><strong>${m.total_tokens.toLocaleString()}</strong></td>
-            </tr>`
-            )
-            .join("")}
-        </tbody>
-      </table>`
-      }
-    </div>
+    <!-- Section 3: Editorial Ledger Tables [LEDGER.01 & LEDGER.02] -->
+    <div class="editorial-section crop-mark-box">
+      <span class="cm-corner cm-tl">+ 00:00</span>
+      <span class="cm-corner cm-tr">+ 10:00</span>
+      <span class="cm-corner cm-bl">+ 00:99</span>
+      <span class="cm-corner cm-br">+ 10:99</span>
+      <div class="ledgers-grid">
+        <div class="ledger-card">
+          <div class="ledger-header">
+            <div class="ledger-header-left">
+              <span class="duct-tape-tag">TOKEN BY MODEL</span>
+              <span class="cargo-tag">[LEDGER.01]</span>
+            </div>
+            <span class="ledger-title">${escapeHtml(t("usage.token_by_model", {}, currentLang))}</span>
+          </div>
+          <div class="ledger-table-wrap">
+            ${
+              stats.by_model.length === 0
+                ? `<div class="empty"><p class="big">${escapeHtml(t("usage.empty_usage", {}, currentLang))}</p><p>${escapeHtml(t("usage.empty_usage_hint", {}, currentLang))}</p></div>`
+                : `<table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>${escapeHtml(t("usage.col_model", {}, currentLang))}</th>
+                  <th class="num">${escapeHtml(t("usage.col_requests", {}, currentLang))}</th>
+                  <th class="num">${escapeHtml(t("usage.col_total_tokens", {}, currentLang))}</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.by_model
+                  .map((m) => {
+                    const tokens = Number(m.total_tokens) || 0;
+                    const fillPct = Math.max(2, Math.min(100, Math.round((tokens / maxModelTokens) * 100)));
+                    return `
+                  <tr>
+                    <td><code>${escapeHtml(m.model)}</code></td>
+                    <td class="num">${Number(m.count || 0).toLocaleString()}</td>
+                    <td class="num">
+                      <div class="ledger-tokens-cell">
+                        <div class="sparkbar-track" title="${fillPct}% of top model usage"><div class="sparkbar-fill" style="width: ${fillPct}%;"></div></div>
+                        <strong>${tokens.toLocaleString()}</strong>
+                      </div>
+                    </td>
+                  </tr>`;
+                  })
+                  .join("")}
+              </tbody>
+            </table>`
+            }
+          </div>
+        </div>
 
-    ${
-      stats.by_account && stats.by_account.length > 0
-        ? `<div class="card">
-      <h3>${escapeHtml(t("usage.token_by_account", {}, currentLang))}</h3>
-      <table>
-        <thead>
-          <tr><th>${escapeHtml(t("usage.col_account", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_provider", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_requests", {}, currentLang))}</th><th>${escapeHtml(t("usage.col_total_tokens", {}, currentLang))}</th></tr>
-        </thead>
-        <tbody>
-          ${stats.by_account
-            .map(
-              (a) => `
-            <tr>
-              <td><code>${escapeHtml(a.name || "direct")}</code></td>
-              <td><span class="pill">${escapeHtml(a.provider || "-")}</span></td>
-              <td>${a.count}</td>
-              <td><strong>${a.total_tokens.toLocaleString()}</strong></td>
-            </tr>`
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>`
-        : ""
-    }
+        ${
+          stats.by_account && stats.by_account.length > 0
+            ? `<div class="ledger-card">
+          <div class="ledger-header">
+            <div class="ledger-header-left">
+              <span class="duct-tape-tag">TOKEN BY ACCOUNT</span>
+              <span class="cargo-tag">[LEDGER.02]</span>
+            </div>
+            <span class="ledger-title">${escapeHtml(t("usage.token_by_account", {}, currentLang))}</span>
+          </div>
+          <div class="ledger-table-wrap">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>${escapeHtml(t("usage.col_account", {}, currentLang))}</th>
+                  <th>${escapeHtml(t("usage.col_provider", {}, currentLang))}</th>
+                  <th class="num">${escapeHtml(t("usage.col_requests", {}, currentLang))}</th>
+                  <th class="num">${escapeHtml(t("usage.col_total_tokens", {}, currentLang))}</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.by_account
+                  .map((a) => {
+                    const tokens = Number(a.total_tokens) || 0;
+                    const fillPct = Math.max(2, Math.min(100, Math.round((tokens / maxAccountTokens) * 100)));
+                    return `
+                  <tr>
+                    <td><code>${escapeHtml(a.name || "direct")}</code></td>
+                    <td><span class="pill">${escapeHtml(a.provider || "-")}</span></td>
+                    <td class="num">${Number(a.count || 0).toLocaleString()}</td>
+                    <td class="num">
+                      <div class="ledger-tokens-cell">
+                        <div class="sparkbar-track" title="${fillPct}% of top account usage"><div class="sparkbar-fill fill-acct" style="width: ${fillPct}%;"></div></div>
+                        <strong>${tokens.toLocaleString()}</strong>
+                      </div>
+                    </td>
+                  </tr>`;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>`
+            : ""
+        }
+      </div>
+    </div>
   `;
 
   return renderLayout({

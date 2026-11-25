@@ -44,16 +44,14 @@ test("traffic - an idle provider reports zeros", () => {
   });
 });
 
-test("traffic - a serial provider hands out one slot but keeps its conversation pool", () => {
-  setup({ provider: "deepseek-web", accounts: 1 });
-  const traffic = getProviderTraffic("deepseek-web");
+test("traffic - a regular provider reports its account cap", () => {
+  setup({ provider: "glm", accounts: 1 });
+  const traffic = getProviderTraffic("glm");
 
-  // The registry says concurrency: 2 (two warm conversations) and serialTurns:
-  // true (one generation at a time), so the slot cap must not follow the pool.
-  assert.strictEqual(traffic.perAccountCap, 1, "serialTurns pins the slot cap to one");
-  assert.strictEqual(traffic.cap, 1);
-  assert.strictEqual(traffic.serialTurns, true);
-  assert.strictEqual(traffic.accounts[0].conversationCap, 2, "the warm conversation pool is still two");
+  assert.strictEqual(traffic.perAccountCap, 2);
+  assert.strictEqual(traffic.cap, 2);
+  assert.strictEqual(traffic.serialTurns, false);
+  assert.strictEqual(traffic.accounts[0].conversationCap, 2);
 });
 
 test("traffic - in-flight and queued requests are visible per account and per provider", async () => {

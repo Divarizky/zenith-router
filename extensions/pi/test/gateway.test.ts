@@ -85,9 +85,9 @@ test("API key dikirim sebagai Bearer hanya saat diberikan", async () => {
 
 test("fetchModelIds mengembalikan id dari /v1/models, dan bentuk salah menjadi payload error", async () => {
   await withServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ object: "list", data: [{ id: "dsw/deepseek-chat" }] }));
+    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ object: "list", data: [{ id: "glm/glm-4.5-air" }] }));
   }, async (origin) => {
-    assert.deepEqual(await fetchModelIds(origin, { timeoutMs: 1000 }), ["dsw/deepseek-chat"]);
+    assert.deepEqual(await fetchModelIds(origin, { timeoutMs: 1000 }), ["glm/glm-4.5-air"]);
   });
   await withServer((_req, res) => { res.writeHead(200).end("{\"hasil\":1}"); }, async (origin) => {
     const error = await capture(fetchModelIds(origin, { timeoutMs: 1000 }));

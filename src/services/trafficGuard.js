@@ -208,7 +208,7 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
   }
 
   // API key connections typically have higher limits; traffic guard focuses primarily on OAuth connections.
-  // A provider that declares its own cap (DeepSeek web sessions, for example) overrides that global value.
+  // A provider that declares its own cap overrides that global value.
   // A serial provider pins the slot cap to one while keeping its declared
   // concurrency for the chain pool, so a second conversation waits here
   // instead of racing the first one into the upstream.
@@ -294,7 +294,7 @@ export async function acquireAccountSlot(connection, signal = null, { purpose = 
 
   const releaseProviderSlot = enterProviderSlot(connection.provider);
 
-  // Apply provider-level throttle minimum (e.g. 3s for web session chats)
+  // Apply provider-level throttle minimum
   // or human-like proactive jitter pacing if previous request just finished (< 250ms ago).
   if (minThrottleMs > 0) {
     const now = Date.now();

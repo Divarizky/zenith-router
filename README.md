@@ -90,7 +90,6 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · Nous · OpenRouter �
 | `ol` | Ollama Cloud | API key | ✅ | ✅ |
 | `l7` | LLM7 | API key | — | ✅ |
 | `nous` | Nous Research (Hermes) | OAuth Device Code / API key | — | ✅ |
-| `dsw` | DeepSeek Web Chat | Token sesi browser / CDP | — | ✅ |
 | *custom* | **Custom Provider (BYOP)** | OpenAI / Claude Endpoint | — | ✅ |
 
 > **Catatan Prefix:** Anda dapat memanggil model menggunakan prefix singkat (misal `cc/claude-3-7-sonnet`, `cx/gpt-4o`, `glm/glm-4`, `nous/hermes-3-llama-3.1-405b`) maupun nama lengkap provider (misal `together/meta-llama/Llama-3-70b-chat-hf`).
@@ -135,7 +134,6 @@ Setelah terpasang, perintah `zenith` dapat dipanggil dari terminal mana pun untu
    * *OAuth Provider (Claude, Copilot, Antigravity, Nous Research, dll):* Klik tombol login browser atau selesaikan device code (untuk Nous, selesaikan verifikasi di portal Hermes).
    * *API Key Provider (OpenRouter, NVIDIA, dll):* Masukkan API key Anda.
    * *Free Provider (Kilo Free, OpenCode, OVH):* Langsung aktif dan siap dipakai.
-   * *DeepSeek Web:* Gunakan fitur **Login sekali klik di browser** via Chrome DevTools Protocol atau tempel `userToken` sesi web Anda.
 3. **Buat Gateway API Key:** Buka tab **API Keys**, buat key gateway baru (contoh `zr_live_...`). Key ini digunakan coding agent Anda untuk mengakses Zenith Router.
 4. **Hubungkan Coding Agent Anda:** Arahkan base URL agent ke Zenith Router:
    * **OpenAI Compatible Base URL:** `http://127.0.0.1:20120/v1`

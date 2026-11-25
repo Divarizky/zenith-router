@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BaseExecutor, registerExecutor } from "./base.js";
 import { antigravityUserAgent } from "../services/antigravityIdentity.js";
 import { flattenToolUnionsForClaude, stripToolCallIds } from "../translator/gemini.js";
+import { applyAntigravityPromptCompatibility } from "../services/antigravityPromptCompatibility.js";
 import { createPrefixTracer } from "../services/prefixTrace.js";
 import { captureLine } from "../services/logger.js";
 
@@ -83,8 +84,11 @@ export class AntigravityExecutor extends BaseExecutor {
     if (!projectId) return missingProjectResponse();
 
     const finalUrl = `${ANTIGRAVITY_BASE_URL}/v1internal:${actionFor(Boolean(stream))}`;
+    const compatibilityRequest = isClaudeModel(model)
+      ? flattenToolUnionsForClaude(sourceRequest)
+      : stripToolCallIds(sourceRequest);
     const upstreamRequest = applyThinkingLevel(
-      isClaudeModel(model) ? flattenToolUnionsForClaude(sourceRequest) : stripToolCallIds(sourceRequest),
+      applyAntigravityPromptCompatibility(compatibilityRequest),
       thinkingLevel
     );
     // An apikey-derived key is shared by every conversation on that key, so comparing

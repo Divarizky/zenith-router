@@ -22,6 +22,8 @@ import deepseekWeb from "./registry/deepseek-web.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled, listRetiredModels } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
 import { codexThinkingLevelsFor } from "./codexTiers.js";
+import { isAntigravityAcpEnabled } from "../services/antigravityAcp/profiles.js";
+import antigravityAcp from "./registry/antigravity-acp.js";
 
 /**
  * Capability fields published per model on /v1/models, same shape as the upstream reference:
@@ -164,6 +166,7 @@ const REGISTRY = [
   ovhcloud,
   xkiro,
   deepseekWeb,
+  antigravityAcp,
 ];
 
 const providerMap = new Map();
@@ -264,6 +267,7 @@ export function getAllProviders() {
  * API nor the pattern table knows the model.
  */
 export function getProviderModels(p) {
+  if (p.id === "antigravity-acp" && !isAntigravityAcpEnabled()) return [];
   const withCaps = (m, storedCaps = null) => {
     const capabilities = resolveCapabilities(m.id, storedCaps);
     return capabilities ? { ...m, capabilities } : m;
@@ -343,6 +347,7 @@ export function resolveModel(modelStr) {
 
   const checkDisabled = (provider, targetModel) => {
     if (!provider || (provider.id === "antigravity" && isAntigravityDisabledPlaceholder(targetModel))) return null;
+    if (provider.id === "antigravity-acp" && !isAntigravityAcpEnabled()) return null;
     return !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
   };
 

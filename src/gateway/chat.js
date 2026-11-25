@@ -2,6 +2,7 @@ import { openAIEnvelope, relayClientRequest } from "./relay.js";
 import { FORMATS } from "../translator/index.js";
 import { estimateTokens, normalizeUsage } from "../services/usage.js";
 import { upstreamResponseToOpenAI } from "../services/upstreamResponse.js";
+import { executeAntigravityAcp } from "../executors/antigravityAcp.js";
 
 const upstreamBaseUrl = (provider) =>
   provider.transport?.baseUrl || "https://api.openai.com/v1/chat/completions";
@@ -14,6 +15,14 @@ export async function handleChat(c) {
     withUsageChunk: true,
     validate: (body) => Boolean(body && body.model && Array.isArray(body.messages)),
     missingFieldMessage: "Missing or invalid 'model' or 'messages' parameter",
+    beforeRoute: (body, c) => {
+      const model = String(body.model || "");
+      if (!/^(?:antigravity-acp|agy-acp)\//i.test(model)) return null;
+      if (model.replace(/^(?:antigravity-acp|agy-acp)\//i, "") !== "gemini-3.8-flash") {
+        return c.json({ error: { message: `Model '${model}' not found in ACP registry`, type: "invalid_request_error", code: "model_not_found" } }, 404);
+      }
+      return executeAntigravityAcp({ body, signal: c.req.raw.signal });
+    },
     envelope: openAIEnvelope,
     streamFormat: "openai",
     // Chat clients cannot declare Responses custom tools, so their set is

@@ -33,6 +33,7 @@ import {
   handleSetAccountProxy,
   handleSetProxyRotation,
   handleSetProviderConcurrency,
+  handleSaveAntigravityAcp,
   handleDeleteAccount,
   handleCheckSession,
   handleUpdateSession,
@@ -201,6 +202,7 @@ app.post("/dashboard/providers/accounts/move", handleMoveAccount);
 app.post("/dashboard/providers/accounts/set-proxy", handleSetAccountProxy);
 app.post("/dashboard/providers/proxy-rotation", handleSetProxyRotation);
 app.post("/dashboard/providers/concurrency", handleSetProviderConcurrency);
+app.post("/dashboard/providers/antigravity-acp", handleSaveAntigravityAcp);
 app.post("/dashboard/providers/test-connection", handleTestConnection);
 app.post("/dashboard/providers/accounts/import-local", handleImportLocalLogin);
 app.post("/dashboard/providers/custom/add", handleAddCustomProvider);

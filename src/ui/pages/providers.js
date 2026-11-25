@@ -52,6 +52,12 @@ import { escapeHtml } from "../html.js";
 import { getSetting, setSetting, deleteSetting } from "../../services/settings.js";
 import { getProviderIconPath } from "../assets.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
+import {
+  isAntigravityAcpEnabled,
+  listAntigravityAcpProfiles,
+  setAntigravityAcpEnabled,
+  setAntigravityAcpProfiles,
+} from "../../services/antigravityAcp/profiles.js";
 
 const SECTIONS = [
   { category: "custom", title: "Custom Providers", hint: "Endpoint kustom OpenAI / Anthropic-compatible (Local LLM, LM Studio, vLLM, self-hosted, dll)." },
@@ -101,6 +107,8 @@ function importNotice(query = {}, provider = null) {
   if (query.notice === "test_no_base") {
     return { ok: false, text: "Provider ini tidak memiliki endpoint untuk diuji." };
   }
+  if (query.notice === "acp_saved") return { ok: true, text: "Pengaturan ACP disimpan." };
+  if (query.notice === "acp_invalid") return { ok: false, text: "Namespace worker ACP tidak valid atau duplikat. Gunakan ID worker yang sudah diprovisikan lokal." };
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
   if (query.notice === "account_exists") {
     return { ok: true, text: "Sesi ini sudah terdaftar sebagai akun. Tidak ada akun baru yang ditambahkan." };
@@ -1063,6 +1071,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
   const notice = importNotice(query, p);
 
   const alias = primaryAlias(p);
+  const acpProfiles = p.id === "antigravity-acp" ? listAntigravityAcpProfiles() : [];
+  const acpEnabled = p.id === "antigravity-acp" && isAntigravityAcpEnabled();
   const accounts = getConnections(p.id);
   const stats = accountStats(accounts);
   const isSession = p.category === "session";
@@ -2622,6 +2632,27 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       </div>
     </div>
 
+    ${p.id === "antigravity-acp" ? `
+    <div class="card" id="acp-workers">
+      <div class="block-header-strip">
+        <div class="block-header-title"><span>LOCAL ACP WORKERS</span><span class="badge-tag">PREVIEW</span></div>
+        <div class="block-header-sub">Pilih ID worker yang sudah diprovisikan admin lokal. Perintah, environment, cwd, dan credential tidak dapat diubah dari dashboard.</div>
+      </div>
+      <form action="/dashboard/providers/antigravity-acp" method="POST" style="padding: 16px; display: grid; gap: 12px;">
+        <label><input type="checkbox" name="enabled" value="true" ${acpEnabled ? "checked" : ""} /> Aktifkan jalur ACP opsional (default nonaktif)</label>
+        ${[0, 1].map((index) => {
+          const profile = acpProfiles[index];
+          return `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;">
+            <input name="worker_id_${index}" value="${escapeHtml(profile?.workerId || "")}" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" placeholder="ID worker tepercaya ${index + 1}" autocomplete="off" />
+            <label><input type="checkbox" name="profile_enabled_${index}" value="true" ${profile?.enabled ? "checked" : ""} /> Pakai</label>
+            <span class="pill pill-muted">${escapeHtml(profile?.status || "unavailable")}</span>
+          </div>`;
+        }).join("")}
+        <p class="hint">Prioritas mengikuti urutan worker. Failover hanya sebelum prompt pada worker pertama dan tidak pernah berdasarkan kuota.</p>
+        <button type="submit" class="btn-nb">Simpan profil ACP</button>
+      </form>
+    </div>` : ""}
+
     <!-- SECTION 2: ACCOUNTS ROSTER (CHANNEL STRIPS) -->
     <div class="card channel-strips-card" id="akun">
       <div class="hw-screw screw-tl"></div>
@@ -2938,6 +2969,26 @@ export async function handleSetProxyRotation(c) {
     return c.redirect(`${backTo(provider.id)}?notice=rotation_updated`);
   }
   return c.redirect(`${backTo(provider.id)}?notice=rotation_invalid`);
+}
+
+export async function handleSaveAntigravityAcp(c) {
+  const body = await c.req.parseBody();
+  const profiles = [];
+  for (const index of [0, 1]) {
+    const workerId = String(body[`worker_id_${index}`] || "").trim();
+    if (!workerId) continue;
+    profiles.push({
+      id: `worker-${index + 1}`,
+      workerId,
+      priority: index,
+      enabled: body[`profile_enabled_${index}`] === "true",
+    });
+  }
+  const wantsEnabled = body.enabled === "true";
+  if (wantsEnabled && !profiles.some((profile) => profile.enabled)) return c.redirect(`${backTo("antigravity-acp")}?notice=acp_invalid`);
+  if (!await setAntigravityAcpProfiles(profiles)) return c.redirect(`${backTo("antigravity-acp")}?notice=acp_invalid`);
+  if (!setAntigravityAcpEnabled(wantsEnabled)) return c.redirect(`${backTo("antigravity-acp")}?notice=acp_invalid`);
+  return c.redirect(`${backTo("antigravity-acp")}?notice=acp_saved`);
 }
 
 export async function handleSetProviderConcurrency(c) {

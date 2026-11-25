@@ -1,5 +1,6 @@
 import { getAllSettings, setSetting } from "../../services/settings.js";
 import { renderLayout } from "../layout.js";
+import { escapeHtml } from "../html.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE) {
@@ -16,6 +17,7 @@ export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LA
         : ""
     }
     <div class="card">
+      <span class="editorial-label">[TOKEN COMPRESSION]</span>
       <h3>${escapeHtml(t("token_saver.title", {}, currentLang))}</h3>
       <p class="hint" style="margin-bottom: 1.25rem;">${escapeHtml(t("token_saver.subtitle", {}, currentLang))}</p>
 
@@ -47,7 +49,7 @@ export function renderTokenSaverPage(port = 20120, query = {}, lang = DEFAULT_LA
         </div>
 
         <div style="margin-top: 1.5rem;">
-          <button type="submit" class="btn btn-primary">Simpan</button>
+          <button type="submit" class="btn btn-lime">Simpan</button>
         </div>
       </form>
     </div>

@@ -385,7 +385,7 @@ export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LAN
           allCustom.filter((m) => m.provider === p.id)
         );
         return `
-      <a class="card provider-card" href="${providerUrl(p.id)}">
+      <a class="card provider-card ${(p.noAuth || stats.healthy > 0) ? "is-active" : ""}" href="${providerUrl(p.id)}">
         <div class="provider-matrix-left">
           <div class="provider-logo-box">
             ${providerIconHtml(p, 36)}
@@ -393,8 +393,9 @@ export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LAN
           <span class="provider-prefix-badge"><code>${escapeHtml(primaryAlias(p))}/</code></span>
         </div>
         <div class="provider-matrix-right">
+          <div class="satellite-label"><span>[PROVIDER #${String(providers.indexOf(p) + 1).padStart(2, "0")}]</span><span>${escapeHtml(s.title)}</span></div>
           <div class="provider-matrix-head">
-            <h3 class="provider-name">${escapeHtml(p.name)}</h3>
+            <h3 class="provider-name editorial-title">${escapeHtml(p.name)}</h3>
             <span class="provider-model-count">${modelCount} MODEL</span>
           </div>
           <div class="provider-matrix-meta">

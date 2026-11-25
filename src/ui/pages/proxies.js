@@ -132,7 +132,7 @@ function renderProxyRow(pool, noAuthRotatingProviders = [], duplicateIds = new S
   const modeBadgesHtml = modeBadgesList.length > 0 ? `<div class="proxy-mode-badges">${modeBadgesList.join(" ")}</div>` : "";
 
   return `
-    <div class="proxy-card-editorial proxy-row" id="proxy-row-${pool.id}" data-bound-ids="${escapeHtml(boundIdsJson)}">
+    <div class="proxy-card-editorial proxy-row ${pool.is_active ? "is-active" : ""}" id="proxy-row-${pool.id}" data-bound-ids="${escapeHtml(boundIdsJson)}">
       <div class="proxy-card-header">
         <div class="proxy-card-header-left">
           <input
@@ -145,6 +145,7 @@ function renderProxyRow(pool, noAuthRotatingProviders = [], duplicateIds = new S
             class="proxy-checkbox"
             aria-label="Pilih ${escapeHtml(pool.name)}"
           />
+          <span class="editorial-label">[PROXY POOL #${String(pool.id).padStart(2, "0")}]</span>
           <span class="proxy-serial-badge">${serialNo}</span>
         </div>
         <div class="proxy-card-header-right">

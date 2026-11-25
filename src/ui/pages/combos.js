@@ -56,6 +56,7 @@ function renderComboDetailCard(combo) {
 
   return `
     <div class="card combo-card">
+      <span class="editorial-label">[FALLBACK CHAIN #01]</span>
       <div class="card-head combo-detail-head">
         <div class="combo-detail-title-group">
           <h3>${name}</h3>
@@ -111,7 +112,7 @@ function renderComboDetailCard(combo) {
 
       <div class="combo-card-row">
         <span class="combo-card-label">Rantai (${total})</span>
-        <div class="combo-card-value">
+        <div class="combo-card-value z-dashed">
           ${
             total > 5
               ? `<div class="combo-chain-search-wrap">

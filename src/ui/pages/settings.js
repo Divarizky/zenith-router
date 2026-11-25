@@ -74,6 +74,7 @@ function sectionCard({ id, iconName, title, hint, rows }) {
   return `
     <section class="card" id="${id}">
       <div class="section-head">
+        <span class="editorial-label">${id === "security" ? "[AUTHENTICATION]" : id === "routing" ? "[NETWORK &amp; SYNC]" : "[NETWORK &amp; SYNC]"}</span>
         <h3>${icon(iconName, 16)} ${title}</h3>
         <p class="hint">${hint}</p>
       </div>

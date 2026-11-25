@@ -2,15 +2,15 @@
 // Tema terang adalah :root, tema gelap memakai [data-theme="dark"].
 export const THEME_TOKENS_CSS = `
 :root {
-  --bg: #fafafa;
-  --surface: #fafafa;
-  --surface-2: #f0f0f0;
-  --surface-3: #e2e2e2;
-  --border: #000000;
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --border: #09090b;
   --border-subtle: #636363;
-  --text: #0a0a0a;
-  --text-muted: #262626;
-  --text-subtle: #636363;
+  --text: #09090b;
+  --text-muted: #3f3f46;
+  --text-subtle: #52525b;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-soft: rgba(37, 99, 235, 0.16);
@@ -20,6 +20,7 @@ export const THEME_TOKENS_CSS = `
   --accent-pink-hover: #fa92c7;
   --accent-pink-soft: rgba(255, 179, 217, 0.25);
   --success: #6ee7b7;
+  --success-text: #047857;
   --warning: #fde047;
   --danger: #ef4444;
   --danger-hover: #dc2626;
@@ -38,14 +39,14 @@ export const THEME_TOKENS_CSS = `
   --hard: 4px 4px 0 var(--shadow-ink);
   --hard-sm: 3px 3px 0 var(--shadow-ink);
   --hard-lg: 8px 8px 0 var(--shadow-ink);
-  --grid-line: rgba(10, 10, 10, 0.045);
+  --grid-line: rgba(9, 9, 11, 0.05);
   --outline-green: #15803d;
   --link: #0369a1;
   --link-hover: #025e8a;
   --focus-ring: #0a0a0a;
   --icon-reasoning: #db2777;
   --icon-vision: #0284c7;
-  --bg-hover: #f0f0f0;
+  --bg-hover: #f4f4f5;
 }
 
 /* ===== Tema gelap (Obsidian Neo-Brutalism) =====
@@ -70,9 +71,10 @@ export const THEME_TOKENS_CSS = `
   --accent-pink: #ffb3d9;
   --accent-pink-hover: #fa92c7;
   --accent-pink-soft: rgba(255, 179, 217, 0.18);
-  --success: #34d399;
-  --warning: #facc15;
-  --danger: #ef4444;
+  --success: #6ee7b7;
+  --success-text: #6ee7b7;
+  --warning: #fde047;
+  --danger: #ff6b4a;
   --danger-hover: #dc2626;
   --info: #38bdf8;
   --shadow-ink: #000000;

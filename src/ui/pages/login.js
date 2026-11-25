@@ -99,6 +99,7 @@ export function renderDashboardLoginPage({
       font-size: 0.82rem; color: var(--text);
     }
     .login-card {
+      position: relative;
       width: 100%; max-width: 380px;
       background: var(--surface);
       border: 2px solid var(--text);
@@ -106,6 +107,10 @@ export function renderDashboardLoginPage({
       box-shadow: var(--hard);
       padding: clamp(1rem, 4vw, 1.75rem);
     }
+    .login-card .hw-screw { top: 10px; }
+    .login-card .hw-screw:first-child { left: 10px; }
+    .login-card .hw-screw:nth-child(2) { right: 10px; }
+    .login-label { display:block; margin-bottom:.6rem; color:var(--text-muted); font:800 var(--text-xs)/1.4 ui-monospace,monospace; letter-spacing:.08em; }
     .brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
     .brand img { width: 36px; height: 36px; border-radius: 0; object-fit: cover; display: block; }
     .brand h1 { font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em; }
@@ -144,10 +149,12 @@ export function renderDashboardLoginPage({
 </head>
 <body>
   <main class="login-card">
+    <span class="hw-screw" aria-hidden="true"></span><span class="hw-screw" aria-hidden="true"></span>
+    <span class="login-label">[AUTHENTICATION]</span>
     <div class="brand">
       <img src="/logo.png" alt="" />
       <div>
-        <h1>Zenith Router</h1>
+        <h1>“ZENITH DASHBOARD”</h1>
         <p>Personal AI Gateway</p>
       </div>
     </div>

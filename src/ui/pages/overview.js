@@ -51,6 +51,7 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
     <div class="grid" style="margin-bottom: 1.5rem;">
       <div class="card stat">
         <span class="stat-index">01</span>
+        <div class="editorial-label">[LOCAL ENDPOINT]</div>
         <div class="label">${escapeHtml(t("overview.gateway_status", {}, currentLang))}</div>
         <div class="value" style="font-size: 1.5rem;">
           <span class="pill pill-success" style="font-size: var(--text-xs); font-weight: 800; border: var(--bw) solid var(--line); box-shadow: 2px 2px 0 var(--shadow-ink);">
@@ -61,12 +62,14 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
       </div>
       <div class="card stat">
         <span class="stat-index">02</span>
+        <div class="editorial-label">[LINKED PROVIDERS]</div>
         <div class="label">${escapeHtml(t("overview.active_connections", {}, currentLang))}</div>
         <div class="value">${activeCount} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">/ ${connections.length}</span></div>
         <div class="sub">${currentLang === "en" ? "Configured accounts" : "Akun terkonfigurasi"}</div>
       </div>
       <div class="card stat">
         <span class="stat-index">03</span>
+        <div class="editorial-label">[CACHE EFFICIENCY]</div>
         <div class="label">${currentLang === "en" ? "Tokens & Requests Today" : "Token &amp; Permintaan Hari Ini"}</div>
         <div class="value">${usageToday.summary.total_tokens.toLocaleString()} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 600;">tok</span></div>
         <div class="sub">${usageToday.summary.total_requests} ${currentLang === "en" ? "requests recorded" : "permintaan tercatat"}</div>
@@ -85,7 +88,8 @@ export function renderOverviewPage(port = 20120, lang = DEFAULT_LANGUAGE) {
       <div class="card bento-card client-endpoints-card">
         <div class="card-header-neo">
           <div>
-            <h3 style="margin: 0; font-size: 1rem; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase;">${escapeHtml(t("overview.integration_endpoints", {}, currentLang))}</h3>
+            <span class="editorial-label">[CLI QUICKSTART]</span>
+            <h3 style="margin: 0.25rem 0 0; font-size: 1rem; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase;">${escapeHtml(t("overview.integration_endpoints", {}, currentLang))}</h3>
             <p style="margin: 0.25rem 0 0; font-size: var(--text-xs); color: var(--text-muted);">${escapeHtml(t("overview.integration_hint", {}, currentLang))}</p>
           </div>
           <span class="pill pill-info" style="font-size: var(--text-xs); font-weight: 800; border: var(--bw) solid var(--line); box-shadow: 2px 2px 0 var(--shadow-ink);">Local Loopback</span>

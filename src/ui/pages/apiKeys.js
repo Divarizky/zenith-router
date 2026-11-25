@@ -67,6 +67,7 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}, lang 
     ${renderNewKeyNotice(newKey, port)}
 
     <div class="card" style="margin-bottom: 1.5rem;">
+      <span class="editorial-label">[AUTHENTICATION]</span>
       <h3>Gateway Access Policy</h3>
       <p class="hint">Kunci API di /v1: ${policy}</p>
       <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
@@ -78,8 +79,8 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}, lang 
 
     <div class="card" style="margin-bottom: 1.5rem;">
       <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h3 style="margin-bottom: 0;">Keys (${keys.length})</h3>
-        <button class="btn btn-primary" onclick="openModal('create-key-modal')">${escapeHtml(t("api_keys.btn_create", {}, currentLang))}</button>
+        <div><span class="duct-tape">LOCAL ACCESS TOKENS</span><h3 style="margin: .4rem 0 0;">Keys (${keys.length})</h3></div>
+        <button class="btn btn-lime" onclick="openModal('create-key-modal')">${escapeHtml(t("api_keys.btn_create", {}, currentLang))}</button>
       </div>
     </div>
 
@@ -120,7 +121,7 @@ export function renderApiKeysPage(port = 20120, newKey = null, query = {}, lang 
             .map(
               (k) => `
             <tr>
-              <td><strong>${escapeHtml(k.name)}</strong></td>
+              <td><span class="editorial-label">[API KEY #${String(keys.indexOf(k) + 1).padStart(2, "0")}]</span><br><strong class="editorial-title">${escapeHtml(k.name)}</strong></td>
               <td><code>${escapeHtml(k.key_prefix)}…</code></td>
               <td>${formatTime(k.created_at)}</td>
               <td>${formatTime(k.last_used_at)}</td>

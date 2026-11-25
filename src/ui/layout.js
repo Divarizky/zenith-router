@@ -104,6 +104,21 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
     code, kbd, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     ::selection { background: var(--accent); color: #ffffff; }
     :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+    /* Shared editorial hardware language: square geometry, readable labels, tactile controls. */
+    .duct-tape { display: inline-block; padding: 0.2rem 0.65rem; background: #ccff00; color: #09090b; border: 2px solid #09090b; box-shadow: 3px 3px 0 var(--shadow-ink); transform: rotate(-1deg); font: 900 var(--text-xs)/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }
+    .z-dashed { border: 2px dashed var(--border-subtle); background: var(--surface-2); padding: .65rem .8rem; overflow-wrap: anywhere; }
+    .hw-screw { position: absolute; width: 9px; height: 9px; border: 2px solid var(--text-subtle); background: var(--surface-3); border-radius: 50%; }
+    .hw-screw::after { content: ''; position: absolute; width: 5px; height: 1px; background: var(--text-subtle); left: 0; top: 2px; transform: rotate(-35deg); }
+    .editorial-label { display: inline-flex; align-items: center; min-height: 1.4rem; padding: .08rem .35rem; border: 1px dashed var(--border-subtle); color: var(--text-muted); font: 800 var(--text-xs)/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; }
+    .editorial-title { font-weight: 900; letter-spacing: -.035em; text-transform: uppercase; }
+    .editorial-title::before, .editorial-title::after { content: '“'; color: var(--text-subtle); }
+    .editorial-title::after { content: '”'; }
+    @media (max-width: 700px) { button, .btn, .nav-link, .page-tab, .switch, .sidebar-actions button { min-height: var(--touch-min); } }
+    .nav-link.active { color: #09090b; background: #ccff00; border-color: #09090b; box-shadow: 0 0 0 2px rgba(204,255,0,.22), 0 0 18px rgba(204,255,0,.48), 3px 3px 0 var(--shadow-ink); }
+    .pill-success { color: #09090b; }
+    [data-theme="dark"] .pill-success { color: #09090b; }
+    .btn-lime { background: #ccff00; color: #09090b; border-color: #09090b; }
+    .btn-lime:hover { background: #bbf400; color: #09090b; }
     .num { font-variant-numeric: tabular-nums; }
 
     /* ===== App Shell & Sidebar Vertikal Neo-Brutalist ===== */
@@ -540,6 +555,10 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
       transform: translate(-2px, -2px);
       box-shadow: 6px 6px 0 #000000;
     }
+    .provider-card.is-active { border-color: #ccff00; box-shadow: 0 0 0 2px rgba(204,255,0,.24), 0 0 22px rgba(204,255,0,.3), 4px 4px 0 var(--shadow-ink); }
+    .provider-card .satellite-label { display: flex; justify-content: space-between; gap: .5rem; color: var(--text-muted); font: 800 var(--text-xs)/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; }
+    .provider-card .provider-matrix-right { gap: .5rem; }
+    .proxy-row.is-active { border-left: 4px solid var(--success-text); padding-left: .75rem; box-shadow: -4px 0 0 rgba(110,231,183,.22); }
     [data-theme="dark"] .provider-card {
       border: 2px solid var(--border);
       box-shadow: 4px 4px 0 var(--shadow-ink);
@@ -1314,7 +1333,8 @@ export function renderLayout({ title = "Zenith Router", activeTab = "overview", 
             </button>
             <div class="main-header-title">
               <div class="crumb"><a href="/dashboard">Zenith Router</a> / <strong>${escapeHtml(title)}</strong></div>
-              <h2>${escapeHtml(title)}</h2>
+              <span class="duct-tape">LOCAL ROUTER // ONLINE</span>
+              <h2 class="editorial-title">${escapeHtml(title)}</h2>
             </div>
             <div class="main-header-status">
               <span class="pill pill-success"><span class="dot dot-success" style="width:7px;height:7px;display:inline-block;"></span> ${escapeHtml(t("common.online", {}, currentLang))} &middot; ${escapeHtml(t("common.port", {}, currentLang))} ${escapeHtml(port)}</span>

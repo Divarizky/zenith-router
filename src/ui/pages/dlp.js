@@ -17,6 +17,7 @@ export function renderDlpPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE)
         : ""
     }
     <div class="card">
+      <span class="editorial-label">[DATA LOSS PREVENTION]</span>
       <h3>${escapeHtml(t("dlp.title", {}, currentLang))}</h3>
       <p class="hint" style="margin-bottom: 1.25rem;">${escapeHtml(t("dlp.subtitle", {}, currentLang))}</p>
 
@@ -49,7 +50,7 @@ export function renderDlpPage(port = 20120, query = {}, lang = DEFAULT_LANGUAGE)
         </div>
 
         <div style="margin-top: 1.5rem;">
-          <button type="submit" class="btn btn-primary">Simpan</button>
+          <button type="submit" class="btn btn-lime">Simpan</button>
         </div>
       </form>
     </div>

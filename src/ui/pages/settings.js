@@ -197,12 +197,61 @@ export function renderSettingsPage(port = 20120, query = {}, lang = DEFAULT_LANG
           </div>
         </div>
 
-        <div class="setting-row" id="password">
-          <div class="setting-info">
+        <div class="setting-row setting-row-password" id="password">
+          <style>
+            #password.setting-row,
+            #password.setting-row-password {
+              flex-direction: column;
+              align-items: stretch;
+              gap: 0.85rem;
+            }
+            #password .password-controls-grid {
+              display: grid;
+              grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+              align-items: end;
+              gap: 0.75rem;
+              width: 100%;
+            }
+            #password .password-controls-grid .field {
+              display: flex;
+              flex-direction: column;
+              gap: 0.35rem;
+              min-width: 0;
+              margin-bottom: 0;
+            }
+            #password .password-controls-grid .field-action {
+              display: flex;
+              align-items: flex-end;
+              margin-bottom: 0;
+            }
+            #password .password-controls-grid .input-password-wrap input {
+              box-sizing: border-box;
+              height: 38px;
+            }
+            #password .password-controls-grid .btn-reset-pw {
+              box-sizing: border-box;
+              height: 38px;
+              white-space: nowrap;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              padding: 0 0.85rem;
+              font-size: 0.85rem;
+            }
+            @media (max-width: 760px) {
+              #password .password-controls-grid {
+                grid-template-columns: 1fr;
+              }
+              #password .password-controls-grid .btn-reset-pw {
+                width: 100%;
+              }
+            }
+          </style>
+          <div class="setting-info" style="width: 100%;">
             <strong>Ubah Password Dashboard</strong>
             <p class="hint">Password awal adalah <code>123456</code>. Ganti memerlukan password saat ini; minimal ${MIN_PASSWORD_LENGTH} karakter untuk password baru. Reset ke default juga memerlukan password saat ini.</p>
           </div>
-          <div class="setting-action setting-stack">
+          <div class="password-controls-grid">
             <div class="field">
               <label for="current_password" class="field-label">${currentLang === "en" ? "Current password" : "Password saat ini"}</label>
               <div class="input-password-wrap">
@@ -223,8 +272,8 @@ export function renderSettingsPage(port = 20120, query = {}, lang = DEFAULT_LANG
                 </button>
               </div>
             </div>
-            <div style="margin-top: 0.35rem; display: flex; justify-content: flex-end;">
-              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-danger btn-sm" data-confirm="Kembalikan password dashboard ke default (123456)? Password saat ini tetap diperlukan." data-confirm-ok="Reset">Reset ke Default (123456)</button>
+            <div class="field-action">
+              <button type="submit" formaction="/dashboard/settings/password/reset" formmethod="POST" class="btn btn-danger btn-sm btn-reset-pw" data-confirm="Kembalikan password dashboard ke default (123456)? Password saat ini tetap diperlukan." data-confirm-ok="Reset">Reset ke Default (123456)</button>
             </div>
           </div>
         </div>`,

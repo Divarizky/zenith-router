@@ -377,33 +377,47 @@ export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LAN
     if (providers.length === 0) return "";
 
     const cards = providers
-      .map((p) => {
+      .map((p, index) => {
         const stats = accountStats(byProvider.get(p.id) || []);
+        const isConnected = Boolean(p.noAuth || stats.healthy > 0);
         const modelCount = countProviderModels(
           p,
           allImported.filter((m) => m.provider === p.id),
           allCustom.filter((m) => m.provider === p.id)
         );
+        const prefix = primaryAlias(p);
+        const slotNum = String(index + 1).padStart(2, "0");
+        const statusText = isConnected ? "ONLINE" : "STANDBY";
+        const actionText = isConnected ? "OPEN MODULE &rarr;" : "CONFIGURE &rarr;";
+
         return `
-      <a class="card provider-card ${(p.noAuth || stats.healthy > 0) ? "is-active" : ""}" href="${providerUrl(p.id)}">
-        <div class="provider-matrix-left">
-          <div class="provider-logo-box">
-            ${providerIconHtml(p, 36)}
+      <a class="card provider-card ${isConnected ? "is-active" : ""}" href="${providerUrl(p.id)}">
+        <div class="provider-card-strip">
+          <div class="provider-strip-left">
+            <span class="provider-status-led ${isConnected ? "is-online" : "is-standby"}" aria-hidden="true"></span>
+            <span class="provider-strip-meta"><code>${escapeHtml(statusText)} &middot; ${escapeHtml(prefix)}/</code></span>
           </div>
-          <span class="provider-prefix-badge"><code>${escapeHtml(primaryAlias(p))}/</code></span>
-        </div>
-        <div class="provider-matrix-right">
-          <div class="satellite-label"><span>[PROVIDER #${String(providers.indexOf(p) + 1).padStart(2, "0")}]</span><span>${escapeHtml(s.title)}</span></div>
-          <div class="provider-matrix-head">
-            <h3 class="provider-name editorial-title">${escapeHtml(p.name)}</h3>
+          <div class="provider-strip-right">
             <span class="provider-model-count">${modelCount} MODEL</span>
           </div>
-          <div class="provider-matrix-meta">
-            ${statusPill(p, stats, byProvider.get(p.id) || [])}
-            ${freeTierPills(p.id)}
-          </div>
-          <span class="sr-only" style="display:none"><code>${escapeHtml(primaryAlias(p))}/</code> &middot; ${modelCount} model</span>
         </div>
+        <div class="provider-card-body">
+          <div class="provider-icon-box">
+            ${providerIconHtml(p, 36)}
+          </div>
+          <div class="provider-body-content">
+            <h3 class="provider-name">${escapeHtml(p.name)}</h3>
+            <div class="provider-body-pills">
+              ${statusPill(p, stats, byProvider.get(p.id) || [])}
+              ${freeTierPills(p.id)}
+            </div>
+          </div>
+        </div>
+        <div class="provider-card-foot">
+          <span class="provider-slot-tag">[SLOT #${slotNum}]</span>
+          <span class="provider-action-label ${isConnected ? "is-ready" : "is-pending"}">${actionText}</span>
+        </div>
+        <span class="sr-only" style="display:none"><code>${escapeHtml(prefix)}/</code> &middot; ${modelCount} model</span>
       </a>`;
       })
       .join("");
@@ -1296,7 +1310,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       .main .provider-chassis-card,
       .main .rack-control-module,
       .main .channel-strips-card,
-      .main .model-fleet-card {
+      .main .model-fleet-card,
+      .main #acp-workers {
         border-radius: 0 !important;
         border: 2.5px solid var(--pd-border, #71717a) !important;
         box-shadow: 4px 4px 0 var(--pd-shadow-ink, #000000) !important;
@@ -1306,7 +1321,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       }
       .main .provider-chassis-card,
       .main .channel-strips-card,
-      .main .model-fleet-card {
+      .main .model-fleet-card,
+      .main #acp-workers {
         padding: 0 !important;
       }
       .fusion-bento-grid > .provider-chassis-card,
@@ -1318,6 +1334,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       [data-theme="light"] .main .rack-control-module,
       [data-theme="light"] .main .channel-strips-card,
       [data-theme="light"] .main .model-fleet-card,
+      [data-theme="light"] .main #acp-workers,
       [data-theme="light"] .main .subnav-bar {
         background: #ffffff !important;
         border: 2.5px solid #000000 !important;
@@ -2310,6 +2327,8 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
         appearance: none !important;
         width: 18px !important;
         height: 18px !important;
+        min-width: 18px !important;
+        flex-shrink: 0 !important;
         border: 2px solid var(--pd-border, #71717a) !important;
         background: var(--pd-card-bg, #15161a) !important;
         cursor: pointer !important;
@@ -2340,6 +2359,75 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
         border-width: 0 2px 2px 0 !important;
         transform: rotate(45deg) !important;
         margin-top: -2px !important;
+      }
+
+      /* LOCAL ACP WORKERS STYLES */
+      #acp-workers form {
+        padding: 16px 20px;
+        display: grid;
+        gap: 14px;
+      }
+      #acp-workers label,
+      #acp-workers .acp-check-label {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 10px !important;
+        cursor: pointer !important;
+        user-select: none !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        color: var(--pd-text, #f4f4f6) !important;
+        margin: 0 !important;
+      }
+      [data-theme="light"] #acp-workers label,
+      [data-theme="light"] #acp-workers .acp-check-label {
+        color: #09090b !important;
+      }
+      #acp-workers input[type="checkbox"] {
+        width: 18px !important;
+        height: 18px !important;
+        min-width: 18px !important;
+        flex-shrink: 0 !important;
+        margin: 0 !important;
+      }
+      #acp-workers .acp-worker-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 12px;
+        align-items: center;
+      }
+      #acp-workers .acp-worker-input {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+        font-size: 12px !important;
+        padding: 8px 12px !important;
+        background: var(--pd-surface-2, #1e2026) !important;
+        border: 2px solid var(--pd-border, #71717a) !important;
+        border-radius: 0 !important;
+        color: var(--pd-text, #f4f4f6) !important;
+        box-shadow: 2px 2px 0 var(--pd-shadow-ink, #000) !important;
+        outline: none !important;
+        width: 100% !important;
+      }
+      [data-theme="light"] #acp-workers .acp-worker-input {
+        background: #ffffff !important;
+        color: #09090b !important;
+        border-color: #000000 !important;
+      }
+      #acp-workers .acp-worker-input:focus {
+        border-color: #6ee7b7 !important;
+      }
+      [data-theme="light"] #acp-workers .acp-worker-input:focus {
+        border-color: #000000 !important;
+      }
+      #acp-workers .hint {
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.45;
+        margin: 0;
+      }
+      [data-theme="light"] #acp-workers .hint {
+        color: #52525b;
       }
 
       /* SUBNAV & HIGHLIGHTS */
@@ -2634,23 +2722,33 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
     </div>
 
     ${p.id === "antigravity-acp" ? `
-    <div class="card" id="acp-workers">
+    <div class="card channel-strips-card" id="acp-workers">
+      <div class="hw-screw screw-tl"></div>
+      <div class="hw-screw screw-tr"></div>
+      <div class="hw-screw screw-bl"></div>
+      <div class="hw-screw screw-br"></div>
       <div class="block-header-strip">
         <div class="block-header-title"><span>LOCAL ACP WORKERS</span><span class="badge-tag">PREVIEW</span></div>
         <div class="block-header-sub">Pilih ID worker yang sudah diprovisikan admin lokal. Perintah, environment, cwd, dan credential tidak dapat diubah dari dashboard.</div>
       </div>
-      <form action="/dashboard/providers/antigravity-acp" method="POST" style="padding: 16px; display: grid; gap: 12px;">
-        <label><input type="checkbox" name="enabled" value="true" ${acpEnabled ? "checked" : ""} /> Aktifkan jalur ACP opsional (default nonaktif)</label>
+      <form action="/dashboard/providers/antigravity-acp" method="POST" style="padding: 16px 20px; display: grid; gap: 14px;">
+        <label class="acp-check-label" style="display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;">
+          <input type="checkbox" name="enabled" value="true" class="nb-check" style="width: 18px; height: 18px; min-width: 18px; flex-shrink: 0; margin: 0;" ${acpEnabled ? "checked" : ""} />
+          <span>Aktifkan jalur ACP opsional (default nonaktif)</span>
+        </label>
         ${[0, 1].map((index) => {
           const profile = acpProfiles[index];
-          return `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;">
-            <input name="worker_id_${index}" value="${escapeHtml(profile?.workerId || "")}" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" placeholder="ID worker tepercaya ${index + 1}" autocomplete="off" />
-            <label><input type="checkbox" name="profile_enabled_${index}" value="true" ${profile?.enabled ? "checked" : ""} /> Pakai</label>
-            <span class="pill pill-muted">${escapeHtml(profile?.status || "unavailable")}</span>
+          return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;">
+            <input name="worker_id_${index}" value="${escapeHtml(profile?.workerId || "")}" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" placeholder="ID worker tepercaya ${index + 1}" autocomplete="off" class="search-cli-input acp-worker-input" style="border-radius: 0;" />
+            <label class="acp-check-label" style="display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;">
+              <input type="checkbox" name="profile_enabled_${index}" value="true" class="nb-check" style="width: 18px; height: 18px; min-width: 18px; flex-shrink: 0; margin: 0;" ${profile?.enabled ? "checked" : ""} />
+              <span>Pakai</span>
+            </label>
+            <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(profile?.status || "unavailable")}</span>
           </div>`;
         }).join("")}
         <p class="hint">Prioritas mengikuti urutan worker. Failover hanya sebelum prompt pada worker pertama dan tidak pernah berdasarkan kuota.</p>
-        <button type="submit" class="btn-nb">Simpan profil ACP</button>
+        <button type="submit" class="btn-nb" style="width: fit-content; align-self: flex-start;">Simpan profil ACP</button>
       </form>
     </div>` : ""}
 

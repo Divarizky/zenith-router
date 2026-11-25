@@ -12,6 +12,7 @@ import {
 import { proxyFetch } from "../executors/proxy.js";
 import { getSetting, setSetting } from "./settings.js";
 import { msUntilNextMidnightUtc, getOpencodeGateState, clearOpencodeGateCooldown } from "./opencodeGate.js";
+import { captureLine } from "./logger.js";
 import { getProvider } from "../providers/index.js";
 
 /**
@@ -248,14 +249,31 @@ export function resetWarpReadinessSnapshot() {
   warpReadinessSnapshot = null;
 }
 
-export function isWarpPoolReady(pool, now = Date.now(), explicitLane = null) {
+export function getWarpPoolReadiness(pool, now = Date.now(), explicitLane = null) {
   const match = String(pool?.name || "").match(/^warp-node-(\d+)$/i);
   const lane = explicitLane == null ? (match ? Number(match[1]) : null) : Number(explicitLane);
-  if (!Number.isInteger(lane) || !warpReadinessSnapshot) return false;
-  if (warpReadinessSnapshot.fresh !== true || now - warpReadinessSnapshot.checkedAt > WARP_READINESS_TTL_MS) return false;
-  if (explicitLane != null && warpReadinessSnapshot.hybridFingerprint !== currentHybridWarpFingerprint()) return false;
+  if (!Number.isInteger(lane) || !warpReadinessSnapshot) return { state: "unknown", checkedAt: null, lastError: null };
+  if (warpReadinessSnapshot.fresh !== true || now - warpReadinessSnapshot.checkedAt > WARP_READINESS_TTL_MS) {
+    return { state: "unknown", checkedAt: warpReadinessSnapshot.checkedAt, lastError: null };
+  }
+  if (explicitLane != null && warpReadinessSnapshot.hybridFingerprint !== currentHybridWarpFingerprint()) {
+    return { state: "unknown", checkedAt: warpReadinessSnapshot.checkedAt, lastError: "konfigurasi lane berubah setelah probe" };
+  }
   const node = warpReadinessSnapshot.nodes.get(lane);
-  return Boolean(node?.ready === true && node.state === "ready" && now - (Number(node.observedAt) || warpReadinessSnapshot.checkedAt) <= WARP_READINESS_TTL_MS);
+  if (!node) return { state: "unknown", checkedAt: warpReadinessSnapshot.checkedAt, lastError: null };
+  const observedAt = Number(node.observedAt) || warpReadinessSnapshot.checkedAt;
+  if (now - observedAt > WARP_READINESS_TTL_MS) {
+    return { state: "unknown", checkedAt: observedAt, lastError: node.lastError || null };
+  }
+  return {
+    state: node.ready === true && node.state === "ready" ? "ready" : (node.state === "degraded" ? "degraded" : "unknown"),
+    checkedAt: observedAt,
+    lastError: node.lastError || null,
+  };
+}
+
+export function isWarpPoolReady(pool, now = Date.now(), explicitLane = null) {
+  return getWarpPoolReadiness(pool, now, explicitLane).state === "ready";
 }
 
 export async function syncWarpReadiness(fetchFn = fetch, now = Date.now()) {
@@ -698,6 +716,8 @@ export function listProxyPools() {
       maskedRotateToken: hasCred ? MASK_PLACEHOLDER : "",
       maskedUrl: maskProxyUrl(p.url),
       exhaustedUntil: getProxyPoolExhaustedUntil(p.id) || null,
+      exhaustedState: getProxyPoolExhaustedState(p.id),
+      warpReadiness: getWarpPoolReadiness(p),
       accountCount: bound.length,
       boundAccounts: bound.map((c) => ({
         id: c.id,
@@ -786,27 +806,68 @@ const rotateStrikeMap = new Map();
 // ikut menandai pool habis hari ini.
 export const PROXY_STRIKE_WINDOW_MS = 300000;
 
-export function markProxyPoolExhausted(poolIdOrUrl, untilMs) {
-  if (!poolIdOrUrl) return;
-  poolExhaustedMap.set(String(poolIdOrUrl), Number(untilMs) || 0);
+function poolExhaustionKeys(poolIdOrUrl) {
+  if (!poolIdOrUrl) return [];
+  if (typeof poolIdOrUrl === "object") {
+    return [poolIdOrUrl.id, poolIdOrUrl.url].filter(Boolean).map(String);
+  }
+  return [String(poolIdOrUrl)];
+}
+
+function setProxyPoolExhaustedRecord(key, untilMs, { at = Date.now(), retryAfterMs = null, source = "manual", laneKey = key } = {}) {
+  if (!key) return;
+  poolExhaustedMap.set(String(key), {
+    until: Number(untilMs) || 0,
+    at: Number(at) || Date.now(),
+    retryAfterMs: Number.isFinite(Number(retryAfterMs)) && Number(retryAfterMs) > 0 ? Number(retryAfterMs) : null,
+    source,
+    laneKey: String(laneKey || key),
+  });
+}
+
+export function markProxyPoolExhausted(poolIdOrUrl, untilMs, metadata = {}) {
+  const keys = poolExhaustionKeys(poolIdOrUrl);
+  const laneKey = metadata.laneKey || keys[0];
+  for (const key of keys) setProxyPoolExhaustedRecord(key, untilMs, { ...metadata, laneKey });
+}
+
+export function getProxyPoolExhaustedState(poolIdOrUrl, now = Date.now()) {
+  const key = poolExhaustionKeys(poolIdOrUrl)[0];
+  if (!key) return null;
+  const record = poolExhaustedMap.get(key);
+  if (!record || record.until <= now) {
+    if (record) poolExhaustedMap.delete(key);
+    return null;
+  }
+  return { ...record };
 }
 
 export function isProxyPoolExhausted(poolIdOrUrl, now = Date.now()) {
-  if (!poolIdOrUrl) return false;
-  const until = poolExhaustedMap.get(String(poolIdOrUrl));
-  if (!until) return false;
-  if (until <= now) {
-    poolExhaustedMap.delete(String(poolIdOrUrl));
-    return false;
-  }
-  return true;
+  return Boolean(getProxyPoolExhaustedState(poolIdOrUrl, now));
 }
 
 export function getProxyPoolExhaustedUntil(poolIdOrUrl, now = Date.now()) {
-  if (!poolIdOrUrl) return null;
-  const until = poolExhaustedMap.get(String(poolIdOrUrl));
-  if (!until || until <= now) return null;
-  return until;
+  return getProxyPoolExhaustedState(poolIdOrUrl, now)?.until || null;
+}
+
+/**
+ * Clear a quota cooldown only after a completed request proves the same lane
+ * works. A request that started before a newer cooldown was recorded must not
+ * clear that newer record when it eventually succeeds.
+ */
+export function noteProxyPoolSuccess(poolEntry, requestStartedAt, now = Date.now()) {
+  const keys = poolExhaustionKeys(poolEntry);
+  if (!keys.length || !Number.isFinite(Number(requestStartedAt))) return false;
+  const records = keys.map((key) => poolExhaustedMap.get(key)).filter(Boolean);
+  const active = records.filter((record) => record.until > now);
+  if (!active.length) return false;
+  if (active.some((record) => record.at > Number(requestStartedAt))) {
+    captureLine(`[PROXY] cooldown dipertahankan: sukses lane=${poolEntry?.name || poolEntry?.id || keys[0]} berasal dari request sebelum cooldown terbaru`);
+    return false;
+  }
+  for (const key of keys) poolExhaustedMap.delete(key);
+  captureLine(`[PROXY] cooldown kuota dibersihkan setelah sukses terverifikasi lane=${poolEntry?.name || poolEntry?.id || keys[0]}`);
+  return true;
 }
 
 export function resetProxyPoolExhausted() {
@@ -865,7 +926,7 @@ export function beginProxyStream(poolEntry) {
   };
 }
 
-function recordProxyPool429Strike(poolEntry, { status = null, reason = "", now = Date.now() } = {}) {
+function recordProxyPool429Strike(poolEntry, { status = null, reason = "", retryAfterMs = null, now = Date.now() } = {}) {
   if (status !== 429 || !/FreeUsageLimit/i.test(String(reason || ""))) return false;
   const poolKey = String(poolEntry.id ?? poolEntry.url ?? "");
   if (!poolKey || isProxyPoolExhausted(poolKey, now) || (poolEntry.id && isProxyPoolExhausted(poolEntry.id, now))) {
@@ -877,15 +938,22 @@ function recordProxyPool429Strike(poolEntry, { status = null, reason = "", now =
   rotateStrikeMap.set(poolKey, { count: strikes, at: now });
   if (strikes < budget) return false;
 
-  const until = now + msUntilNextMidnightUtc(now) + 30000;
-  markProxyPoolExhausted(poolKey, until);
-  if (poolEntry.id) markProxyPoolExhausted(poolEntry.id, until);
+  // Keep the pool and gate on the same deadline: a valid Retry-After wins,
+  // but a quota cooldown never crosses the next UTC reset plus the 30s guard.
+  const resetMs = msUntilNextMidnightUtc(now) + 30000;
+  const effectiveRetryAfterMs = Number(retryAfterMs) > 0 ? Math.min(Number(retryAfterMs), resetMs) : resetMs;
+  const until = now + effectiveRetryAfterMs;
+  const metadata = { at: now, retryAfterMs: Number(retryAfterMs) > 0 ? Number(retryAfterMs) : null, source: Number(retryAfterMs) > 0 ? "retry-after" : "utc-reset", laneKey: poolKey };
+  markProxyPoolExhausted(poolEntry, until, metadata);
+  captureLine(
+    `[PROXY] quota cooldown lane=${poolEntry.name || poolEntry.id || poolKey} sampai=${new Date(until).toISOString()} sumber=${metadata.source}`
+  );
   return true;
 }
 
 export async function notifyProxyRotate(
   poolEntry,
-  { status = null, reason = "", fetchFn = fetch, now = Date.now(), debounceMs = PROXY_ROTATE_DEBOUNCE_MS, maxDeferMs = PROXY_ROTATE_MAX_DEFER_MS } = {}
+  { status = null, reason = "", retryAfterMs = null, fetchFn = fetch, now = Date.now(), debounceMs = PROXY_ROTATE_DEBOUNCE_MS, maxDeferMs = PROXY_ROTATE_MAX_DEFER_MS } = {}
 ) {
   const rotateUrl = poolEntry?.rotate_url;
   if (!rotateUrl) return { sent: false, skipped: "no_url" };
@@ -893,7 +961,7 @@ export async function notifyProxyRotate(
   if (isProxyPoolExhausted(poolKey, now) || (poolEntry.id && isProxyPoolExhausted(poolEntry.id, now))) {
     return { sent: false, skipped: "pool_exhausted" };
   }
-  recordProxyPool429Strike(poolEntry, { status, reason, now });
+  recordProxyPool429Strike(poolEntry, { status, reason, retryAfterMs, now });
   const key = String(poolEntry.id ?? rotateUrl);
   const lastSentAt = rotateDebounceMap.get(key);
   if (lastSentAt !== undefined && now - lastSentAt < debounceMs) {
@@ -1065,15 +1133,15 @@ export const signalWarp429 = signalProxy429;
  * For WARP nodes on HTTP 429, signals /signal/429 (async queued) only; otherwise
  * falls back to notifyProxyRotate when rotate_url is configured.
  */
-export function dispatchProxyFailureSignal(proxyEntry, { model = "", status = null, reason = "" } = {}) {
+export function dispatchProxyFailureSignal(proxyEntry, { model = "", status = null, reason = "", retryAfterMs = null } = {}) {
   if (!proxyEntry) return;
   if (status === 429 && extractWarpNode(proxyEntry) !== null) {
-    recordProxyPool429Strike(proxyEntry, { status, reason, now: Date.now() });
+    recordProxyPool429Strike(proxyEntry, { status, reason, retryAfterMs, now: Date.now() });
     signalProxy429(proxyEntry, { model, async: true }).catch(() => {});
     return;
   }
   if ((status === 429 || status === 403) && proxyEntry?.rotate_url) {
-    notifyProxyRotate(proxyEntry, { status, reason: String(reason || "").slice(0, 120) }).catch(() => {});
+    notifyProxyRotate(proxyEntry, { status, reason: String(reason || "").slice(0, 120), retryAfterMs }).catch(() => {});
   }
 }
 
@@ -1140,7 +1208,7 @@ export function resetHybridRotation() {
   resetProtonReadinessSnapshot();
 }
 
-export function planProxyRotationEntries(providerId, strategy, scopedIds = null) {
+export function planProxyRotationEntries(providerId, strategy, scopedIds = null, now = Date.now()) {
   if (strategy !== "round_robin" && strategy !== "random") return [];
   const enforceReadiness = getSetting("warp_readiness_enforce", "false") === "true";
   const shadowProtonIds = providerId === "opencode" && getOpencodeHybridMode() === "shadow"
@@ -1149,7 +1217,7 @@ export function planProxyRotationEntries(providerId, strategy, scopedIds = null)
   const active = getProxyPools().filter((p) => Number(p.is_active) === 1
     && !shadowProtonIds.has(Number(p.id))
     && (!scopedIds || (scopedIds.includes(Number(p.id)) && !validateProxyAddress(p.url)))
-    && (!enforceReadiness || providerId !== "opencode" || !String(p.name || "").startsWith("warp-node-") || isWarpPoolReady(p)));
+    && (!enforceReadiness || providerId !== "opencode" || !String(p.name || "").startsWith("warp-node-") || isWarpPoolReady(p, now)));
   if (active.length === 0) return [];
 
   let rawOrdered;
@@ -1171,8 +1239,8 @@ export function planProxyRotationEntries(providerId, strategy, scopedIds = null)
 
   // Prioritize active proxies that are NOT currently exhausted or in gate cooldown
   const isAvailable = (p) => {
-    if (isProxyPoolExhausted(p.id) || isProxyPoolExhausted(p.url)) return false;
-    if (providerId === "opencode" && getOpencodeGateState(p.url)) return false;
+    if (isProxyPoolExhausted(p.id, now) || isProxyPoolExhausted(p.url, now)) return false;
+    if (providerId === "opencode" && getOpencodeGateState(p.url, now)) return false;
     return true;
   };
   const healthy = rawOrdered.filter(isAvailable);
@@ -1201,6 +1269,6 @@ export function planProxyRotationEntries(providerId, strategy, scopedIds = null)
   return expanded;
 }
 
-export function planProxyRotation(providerId, strategy) {
-  return planProxyRotationEntries(providerId, strategy).map((entry) => entry.url);
+export function planProxyRotation(providerId, strategy, now = Date.now()) {
+  return planProxyRotationEntries(providerId, strategy, null, now).map((entry) => entry.url);
 }

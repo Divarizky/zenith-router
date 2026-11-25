@@ -39,6 +39,7 @@ import {
   beginProxyStream,
   signalProxy429,
   dispatchProxyFailureSignal,
+  noteProxyPoolSuccess,
   extractWarpNode,
 } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
@@ -185,11 +186,12 @@ export function getNextConnection(providerId, triedIds = [], model = null, effor
  * Menandai aliran sukses sebagai aktif pada proxy-nya selama body belum habis
  * atau dibatalkan, supaya rotasi node tidak memutusnya.
  */
-function attachProxyStreamTracker(res, proxyEntry) {
+function attachProxyStreamTracker(res, proxyEntry, onComplete = null) {
   if (!res?.body) return res;
   const release = beginProxyStream(proxyEntry);
   const tracker = new TransformStream({
     flush() {
+      onComplete?.();
       release();
     },
     cancel() {
@@ -398,7 +400,7 @@ function freeTierModelIds(provider, modelId) {
  */
 const MIDSTREAM_ROTATE_RE = /FreeTierError|FreeUsageLimitError|"type"\s*:\s*"error"/i;
 
-function attachMidstreamRotateObserver(res, proxyEntry, modelId = "") {
+function attachMidstreamRotateObserver(res, proxyEntry, modelId = "", onFailure = null) {
   if (!res?.body || (!proxyEntry?.rotate_url && !extractWarpNode(proxyEntry))) return res;
   const decoder = new TextDecoder();
   let triggered = false;
@@ -409,6 +411,7 @@ function attachMidstreamRotateObserver(res, proxyEntry, modelId = "") {
         const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
         if (MIDSTREAM_ROTATE_RE.test(text)) {
           triggered = true;
+          onFailure?.();
           dispatchProxyFailureSignal(proxyEntry, {
             model: modelId,
             status: 429,
@@ -940,6 +943,7 @@ export async function executeWithFallback({
     }
 
     let res;
+    const requestStartedAt = Date.now();
     try {
       dispatchBudget.spend();
       res = await executor.execute({
@@ -975,12 +979,21 @@ export async function executeWithFallback({
     if (res.ok) {
       clearStrikes(connection, modelId);
       if (pinnable && connection?.id) sessionPins.set(provider.id, sessionKey, connection.id, modelId, pinScope);
+      let midstreamFailed = false;
       const observedRes =
         stream && provider.id === "opencode" && (proxyEntry?.rotate_url || extractWarpNode(proxyEntry))
-          ? attachMidstreamRotateObserver(res, proxyEntry, modelId || targetModel)
+          ? attachMidstreamRotateObserver(res, proxyEntry, modelId || targetModel, () => {
+              midstreamFailed = true;
+            })
           : res;
+      const markVerifiedProxySuccess = () => {
+        if (!midstreamFailed) noteProxyPoolSuccess(proxyEntry, requestStartedAt);
+      };
       const trackedRes =
-        stream && proxyEntry?.rotate_url ? attachProxyStreamTracker(observedRes, proxyEntry) : observedRes;
+        stream && (proxyEntry?.rotate_url || extractWarpNode(proxyEntry))
+          ? attachProxyStreamTracker(observedRes, proxyEntry, markVerifiedProxySuccess)
+          : observedRes;
+      if (!stream || !trackedRes.body) markVerifiedProxySuccess();
       return { ok: true, upstreamRes: attachSlotRelease(trackedRes, releaseSlot), connection };
     }
 
@@ -1111,6 +1124,7 @@ export async function executeWithFallback({
         model: modelId || targetModel,
         status: res.status,
         reason: errText,
+        retryAfterMs: parseRetryAfterMs(res.headers?.get?.("retry-after")),
       });
       if (!isTransportFailure(res, errText)) {
         const skipVirtual = !connection?.id && rotationEntries.length > 0 && attempt < maxAttempts;

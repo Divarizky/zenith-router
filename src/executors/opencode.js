@@ -743,7 +743,12 @@ export class OpencodeExecutor extends BaseExecutor {
         // An explicit network block or quota limit is not a shape problem: a second request
         // from the same IP/account only extends it, so the cooldown starts right away.
         if ((isOpencodeNetworkBlock(firstText) || isQuotaLimit) && shapeOk) {
-          dispatchProxyFailureSignal(proxyMeta, { model, status: res.status, reason: firstText });
+          dispatchProxyFailureSignal(proxyMeta, {
+            model,
+            status: res.status,
+            reason: firstText,
+            retryAfterMs: firstRetryAfterMs,
+          });
           const state = noteOpencodeGateRejection(gateKey, {
             status: res.status,
             shape,
@@ -776,8 +781,13 @@ export class OpencodeExecutor extends BaseExecutor {
             if (!isOpencodeGateRejection(retryRes.status, retryText)) {
               res = retryRes;
             } else {
-              dispatchProxyFailureSignal(proxyMeta, { model, status: retryRes.status, reason: retryText });
               const retryRetryAfterMs = parseRetryAfterMs(retryRes.headers?.get?.("retry-after")) || firstRetryAfterMs;
+              dispatchProxyFailureSignal(proxyMeta, {
+                model,
+                status: retryRes.status,
+                reason: retryText,
+                retryAfterMs: retryRetryAfterMs,
+              });
               const state = noteOpencodeGateRejection(gateKey, {
                 status: retryRes.status,
                 shape,

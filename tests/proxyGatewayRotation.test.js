@@ -30,6 +30,11 @@ const {
   resetProxyStreamState,
   markProxyPoolExhausted,
   isProxyPoolExhausted,
+  getProxyPoolExhaustedState,
+  noteProxyPoolSuccess,
+  setWarpReadinessSnapshot,
+  getWarpPoolReadiness,
+  resetWarpReadinessSnapshot,
   resetProxyPoolExhausted,
 } = await import("../src/services/proxyPools.js");
 
@@ -67,6 +72,7 @@ function clearPoolsAndSettings() {
   resetProxyRotateDebounce();
   resetProxyStreamState();
   resetProxyPoolExhausted();
+  resetWarpReadinessSnapshot();
   resetOpencodeGate();
   resetVirtualCooldowns();
 }
@@ -464,6 +470,87 @@ test("a quota 429 from an earlier day does not mark the pool exhausted today", a
   const r = await notifyProxyRotate(pool, { status: 429, reason: "FreeUsageLimitError", fetchFn: fakeFetch, now: day3 });
   assert.equal(r.sent, true);
   assert.equal(isProxyPoolExhausted(91, day3 + 1000), false, "the old strike must not carry over");
+});
+
+test("Retry-After 120s tetap menahan lane meski WARP ready dan planner memakainya setelah expiry", async () => {
+  clearPoolsAndSettings();
+  const now = Date.UTC(2026, 10, 24, 12, 0, 0);
+  const pool = createProxyPool({
+    name: "warp-node-1",
+    url: "http://100.90.253.83:3129",
+    rotate_url: "http://100.90.253.83:8405/rotate",
+  });
+  setWarpReadinessSnapshot({
+    fresh: true,
+    nodes: [{ node: 1, ready: true, state: "ready", observed_at: now }],
+  }, now);
+  assert.equal(getWarpPoolReadiness(pool, now).state, "ready");
+
+  await notifyProxyRotate(pool, {
+    status: 429,
+    reason: "FreeUsageLimitError: daily quota exceeded",
+    retryAfterMs: 120000,
+    fetchFn: async () => new Response("{}", { status: 202 }),
+    now,
+  });
+
+  const state = getProxyPoolExhaustedState(pool.id, now + 1);
+  assert.equal(state.until, now + 120000);
+  assert.equal(state.source, "retry-after");
+  assert.equal(isProxyPoolExhausted(pool.id, now + 119999), true);
+  assert.deepEqual(planProxyRotationEntries("opencode", "round_robin", [pool.id], now + 120001).map((entry) => entry.id), [pool.id]);
+});
+
+test("Retry-After header dari upstream diteruskan ke cooldown pool", async () => {
+  clearPoolsAndSettings();
+  setProxyRotationStrategy("opencode", "round_robin");
+  const pool = createProxyPool({
+    name: "warp-node-1",
+    url: "http://100.90.253.83:3129",
+    rotate_url: "http://100.90.253.83:8405/rotate",
+  });
+  const executor = new OpencodeExecutor({
+    proxyFetchFn: async () => new Response(
+      JSON.stringify({ type: "error", error: { type: "FreeUsageLimitError", message: "quota" } }),
+      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "120" } }
+    ),
+  });
+  const started = Date.now();
+  const result = await executeWithFallback({
+    provider: { id: "opencode", name: "OpenCode Free", noAuth: true, models: ["gpt-5-nano"] },
+    targetModel: "gpt-5-nano",
+    targetFormat: "openai",
+    stream: false,
+    baseHeaders: {},
+    upstreamPayload: { model: "gpt-5-nano", messages: [{ role: "user", content: "hi" }] },
+    executor,
+    resolveUrl: () => "https://opencode.ai/zen/v1/chat/completions",
+  });
+  assert.equal(result.ok, false);
+  const state = getProxyPoolExhaustedState(pool.id);
+  const gate = getOpencodeGateState(opencodeGateKey(pool.url));
+  assert.equal(state.source, "retry-after");
+  assert.ok(state.until >= started + 119000 && state.until <= started + 121000, `unexpected expiry: ${state.until - started}ms`);
+  assert.ok(gate, "gate cooldown harus tercatat bersama pool cooldown");
+  assert.ok(Math.abs(gate.until - state.until) < 100, `deadline gate/pool berbeda: ${gate.until} vs ${state.until}`);
+});
+
+test("sukses hanya membersihkan cooldown lane yang tidak lebih baru dari request", () => {
+  clearPoolsAndSettings();
+  const pool = { id: 701, name: "warp-node-1", url: "http://100.90.253.83:3129" };
+  const cooldownAt = 2000;
+  markProxyPoolExhausted(pool, 100000, { at: cooldownAt, source: "retry-after" });
+
+  assert.equal(noteProxyPoolSuccess(pool, cooldownAt - 1, cooldownAt + 1), false);
+  assert.equal(isProxyPoolExhausted(pool.id, cooldownAt + 1), true);
+  assert.equal(noteProxyPoolSuccess(pool, cooldownAt, cooldownAt + 1), true);
+  assert.equal(isProxyPoolExhausted(pool.id, cooldownAt + 1), false);
+
+  const otherLane = { id: 702, name: "warp-node-2", url: "http://100.90.253.83:3130" };
+  markProxyPoolExhausted(pool, 100000, { at: 3000, source: "retry-after" });
+  markProxyPoolExhausted(otherLane, 100000, { at: 3000, source: "retry-after" });
+  assert.equal(noteProxyPoolSuccess(otherLane, 3000, 3001), true);
+  assert.equal(isProxyPoolExhausted(pool.id, 3001), true);
 });
 
 test("a non-quota 429 never marks the pool exhausted", async () => {

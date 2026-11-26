@@ -2536,6 +2536,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
 
     ${p.id === "antigravity-acp" ? renderAgyAccountsCard({ accounts: acpProfiles, enabled: acpEnabled, lang: currentLang, notice: query.acp_notice }) : ""}
 
+    ${p.id !== "antigravity-acp" ? `
     <!-- SECTION 2: ACCOUNTS ROSTER (CHANNEL STRIPS) -->
     <div class="card channel-strips-card" id="akun">
       <div class="hw-screw screw-tl"></div>
@@ -2569,7 +2570,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       </table>
 
       ${accountsBody}
-    </div>
+    </div>` : ""}
 
     <!-- SECTION 3: MODEL FLEET DIRECTORY -->
     <div class="card model-fleet-card" id="model">

@@ -97,6 +97,14 @@ const LOGIN_SCRIPT = `
   }
   function box() { return document.getElementById('agy-acp-login'); }
   function msg(text) { var el = document.getElementById('agy-acp-login-msg'); if (el) el.textContent = text; }
+  function extractCode(value) {
+    var text = value.trim();
+    try {
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return new URL(text).searchParams.get('code') || text;
+      if (/(?:^|[?&])code=/.test(text)) return new URLSearchParams(text.replace(/^.*?\?/, '')).get('code') || text;
+    } catch (_) {}
+    return text;
+  }
   window.zrAgyAcpLogin = function (id, btn) {
     var t = btn.dataset;
     window.zrAgyAcpCancel();
@@ -106,9 +114,10 @@ const LOGIN_SCRIPT = `
       attemptId = r.attemptId;
       if (popup) popup.location = r.authorizationUrl;
       box().hidden = false;
-      box().innerHTML = '<input id="agy-acp-code" type="password" autocomplete="off" class="search-cli-input" placeholder="' + t.placeholder + '" /> <button type="button" class="btn-nb" id="agy-acp-submit">' + t.submit + '</button> <span id="agy-acp-login-msg" class="hint"></span>';
+      box().innerHTML = '<a class="btn-nb" target="_blank" rel="noopener" href="' + r.authorizationUrl + '">Buka Halaman Login Google</a> <label for="agy-acp-code">Kode otorisasi</label> <input id="agy-acp-code" type="text" autocomplete="off" class="search-cli-input" placeholder="' + t.placeholder + '" /> <button type="button" class="btn-nb" id="agy-acp-submit">' + t.submit + '</button> <button type="button" class="btn-nb" id="agy-acp-cancel">Batal</button> <span id="agy-acp-login-msg" class="hint"></span>';
+      document.getElementById('agy-acp-cancel').onclick = function () { window.zrAgyAcpCancel(); box().innerHTML = ''; box().hidden = true; };
       document.getElementById('agy-acp-submit').onclick = function () {
-        var code = document.getElementById('agy-acp-code').value.trim();
+        var code = extractCode(document.getElementById('agy-acp-code').value);
         if (!code) return;
         this.disabled = true;
         var self = this;
@@ -125,6 +134,7 @@ const LOGIN_SCRIPT = `
     attemptId = null;
     if (popup && !popup.closed) popup.close();
     popup = null;
+    var loginBox = box(); if (loginBox) { loginBox.innerHTML = ''; loginBox.hidden = true; }
   };
   if (window.__zrSwapCleanups) window.__zrSwapCleanups.push(function () { window.zrAgyAcpCancel(); });
 })();
@@ -154,7 +164,7 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
       <div class="hw-screw screw-bl"></div>
       <div class="hw-screw screw-br"></div>
       <div class="block-header-strip">
-        <div class="block-header-title"><span>${escapeHtml(tr("title"))}</span><span class="badge-tag">PREVIEW</span></div>
+        <div class="block-header-title"><img src="/providers/antigravity-acp.png" alt="" width="22" height="22" /><span>${escapeHtml(tr("title"))}</span><span class="badge-tag">PREVIEW</span></div>
         <div class="block-header-sub">${escapeHtml(tr("hint"))}</div>
       </div>
       <div style="padding: 16px 20px; display: grid; gap: 14px;">
@@ -167,10 +177,15 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
         </form>
         ${rows}
         <div id="agy-acp-login" hidden></div>
-        <form action="${BACK}/accounts/add" method="POST" style="display:flex;gap:12px;margin:0;">
-          <input name="name" maxlength="40" required autocomplete="off" placeholder="${escapeHtml(tr("name_placeholder"))}" class="search-cli-input acp-worker-input" style="border-radius: 0; flex: 1;" />
-          <button type="submit" class="btn-nb">${escapeHtml(tr("add"))}</button>
-        </form>
+        <section class="rack-chassis" style="padding:14px;border:2px solid var(--border);display:grid;gap:10px;">
+          <strong>Tambah Akun</strong>
+          <p class="hint">Step 1: Beri nama &amp; tambah akun → Step 2: Klik Login Google.</p>
+          <form action="${BACK}/accounts/add" method="POST" style="display:grid;gap:8px;margin:0;">
+            <label for="agy-account-name">Nama akun</label>
+            <input id="agy-account-name" name="name" maxlength="40" required autocomplete="off" placeholder="${escapeHtml(tr("name_placeholder"))}" class="search-cli-input acp-worker-input" style="border-radius: 0; width:100%;" />
+            <button type="submit" class="btn-nb">${escapeHtml(tr("add"))}</button>
+          </form>
+        </section>
       </div>
     </div>${LOGIN_SCRIPT}`;
 }

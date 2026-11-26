@@ -310,10 +310,23 @@ async function verifyWorker(record) {
   }
 }
 
+function extractCode(code) {
+  if (typeof code !== "string") return "";
+  const value = code.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    try { return new URL(value).searchParams.get("code") || ""; } catch { return ""; }
+  }
+  if (/[?&]code=/.test(value) || value.startsWith("code=")) {
+    try { return new URLSearchParams(value.replace(/^.*?\?/, "")).get("code") || ""; } catch { return ""; }
+  }
+  return value;
+}
+
 function validateCode(code) {
-  if (typeof code !== "string" || code.length === 0 || code.length > AGY_LOGIN_MAX_CODE_LENGTH) return false;
-  if (code.includes("://") || /[\s\u0000-\u001f\u007f]/.test(code)) return false;
-  return CODE_PATTERN.test(code);
+  const extracted = extractCode(code);
+  if (!extracted || extracted.length > AGY_LOGIN_MAX_CODE_LENGTH) return false;
+  if (/[\s\u0000-\u001f\u007f]/.test(extracted)) return false;
+  return CODE_PATTERN.test(extracted);
 }
 
 export async function startAntigravityAcpLogin(binding, accountId) {
@@ -377,9 +390,10 @@ export async function submitAntigravityAcpLogin({ attemptId, binding, code }) {
   const record = attempts.get(attemptId);
   if (!record || record.binding !== binding || record.terminal) return genericFailure("login_attempt_invalid");
   if (record.state !== "awaiting_code") return genericFailure("login_attempt_used");
-  if (!validateCode(code)) return genericFailure("invalid_authorization_code");
+  const extractedCode = extractCode(code);
+  if (!validateCode(extractedCode)) return genericFailure("invalid_authorization_code");
   record.state = "submitting";
-  let rawCode = code;
+  let rawCode = extractedCode;
   try {
     if (!record.child?.stdin || typeof record.child.stdin.write !== "function") {
       failRecord(record, "login_process_failed");

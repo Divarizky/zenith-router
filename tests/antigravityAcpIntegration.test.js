@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, chmod, writeFile, rm, realpath, unlink } from "node:fs/promises";
+import { mkdtemp, mkdir, chmod, writeFile, rm, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -21,7 +21,7 @@ import { executeAntigravityAcp, setAntigravityAcpTransportFactory } from "../src
 import { AntigravityAcpTransport } from "../src/services/antigravityAcp/transport.js";
 import { handleChat } from "../src/gateway/chat.js";
 import { renderProviderDetailPage, handleSaveAntigravityAcp } from "../src/ui/pages/providers.js";
-import { getAntigravityAcpWorker, getAntigravityAcpWorkers, setAntigravityAcpWorkerConfigPathForTests, setAntigravityAcpWorkerLoaderForTests, setAntigravityAcpAutoDiscoveryForTests } from "../src/services/antigravityAcp/workers.js";
+import { getAntigravityAcpWorker, getAntigravityAcpWorkers, setAntigravityAcpWorkerConfigPathForTests, setAntigravityAcpWorkerLoaderForTests, setAntigravityAcpAutoDiscoveryForTests, setAntigravityAcpProvisionRootForTests } from "../src/services/antigravityAcp/workers.js";
 import { createAntigravityAcpClient } from "../src/services/antigravityAcp/client.js";
 
 async function reset(profiles = []) {
@@ -99,7 +99,7 @@ test("deployment worker map accepts only canonical isolated launchers and reject
     assert.equal(await getAntigravityAcpWorker("unknown"), null);
 
     for (const [target, mode] of [[launcher, 0o770], [launcher, 0o707], [workspace, 0o770], [workspace, 0o707]]) {
-      const original = target === launcher ? 0o700 : 0o700;
+      const original = 0o700;
       await chmod(target, mode);
       assert.deepEqual(await getAntigravityAcpWorkers(), [], `${target === launcher ? "launcher" : "workspace"} mode ${mode.toString(8)} must fail closed`);
       await chmod(target, original);
@@ -128,30 +128,62 @@ test("missing worker map auto-provisions isolated agy worker and rejects unsafe 
   try {
     await writeFile(binary, "#!/bin/sh\\nexit 0\\n", { mode: 0o700 });
     await chmod(binary, 0o700);
+    const provisionRoot = path.join(dir, "provision-root");
+    setAntigravityAcpProvisionRootForTests(provisionRoot);
     setAntigravityAcpAutoDiscoveryForTests([binary]);
     const [worker] = await getAntigravityAcpWorkers();
     assert.equal(worker.workerId, "agy-worker-default");
     assert.equal(worker.launcher, await realpath(binary));
     assert.deepEqual(worker.launcherArgs, ["acp", "--stdio"]);
     assert.deepEqual(worker.loginLauncherArgs, ["acp", "--login"]);
-    assert.equal(worker.isolatedHome, path.join(os.homedir(), ".config", "zenith-router", "acp", "default", "home"));
-    for (const dirPath of [worker.workspace, worker.isolatedHome, path.join(os.homedir(), ".config", "zenith-router", "acp", "default", "appdata")]) {
+    assert.equal(worker.isolatedHome, path.join(provisionRoot, "default", "home"));
+    for (const dirPath of [worker.workspace, worker.isolatedHome]) {
       const info = await import("node:fs/promises").then(({ stat }) => stat(dirPath));
       assert.equal(info.mode & 0o777, 0o700);
     }
     await chmod(binary, 0o775);
     assert.deepEqual(await getAntigravityAcpWorkers(), []);
     await chmod(binary, 0o700);
-    await unlink(binary);
-    assert.deepEqual(await getAntigravityAcpWorkers(), []);
     setAntigravityAcpAutoDiscoveryForTests([binary]);
     await writeFile(configPath, "{ invalid", { mode: 0o600 });
     assert.deepEqual(await getAntigravityAcpWorkers(), []);
-    await writeFile(configPath, "[]", { mode: 0o600 });
+    await writeFile(configPath, JSON.stringify([{
+      workerId: "agy-explicit-test", namespace: "agy-explicit-test", launcher: binary, workspace: worker.workspace,
+    }]), { mode: 0o600 });
+    assert.equal((await getAntigravityAcpWorkers()).length, 1, "valid worker config must load when mode is 0600");
     await chmod(configPath, 0o666);
-    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    assert.deepEqual(await getAntigravityAcpWorkers(), [], "valid worker config must fail closed when group/other writable");
+    assert.equal((await realpath(binary)), binary);
   } finally {
     setAntigravityAcpAutoDiscoveryForTests(null);
+    setAntigravityAcpProvisionRootForTests(null);
+    setAntigravityAcpWorkerConfigPathForTests(null);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("auto-provisioning rejects symlinked provision roots without modifying their targets", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-symlink-"));
+  const configPath = path.join(dir, "missing.json");
+  const binary = path.join(dir, "agy");
+  const victim = path.join(dir, "victim");
+  const provisionRoot = path.join(dir, "provision-root");
+  setAntigravityAcpWorkerLoaderForTests(null);
+  setAntigravityAcpWorkerConfigPathForTests(configPath);
+  try {
+    await writeFile(binary, "#!/bin/sh\\nexit 0\\n", { mode: 0o700 });
+    await chmod(binary, 0o700);
+    await mkdir(victim);
+    setAntigravityAcpAutoDiscoveryForTests([binary]);
+    setAntigravityAcpProvisionRootForTests(provisionRoot);
+    await import("node:fs/promises").then(({ symlink }) => symlink(victim, provisionRoot, "dir"));
+    const victimModeBefore = (await import("node:fs/promises").then(({ stat }) => stat(victim))).mode & 0o777;
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    assert.equal((await import("node:fs/promises").then(({ stat }) => stat(victim))).mode & 0o777, victimModeBefore);
+    assert.deepEqual(await import("node:fs/promises").then(({ readdir }) => readdir(victim)), []);
+  } finally {
+    setAntigravityAcpAutoDiscoveryForTests(null);
+    setAntigravityAcpProvisionRootForTests(null);
     setAntigravityAcpWorkerConfigPathForTests(null);
     await rm(dir, { recursive: true, force: true });
   }

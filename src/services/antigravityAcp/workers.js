@@ -8,6 +8,7 @@ const MAX_CONFIG_BYTES = 32 * 1024;
 let configPath = DEFAULT_CONFIG;
 let loaderOverride = null;
 let discoveryPathsOverride = null;
+let provisionRootOverride = null;
 
 /** Test hook; runtime callers must never derive worker launch data from requests. */
 export function setAntigravityAcpWorkerLoaderForTests(loader) {
@@ -23,11 +24,20 @@ export function setAntigravityAcpAutoDiscoveryForTests(paths) {
   discoveryPathsOverride = Array.isArray(paths) ? paths.filter((item) => typeof item === "string") : null;
 }
 
+export function setAntigravityAcpProvisionRootForTests(rootPath) {
+  provisionRootOverride = typeof rootPath === "string" && path.isAbsolute(rootPath) ? rootPath : null;
+}
+
 function candidatePaths() {
   if (discoveryPathsOverride) return discoveryPathsOverride;
   const home = os.homedir();
   const candidates = process.platform === "win32"
-    ? [path.join(process.env.LOCALAPPDATA || "", "Programs", "Antigravity", "bin", "agy.cmd"), path.join(process.env.USERPROFILE || home, ".local", "bin", "agy.exe")]
+    ? [
+        process.env.LOCALAPPDATA && path.isAbsolute(process.env.LOCALAPPDATA)
+          ? path.join(process.env.LOCALAPPDATA, "Programs", "Antigravity", "bin", "agy.cmd") : null,
+        process.env.USERPROFILE && path.isAbsolute(process.env.USERPROFILE)
+          ? path.join(process.env.USERPROFILE, ".local", "bin", "agy.exe") : null,
+      ].filter(Boolean)
     : [path.join(home, ".local", "bin", "agy"), "/usr/local/bin/agy", "/usr/bin/agy"];
   if (process.platform === "darwin") candidates.splice(2, 0, "/Applications/Antigravity.app/Contents/Resources/app/bin/agy", "/opt/homebrew/bin/agy");
   const pathValue = process.env.PATH || "";
@@ -40,6 +50,7 @@ function candidatePaths() {
 
 async function findAgyBinary() {
   for (const candidate of candidatePaths()) {
+    if (!path.isAbsolute(candidate)) continue;
     try {
       const resolved = await realpath(candidate);
       const info = await stat(resolved);
@@ -57,15 +68,35 @@ async function findAgyBinary() {
 async function provisionDefaultWorker() {
   const agy = await findAgyBinary();
   if (!agy) return [];
-  const root = path.join(os.homedir(), ".config", "zenith-router", "acp", "default");
-  const paths = { workspace: path.join(root, "workspace"), homeDir: path.join(root, "home"), appDataDir: path.join(root, "appdata") };
+  const home = os.homedir();
+  const baseConfigDir = provisionRootOverride || path.join(home, ".config", "zenith-router", "acp");
+  const root = path.join(baseConfigDir, "default");
+  const paths = { workspace: path.join(root, "workspace"), homeDir: path.join(root, "home") };
+  const configAncestors = provisionRootOverride ? [] : [path.join(home, ".config"), path.join(home, ".config", "zenith-router")];
+  const directories = [...configAncestors, baseConfigDir, root, ...Object.values(paths)];
   try {
-    for (const dir of [path.join(os.homedir(), ".config", "zenith-router", "acp"), root, ...Object.values(paths)]) {
+    // Reject pre-existing links and non-directories before mkdir/chmod can follow or modify them.
+    for (const dir of directories) {
+      try {
+        const info = await lstat(dir);
+        if (info.isSymbolicLink() || !info.isDirectory()) return [];
+      } catch (error) {
+        if (error?.code !== "ENOENT") return [];
+      }
+    }
+    for (const dir of directories) {
       await mkdir(dir, { recursive: true, mode: 0o700 });
-      if (process.platform !== "win32") await chmod(dir, 0o700);
+      const info = await lstat(dir);
+      if (info.isSymbolicLink() || !info.isDirectory()) return [];
+      if (!configAncestors.includes(dir) && process.platform !== "win32") await chmod(dir, 0o700);
+    }
+    const baseReal = await realpath(baseConfigDir);
+    const basePrefix = baseReal.endsWith(path.sep) ? baseReal : `${baseReal}${path.sep}`;
+    for (const dir of [root, ...Object.values(paths)]) {
+      const dirReal = await realpath(dir);
+      if (!dirReal.startsWith(basePrefix)) return [];
     }
   } catch { return []; }
-  const win = process.platform === "win32";
   return [Object.freeze({
     workerId: "agy-worker-default", namespace: "agy-worker-default", launcher: agy,
     launcherArgs: Object.freeze(["acp", "--stdio"]),

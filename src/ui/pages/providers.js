@@ -105,6 +105,7 @@ function importNotice(query = {}, provider = null) {
     return { ok: false, text: "Provider ini tidak memiliki endpoint untuk diuji." };
   }
   if (query.notice === "acp_saved") return { ok: true, text: "Pengaturan ACP disimpan." };
+  if (query.notice === "agy_login_added") return { ok: true, text: "Login Agy berhasil diverifikasi dan worker ACP didaftarkan." };
   if (query.notice === "acp_invalid") return { ok: false, text: "Namespace worker ACP tidak valid atau duplikat. Gunakan ID worker yang sudah diprovisikan lokal." };
   if (query.notice === "account_added") return { ok: true, text: "Akun berhasil ditambahkan." };
   if (query.notice === "account_exists") {
@@ -622,6 +623,63 @@ const OAUTH_SCRIPT = `
 })();
 </script>`;
 
+const AGY_LOGIN_SCRIPT = `
+<script>
+(function () {
+  var attemptId = null, popup = null;
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); }
+  function value(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+  function show(html, error) {
+    var el = document.getElementById('oauth-status');
+    if (!el) return;
+    el.hidden = false;
+    el.className = 'oauth-status' + (error ? ' error' : '');
+    el.innerHTML = html;
+  }
+  function post(url, data) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.error) j.error = 'Gagal memproses login'; return j; }); });
+  }
+  window.zrAgyLoginStart = function () {
+    window.zrOAuthCancel && window.zrOAuthCancel();
+    window.zrAgyLoginCancel();
+    popup = window.open('about:blank', '_blank');
+    show('<p>Menyiapkan login Agy...</p>');
+    post('/dashboard/providers/antigravity-acp/login/start', {}).then(function (r) {
+      if (r.error) { if (popup) popup.close(); popup = null; return show('Login Agy tidak tersedia.', true); }
+      attemptId = r.attemptId;
+      var link = '<a href="' + esc(r.authorizationUrl) + '" target="_blank" rel="noopener noreferrer">Buka halaman otorisasi Google</a>';
+      if (popup) { popup.opener = null; popup.location.href = r.authorizationUrl; }
+      show('<p>Selesaikan otorisasi di browser. ' + link + '</p>' +
+        '<p class="hint">Setelah Google menampilkan kode, tempel kode mentahnya di bawah. Jangan tempel URL redirect.</p>' +
+        '<div class="field"><input id="agy-login-code" type="password" autocomplete="off" placeholder="Kode otorisasi Agy" /></div>' +
+        '<button type="button" class="btn btn-sm" id="agy-login-submit" onclick="zrAgyLoginSubmit()">Kirim kode</button>' +
+        '<p id="agy-login-error" class="hint" style="color: var(--danger); margin-top: 0.5rem;"></p>');
+    }).catch(function () { if (popup) popup.close(); popup = null; show('Login Agy tidak tersedia.', true); });
+  };
+  window.zrAgyLoginSubmit = function () {
+    if (!attemptId) return;
+    var code = value('agy-login-code');
+    var errorEl = document.getElementById('agy-login-error');
+    var button = document.getElementById('agy-login-submit');
+    if (!code) { if (errorEl) errorEl.textContent = 'Masukkan kode otorisasi Agy.'; return; }
+    if (button) button.disabled = true;
+    post('/dashboard/providers/antigravity-acp/login/submit', { attemptId: attemptId, code: code }).then(function (r) {
+      if (r.status === 'ready') return location.href = '/dashboard/providers/antigravity-acp?notice=agy_login_added';
+      if (errorEl) errorEl.textContent = r.error === 'invalid_authorization_code' ? 'Kode tidak valid. Tempel kode mentah, bukan URL.' : 'Login Agy gagal atau sudah kedaluwarsa.';
+      if (button) button.disabled = false;
+    }).catch(function () { if (errorEl) errorEl.textContent = 'Login Agy gagal atau sudah kedaluwarsa.'; if (button) button.disabled = false; });
+  };
+  window.zrAgyLoginCancel = function () {
+    if (attemptId) post('/dashboard/providers/antigravity-acp/login/cancel', { attemptId: attemptId }).catch(function () {});
+    attemptId = null;
+    if (popup && !popup.closed) popup.close();
+    popup = null;
+  };
+  if (window.__zrSwapCleanups) window.__zrSwapCleanups.push(function () { if (attemptId) window.zrAgyLoginCancel(); });
+})();
+</script>`;
+
 function renderAddAccountModal(p) {
   const id = escapeHtml(p.id);
   const title = `<h3>Add ${escapeHtml(p.name)} Account</h3>`;
@@ -663,8 +721,11 @@ function renderAddAccountModal(p) {
     </div>`;
   }
 
+  const agyLogin = p.id === "antigravity"
+    ? `<button type="button" class="btn btn-primary" onclick="zrAgyLoginStart()">Login via Agy</button>`
+    : "";
   const login = getOAuthFlow(p.id)
-    ? `<button type="button" class="btn btn-primary" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Masuk")}</button>`
+    ? `<button type="button" class="btn${p.id === "antigravity" ? "" : " btn-primary"}" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Masuk")}</button>`
     : "";
   const local = LOCAL_IMPORT[p.id];
   const importForm = local
@@ -698,6 +759,7 @@ function renderAddAccountModal(p) {
             : ""
         }
         <div class="oauth-actions">
+          ${agyLogin}
           ${login}
           ${importForm}
         </div>
@@ -725,11 +787,11 @@ function renderAddAccountModal(p) {
           </form>
         </details>
         <div class="modal-actions">
-          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel()">Tutup</button>
+          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel(); zrAgyLoginCancel()">Tutup</button>
         </div>
       </div>
     </div>
-    ${OAUTH_SCRIPT}`;
+    ${OAUTH_SCRIPT}${agyLogin ? AGY_LOGIN_SCRIPT : ""}`;
 }
 
 /**

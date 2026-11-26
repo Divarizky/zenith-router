@@ -19,23 +19,42 @@ export function setAntigravityAcpWorkerConfigPathForTests(filePath) {
 
 async function canonicalWorker(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("invalid worker entry");
-  if (Object.keys(entry).some((key) => !["workerId", "namespace", "launcher", "workspace"].includes(key))) throw new Error("unsupported worker config field");
+  if (Object.keys(entry).some((key) => !["workerId", "namespace", "launcher", "loginLauncher", "workspace"].includes(key))) throw new Error("unsupported worker config field");
   if (typeof entry.workerId !== "string" || !ID_PATTERN.test(entry.workerId)) throw new Error("invalid worker id");
   if (typeof entry.namespace !== "string" || !ID_PATTERN.test(entry.namespace)) throw new Error("invalid worker namespace");
   for (const key of ["launcher", "workspace"]) {
     if (typeof entry[key] !== "string" || !path.isAbsolute(entry[key]) || entry[key].includes("\0")) throw new Error("worker paths must be absolute");
   }
-  const [launcherReal, workspaceReal] = await Promise.all([realpath(entry.launcher), realpath(entry.workspace)]);
+  if (entry.loginLauncher !== undefined && (typeof entry.loginLauncher !== "string" || !path.isAbsolute(entry.loginLauncher) || entry.loginLauncher.includes("\0"))) {
+    throw new Error("login launcher path must be absolute");
+  }
+  const [launcherReal, loginLauncherReal, workspaceReal] = await Promise.all([
+    realpath(entry.launcher),
+    entry.loginLauncher === undefined ? null : realpath(entry.loginLauncher),
+    realpath(entry.workspace),
+  ]);
   // Stat the resolved paths: a symlink's own mode says nothing about the file Zenith will execute.
-  const [launcherStat, workspaceStat] = await Promise.all([stat(launcherReal), stat(workspaceReal)]);
-  if (process.platform !== "win32" && ((launcherStat.mode & 0o022) !== 0 || (workspaceStat.mode & 0o022) !== 0)) throw new Error("worker launcher/workspace must not be group/other writable");
-  if (!launcherStat.isFile() || (process.platform !== "win32" && !(launcherStat.mode & 0o111)) || !workspaceStat.isDirectory()) throw new Error("worker launcher/workspace type invalid");
-  return Object.freeze({
+  const [launcherStat, loginLauncherStat, workspaceStat] = await Promise.all([
+    stat(launcherReal),
+    loginLauncherReal ? stat(loginLauncherReal) : null,
+    stat(workspaceReal),
+  ]);
+  const launchers = [launcherStat, loginLauncherStat].filter(Boolean);
+  if (process.platform !== "win32" && (launchers.some((entryStat) => (entryStat.mode & 0o022) !== 0) || (workspaceStat.mode & 0o022) !== 0)) {
+    throw new Error("worker launcher/workspace must not be group/other writable");
+  }
+  if (launchers.some((entryStat) => !entryStat.isFile() || (process.platform !== "win32" && !(entryStat.mode & 0o111))) || !workspaceStat.isDirectory()) {
+    throw new Error("worker launcher/workspace type invalid");
+  }
+  const worker = {
     workerId: entry.workerId,
     namespace: entry.namespace,
     launcher: launcherReal,
     workspace: workspaceReal,
-  });
+  };
+  // Keep the field absent for legacy worker maps so existing callers and configs remain stable.
+  if (loginLauncherReal) worker.loginLauncher = loginLauncherReal;
+  return Object.freeze(worker);
 }
 
 async function loadWorkers() {
@@ -49,14 +68,19 @@ async function loadWorkers() {
     const workerIds = new Set();
     const namespaces = new Set();
     const launchers = new Set();
+    const loginLaunchers = new Set();
     const workspaces = new Set();
     for (const worker of workers) {
       const workerKey = worker.workerId.toLocaleLowerCase("en-US");
       const namespaceKey = worker.namespace.toLocaleLowerCase("en-US");
-      if (workerIds.has(workerKey) || namespaces.has(namespaceKey) || launchers.has(worker.launcher) || workspaces.has(worker.workspace)) throw new Error("duplicate worker mapping");
+      if (workerIds.has(workerKey) || namespaces.has(namespaceKey) || workspaces.has(worker.workspace) || launchers.has(worker.launcher) || (worker.loginLauncher && (launchers.has(worker.loginLauncher) || loginLaunchers.has(worker.loginLauncher)))) throw new Error("duplicate worker mapping");
       workerIds.add(workerKey);
       namespaces.add(namespaceKey);
       launchers.add(worker.launcher);
+      if (worker.loginLauncher) {
+        launchers.add(worker.loginLauncher);
+        loginLaunchers.add(worker.loginLauncher);
+      }
       workspaces.add(worker.workspace);
     }
     return workers;

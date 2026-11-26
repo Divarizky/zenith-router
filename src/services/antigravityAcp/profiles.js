@@ -71,11 +71,11 @@ export function getAntigravityAcpProfiles() {
   return parseProfiles(getSetting(PROFILES_SETTING, "[]"));
 }
 
-export async function setAntigravityAcpProfiles(profiles) {
-  if (!validateAntigravityAcpProfiles(profiles)) return false;
-  for (const profile of profiles) {
-    if (!await getAntigravityAcpWorker(profile.workerId)) return false;
-  }
+export function getAntigravityAcpConfigGeneration() {
+  return configGeneration;
+}
+
+function applyProfilesUpdate(profiles) {
   const serialized = JSON.stringify(profiles);
   const changed = getSetting(PROFILES_SETTING, "[]") !== serialized;
   const result = setSetting(PROFILES_SETTING, serialized);
@@ -83,6 +83,52 @@ export async function setAntigravityAcpProfiles(profiles) {
   if (changed) configGeneration += 1;
   profileStatuses.clear();
   return true;
+}
+
+/**
+ * Registers a trusted worker after an out-of-band bootstrap (for example Agy
+ * login) without replacing another slot. The generation and worker snapshot
+ * make the commit fail closed when an admin changed the mapping mid-attempt.
+ */
+export async function registerAntigravityAcpWorker(workerId, {
+  expectedGeneration = configGeneration,
+  expectedWorker = null,
+  shouldCommit = null,
+} = {}) {
+  if (typeof workerId !== "string" || expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
+  const worker = await getAntigravityAcpWorker(workerId);
+  if (!worker || expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
+  if (expectedWorker && (worker.launcher !== expectedWorker.launcher || worker.workspace !== expectedWorker.workspace || worker.loginLauncher !== expectedWorker.loginLauncher)) {
+    return { ok: false, reason: "stale" };
+  }
+  if (typeof shouldCommit === "function" && !shouldCommit()) return { ok: false, reason: "cancelled" };
+  if (expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
+  const profiles = getAntigravityAcpProfiles();
+  const existing = profiles.find((profile) => profile.workerId === workerId);
+  if (existing) return { ok: true, added: false, profile: { ...existing } };
+  if (profiles.length >= MAX_PROFILES) return { ok: false, reason: "full" };
+  const usedIds = new Set(profiles.map((profile) => profile.id));
+  const usedPriorities = new Set(profiles.map((profile) => profile.priority));
+  const priority = [0, 1].find((candidate) => !usedPriorities.has(candidate));
+  if (priority === undefined) return { ok: false, reason: "full" };
+  let suffix = 1;
+  while (usedIds.has(`worker-${suffix}`)) suffix += 1;
+  const profile = { id: `worker-${suffix}`, workerId, priority, enabled: true };
+  const nextProfiles = [...profiles, profile];
+  if (!validateAntigravityAcpProfiles(nextProfiles)) return { ok: false, reason: "stale" };
+  if (typeof shouldCommit === "function" && !shouldCommit()) return { ok: false, reason: "cancelled" };
+  if (expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
+  if (!applyProfilesUpdate(nextProfiles)) return { ok: false, reason: "stale" };
+  return { ok: true, added: true, profile };
+}
+
+export async function setAntigravityAcpProfiles(profiles, { expectedGeneration = null } = {}) {
+  if (!validateAntigravityAcpProfiles(profiles)) return false;
+  for (const profile of profiles) {
+    if (!await getAntigravityAcpWorker(profile.workerId)) return false;
+  }
+  if (expectedGeneration !== null && expectedGeneration !== configGeneration) return false;
+  return applyProfilesUpdate(profiles);
 }
 
 /** Status is runtime-only and contains no process output or secret-bearing details. */

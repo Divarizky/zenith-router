@@ -69,6 +69,12 @@ import {
   handleOAuthCallback,
   handleImportLocalLogin,
 } from "./ui/pages/oauth.js";
+import {
+  handleAgyLoginStart,
+  handleAgyLoginSubmit,
+  handleAgyLoginStatus,
+  handleAgyLoginCancel,
+} from "./ui/pages/agyLogin.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
 import { syncManagedCombos } from "./services/managedCombos.js";
 import { startOpencodeBridgeService } from "./services/opencodeBridge.js";
@@ -207,6 +213,10 @@ app.post("/dashboard/oauth/start", handleOAuthStart);
 app.post("/dashboard/oauth/poll", handleOAuthPoll);
 app.post("/dashboard/oauth/manual", handleOAuthManual);
 app.post("/dashboard/oauth/cancel", handleOAuthCancel);
+app.post("/dashboard/providers/antigravity-acp/login/start", handleAgyLoginStart);
+app.post("/dashboard/providers/antigravity-acp/login/submit", handleAgyLoginSubmit);
+app.post("/dashboard/providers/antigravity-acp/login/status", handleAgyLoginStatus);
+app.post("/dashboard/providers/antigravity-acp/login/cancel", handleAgyLoginCancel);
 app.get("/callback", handleOAuthCallback);
 app.post("/dashboard/providers/models/custom/add", handleAddCustomModel);
 app.post("/dashboard/providers/models/custom/delete", handleDeleteCustomModel);

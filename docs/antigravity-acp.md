@@ -27,3 +27,29 @@ The deployment file is an array with at most two entries, for example:
 ```
 
 Each launcher must itself enforce the separate account/OS sandbox and start an ACP v1 stdio endpoint. This application does not provision launcher scripts, accounts, keyrings, or sign-in state. Provisioning and verification of those external controls are production prerequisites.
+
+## Browser login MVP
+
+The Antigravity provider's **Login via Agy** action is a browser-only bootstrap for an already provisioned worker. It is separate from the existing **Login via Zenith OAuth** action, which remains available and unchanged.
+
+To enable the MVP, add `loginLauncher` to exactly one worker entry. The file must be an externally provisioned, non-group/world-writable executable in the same worker isolation and workspace as `launcher`; it must run `agy acp --login` and print the official Google authorization URL in this documented machine-readable shape:
+
+```text
+AGY_LOGIN_URL=https://accounts.google.com/o/oauth2/v2/auth?...
+```
+
+Zenith also accepts that same official URL when an Agy version prefixes it with human-readable text. Only `https://accounts.google.com/o/oauth2/v2/auth` (or `/o/oauth2/auth`) URLs with a query string are passed to the browser. URLs supplied by the browser are never accepted. Example deployment entry:
+
+```json
+{
+  "workerId": "agy-worker-a",
+  "namespace": "agy-worker-a",
+  "launcher": "/opt/zenith/acp/launch-worker-a",
+  "loginLauncher": "/opt/zenith/acp/login-worker-a",
+  "workspace": "/srv/zenith/acp/worker-a"
+}
+```
+
+The dashboard starts the trusted login launcher with no browser-selected command, arguments, environment, or cwd. It relays only the short raw authorization code (not a redirect URL) to the original process stdin. Attempts are bound to the authenticated dashboard session, expire after two minutes, accept one submission, and are cleaned up on cancel, timeout, or process failure. A successful process exit is not sufficient: Zenith verifies ACP v1 `initialize` and `session/new` through the worker runtime launcher before registering the worker in the ACP profile list. The registration fails closed if the worker mapping changed, verification failed, or both profile slots are occupied. Zenith never reads or persists Agy tokens, keyrings, email, or account output.
+
+Live testing is intentionally out of scope for this MVP. Before a real deployment, an administrator must provision and review both launchers, confirm the Agy CLI output shape, ensure the worker's keyring is isolated, and manually complete a browser login on a disposable account. Automated tests use fake child processes and offline ACP fixtures only.

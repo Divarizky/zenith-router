@@ -45,6 +45,8 @@ export async function createAntigravityAcpClient(workerId, createTransport, { si
     cwd: worker.workspace,
     initialize: (params) => transport.initialize(params),
     newSession: (params) => transport.request("session/new", params),
+    setConfigOption: (params) => transport.request("session/set_config_option", params),
+    setModel: (params) => transport.request("session/set_model", params),
     async prompt(params) {
       promptActive = true;
       try { return await transport.request("session/prompt", params); }

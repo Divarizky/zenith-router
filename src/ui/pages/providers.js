@@ -64,6 +64,11 @@ const SECTIONS = [
   { category: "apikey", title: "API Key Providers", hint: "Butuh API key dari vendor." },
 ];
 
+/** Dashboard group only: ACP is a login-based provider, but its registry category/noAuth stay untouched (routing and managed combos read those). */
+function displayCategory(p) {
+  return p.id === "antigravity-acp" ? "oauth" : (p.category || "apikey");
+}
+
 function primaryAlias(p) {
   return Array.isArray(p.alias) ? p.alias[0] : p.alias || p.id;
 }
@@ -335,7 +340,7 @@ export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LAN
 
   const sections = SECTIONS.map((s) => {
     const providers = getAllProviders()
-      .filter((p) => (p.category || "apikey") === s.category)
+      .filter((p) => displayCategory(p) === s.category)
       // Ready (noAuth) first, then connected, then alphabetical.
       .sort((a, b) => {
         const ra = a.noAuth ? 0 : accountStats(byProvider.get(a.id) || []).healthy > 0 ? 1 : 2;

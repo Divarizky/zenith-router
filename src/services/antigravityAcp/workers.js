@@ -1,24 +1,19 @@
-import { lstat, stat, realpath, readFile, mkdir, chmod, rm } from "node:fs/promises";
+import { lstat, stat, realpath, mkdir, chmod, rm } from "node:fs/promises";
 import { lstatSync } from "node:fs";
 import { getAccounts, isValidAccountId, workerIdForAccount, accountIdFromWorkerId } from "./accounts.js";
 import path from "node:path";
 import os from "node:os";
 
-const DEFAULT_CONFIG = path.join(os.homedir(), ".config", "zenith-router", "antigravity-acp-workers.json");
-const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const MAX_CONFIG_BYTES = 32 * 1024;
-let configPath = DEFAULT_CONFIG;
 let loaderOverride = null;
+// Accounts whose first login is still running. They have folders and a derived worker
+// but are not in the account list yet; the list entry is written only after a verified login.
+const pendingAccountIds = new Set();
 let discoveryPathsOverride = null;
 let provisionRootOverride = null;
 
 /** Test hook; runtime callers must never derive worker launch data from requests. */
 export function setAntigravityAcpWorkerLoaderForTests(loader) {
   loaderOverride = typeof loader === "function" ? loader : null;
-}
-
-export function setAntigravityAcpWorkerConfigPathForTests(filePath) {
-  configPath = typeof filePath === "string" && path.isAbsolute(filePath) ? filePath : DEFAULT_CONFIG;
 }
 
 /** Isolate auto-discovery from host-installed binaries in unit tests. */
@@ -30,24 +25,45 @@ export function setAntigravityAcpProvisionRootForTests(rootPath) {
   provisionRootOverride = typeof rootPath === "string" && path.isAbsolute(rootPath) ? rootPath : null;
 }
 
+// Troupe registry: Linux/macOS ship `agy_acp_server.par` (Linux with `--uid=`); a plain `agy_acp_server` is also accepted.
+const SERVER_NAMES = process.platform === "win32" ? ["agy_acp_server.exe"] : ["agy_acp_server.par", "agy_acp_server"];
+
+/** Fixed argv for a resolved binary; never derived from requests. */
+export function serverArgsFor(binary) {
+  return process.platform === "linux" && typeof binary === "string" && path.basename(binary).endsWith(".par") ? ["--uid="] : [];
+}
+
+/** Official ACP server only. The `agy` CLI is deliberately not a fallback: it is not isolated per account. */
 function candidatePaths() {
   if (discoveryPathsOverride) return discoveryPathsOverride;
   const home = os.homedir();
-  const candidates = process.platform === "win32"
-    ? [
-        process.env.LOCALAPPDATA && path.isAbsolute(process.env.LOCALAPPDATA)
-          ? path.join(process.env.LOCALAPPDATA, "Programs", "Antigravity", "bin", "agy.cmd") : null,
-        process.env.USERPROFILE && path.isAbsolute(process.env.USERPROFILE)
-          ? path.join(process.env.USERPROFILE, ".local", "bin", "agy.exe") : null,
-      ].filter(Boolean)
-    : [path.join(home, ".local", "bin", "agy"), "/usr/local/bin/agy", "/usr/bin/agy"];
-  if (process.platform === "darwin") candidates.splice(2, 0, "/Applications/Antigravity.app/Contents/Resources/app/bin/agy", "/opt/homebrew/bin/agy");
+  const candidates = [];
+  if (process.env.ZENITH_AGY_ACP_SERVER && path.isAbsolute(process.env.ZENITH_AGY_ACP_SERVER)) candidates.push(process.env.ZENITH_AGY_ACP_SERVER);
+  for (const name of SERVER_NAMES) candidates.push(path.join(home, ".local", "bin", name), `/usr/local/bin/${name}`, `/usr/bin/${name}`);
+  // Android Studio ships the official server here; each directory is still checked by findAgyBinary (owner/mode/parent).
+  const studio = path.join(home, ".android", "studio", "agent", "binaries", "antigravity-acp");
+  const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+  const plat = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
+  for (const name of SERVER_NAMES) candidates.push(path.join(studio, `${plat}-${arch}`, name));
   const pathValue = process.env.PATH || "";
   for (const entry of pathValue.split(path.delimiter)) {
-    if (!entry || !path.isAbsolute(entry) || entry === ".") continue;
-    candidates.push(...(process.platform === "win32" ? ["agy.exe", "agy.cmd", "agy.bat"] : ["agy"]).map((name) => path.join(entry, name)));
+    if (!entry || !path.isAbsolute(entry)) continue;
+    for (const name of SERVER_NAMES) candidates.push(path.join(entry, name));
   }
   return [...new Set(candidates)];
+}
+
+/**
+ * Other-writable is never trusted. Group-writable is accepted only when the owner is this user and the
+ * group is this user's own primary group, which is the default on Linux (umask 002, private user group).
+ * Any other group could let someone else swap the binary.
+ */
+function isTrustedWriteMode(info) {
+  if (info.mode & 0o002) return false;
+  if (!(info.mode & 0o020)) return true;
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  return uid !== undefined && info.uid === uid && info.gid === gid;
 }
 
 async function findAgyBinary() {
@@ -56,10 +72,10 @@ async function findAgyBinary() {
     try {
       const resolved = await realpath(candidate);
       const info = await stat(resolved);
-      if (!info.isFile() || (process.platform !== "win32" && (!(info.mode & 0o111) || (info.mode & 0o022)))) continue;
+      if (!info.isFile() || (process.platform !== "win32" && (!(info.mode & 0o111) || !isTrustedWriteMode(info)))) continue;
       if (process.platform !== "win32") {
         const parent = await stat(path.dirname(resolved));
-        if (!parent.isDirectory() || (parent.mode & 0o022)) continue;
+        if (!parent.isDirectory() || !isTrustedWriteMode(parent)) continue;
       }
       return resolved;
     } catch {}
@@ -76,19 +92,33 @@ export function accountPaths(accountId) {
   if (!isValidAccountId(accountId)) throw new Error("invalid account id");
   const root = path.join(accountsRoot(), accountId);
   const home = path.join(root, "home");
-  return { root, home, appdata: path.join(root, "appdata"), workspace: path.join(root, "workspace"),
+  return { root, home, run: path.join(home, "run"), appdata: path.join(root, "appdata"), workspace: path.join(root, "workspace"),
     tokenFile: path.join(home, ".gemini", "antigravity-acp", "acp_token.json"),
     businessTokenFile: path.join(home, ".gemini", "antigravity-acp", "acp_business_token.json") };
 }
 
-/** True when a deployment worker map file exists (it then overrides account-derived workers). */
-export function isExplicitWorkerMapPresent() {
-  try { lstatSync(configPath); return true; } catch (error) { return error?.code !== "ENOENT"; }
+/** Workers are always derived from accounts; only a test loader replaces that. */
+export function isDerivedWorkerMode() {
+  return !loaderOverride;
 }
 
-/** Account-derived workers are in effect only when neither a deployment map nor a test loader overrides them. */
-export function isDerivedWorkerMode() {
-  return !loaderOverride && !isExplicitWorkerMapPresent();
+/** Marks an account id as mid-login so its worker resolves before it is listed. */
+export function registerPendingAntigravityAcpAccount(accountId) {
+  if (!isValidAccountId(accountId)) return false;
+  pendingAccountIds.add(accountId);
+  return true;
+}
+
+export function unregisterPendingAntigravityAcpAccount(accountId) {
+  pendingAccountIds.delete(accountId);
+}
+
+export function isPendingAntigravityAcpAccount(accountId) {
+  return pendingAccountIds.has(accountId);
+}
+
+export function resetAntigravityAcpWorkerStateForTests() {
+  pendingAccountIds.clear();
 }
 
 /** Login state from file presence/size only; the token contents are never read. */
@@ -111,6 +141,10 @@ export function workerRuntimeEnv(worker) {
     env.USERPROFILE = worker.isolatedHome;
     if (worker.appData) env.APPDATA = worker.appData;
   }
+  if (process.platform === "linux") {
+    env.DBUS_SESSION_BUS_ADDRESS = "disabled:";
+    env.XDG_RUNTIME_DIR = path.join(worker.isolatedHome, "run");
+  }
   return env;
 }
 
@@ -119,7 +153,7 @@ async function ensureAccountDirs(accountId) {
   const base = accountsRoot();
   const home = os.homedir();
   const ancestors = provisionRootOverride ? [] : [path.join(home, ".config"), path.join(home, ".config", "zenith-router")];
-  const directories = [...ancestors, base, paths.root, paths.home, paths.appdata, paths.workspace];
+  const directories = [...ancestors, base, paths.root, paths.home, paths.run, paths.appdata, paths.workspace];
   try {
     // Reject pre-existing links and non-directories before mkdir/chmod can follow or modify them.
     for (const dir of directories) {
@@ -172,9 +206,11 @@ async function deriveAccountWorker(accountId, agy) {
   if (!paths) return null;
   return Object.freeze({
     workerId: workerIdForAccount(accountId), namespace: workerIdForAccount(accountId), launcher: agy,
-    launcherArgs: Object.freeze(["acp", "--stdio"]),
+    launcherArgs: Object.freeze(serverArgsFor(agy)),
     loginLauncher: agy,
-    loginLauncherArgs: Object.freeze(["acp", "--login"]),
+    loginLauncherArgs: Object.freeze(serverArgsFor(agy)),
+    loginMode: "acp-authenticate",
+    authMethodId: "oauth-personal",
     workspace: paths.workspace, isolatedHome: paths.home, appData: paths.appdata,
   });
 }
@@ -182,91 +218,20 @@ async function deriveAccountWorker(accountId, agy) {
 async function deriveAccountWorkers(onlyAccountId = null) {
   const agy = await findAgyBinary();
   if (!agy) return [];
-  const accounts = getAccounts().filter((account) => onlyAccountId === null || account.id === onlyAccountId);
+  const ids = new Set(getAccounts().map((account) => account.id));
+  for (const id of pendingAccountIds) ids.add(id);
   const workers = [];
-  for (const account of accounts) {
-    const worker = await deriveAccountWorker(account.id, agy);
+  for (const id of ids) {
+    if (onlyAccountId !== null && id !== onlyAccountId) continue;
+    const worker = await deriveAccountWorker(id, agy);
     if (worker) workers.push(worker);
   }
   return workers;
 }
 
-async function canonicalWorker(entry) {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("invalid worker entry");
-  if (Object.keys(entry).some((key) => !["workerId", "namespace", "launcher", "loginLauncher", "workspace"].includes(key))) throw new Error("unsupported worker config field");
-  if (typeof entry.workerId !== "string" || !ID_PATTERN.test(entry.workerId)) throw new Error("invalid worker id");
-  if (typeof entry.namespace !== "string" || !ID_PATTERN.test(entry.namespace)) throw new Error("invalid worker namespace");
-  for (const key of ["launcher", "workspace"]) {
-    if (typeof entry[key] !== "string" || !path.isAbsolute(entry[key]) || entry[key].includes("\0")) throw new Error("worker paths must be absolute");
-  }
-  if (entry.loginLauncher !== undefined && (typeof entry.loginLauncher !== "string" || !path.isAbsolute(entry.loginLauncher) || entry.loginLauncher.includes("\0"))) {
-    throw new Error("login launcher path must be absolute");
-  }
-  const [launcherReal, loginLauncherReal, workspaceReal] = await Promise.all([
-    realpath(entry.launcher),
-    entry.loginLauncher === undefined ? null : realpath(entry.loginLauncher),
-    realpath(entry.workspace),
-  ]);
-  // Stat the resolved paths: a symlink's own mode says nothing about the file Zenith will execute.
-  const [launcherStat, loginLauncherStat, workspaceStat] = await Promise.all([
-    stat(launcherReal),
-    loginLauncherReal ? stat(loginLauncherReal) : null,
-    stat(workspaceReal),
-  ]);
-  const launchers = [launcherStat, loginLauncherStat].filter(Boolean);
-  if (process.platform !== "win32" && (launchers.some((entryStat) => (entryStat.mode & 0o022) !== 0) || (workspaceStat.mode & 0o022) !== 0)) {
-    throw new Error("worker launcher/workspace must not be group/other writable");
-  }
-  if (launchers.some((entryStat) => !entryStat.isFile() || (process.platform !== "win32" && !(entryStat.mode & 0o111))) || !workspaceStat.isDirectory()) {
-    throw new Error("worker launcher/workspace type invalid");
-  }
-  const worker = {
-    workerId: entry.workerId,
-    namespace: entry.namespace,
-    launcher: launcherReal,
-    workspace: workspaceReal,
-  };
-  // Keep the field absent for legacy worker maps so existing callers and configs remain stable.
-  if (loginLauncherReal) worker.loginLauncher = loginLauncherReal;
-  return Object.freeze(worker);
-}
-
 async function loadWorkers(onlyAccountId = null) {
   if (loaderOverride) return loaderOverride();
-  let info;
-  try {
-    info = await lstat(configPath);
-  } catch (error) {
-    if (error?.code === "ENOENT") return deriveAccountWorkers(onlyAccountId);
-    return [];
-  }
-  try {
-    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_CONFIG_BYTES || (process.platform !== "win32" && (info.mode & 0o022) !== 0)) throw new Error("worker config invalid");
-    const parsed = JSON.parse(await readFile(configPath, "utf8"));
-    if (!Array.isArray(parsed) || parsed.length > 256) throw new Error("worker config invalid");
-    const workers = await Promise.all(parsed.map(canonicalWorker));
-    const workerIds = new Set();
-    const namespaces = new Set();
-    const launchers = new Set();
-    const loginLaunchers = new Set();
-    const workspaces = new Set();
-    for (const worker of workers) {
-      const workerKey = worker.workerId.toLocaleLowerCase("en-US");
-      const namespaceKey = worker.namespace.toLocaleLowerCase("en-US");
-      if (workerIds.has(workerKey) || namespaces.has(namespaceKey) || workspaces.has(worker.workspace) || launchers.has(worker.launcher) || (worker.loginLauncher && (launchers.has(worker.loginLauncher) || loginLaunchers.has(worker.loginLauncher)))) throw new Error("duplicate worker mapping");
-      workerIds.add(workerKey);
-      namespaces.add(namespaceKey);
-      launchers.add(worker.launcher);
-      if (worker.loginLauncher) {
-        launchers.add(worker.loginLauncher);
-        loginLaunchers.add(worker.loginLauncher);
-      }
-      workspaces.add(worker.workspace);
-    }
-    return workers;
-  } catch {
-    return [];
-  }
+  return deriveAccountWorkers(onlyAccountId);
 }
 
 export async function getAntigravityAcpWorkers() {
@@ -276,10 +241,9 @@ export async function getAntigravityAcpWorkers() {
 
 export async function getAntigravityAcpWorker(workerId) {
   if (typeof workerId !== "string") return null;
-  const explicit = isExplicitWorkerMapPresent();
-  // Without a deployment map, only workers derived from an existing account are resolvable.
-  const only = !explicit && !loaderOverride ? accountIdFromWorkerId(workerId) : null;
-  if (!explicit && !loaderOverride && !only) return null;
+  // Only workers derived from a listed or mid-login account are resolvable.
+  const only = loaderOverride ? null : accountIdFromWorkerId(workerId);
+  if (!loaderOverride && !only) return null;
   const workers = await loadWorkers(only);
   return workers.find((worker) => worker.workerId === workerId) || null;
 }

@@ -1,14 +1,20 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn as defaultSpawn } from "node:child_process";
 import path from "node:path";
+import http from "node:http";
+import os from "node:os";
+import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
+import { recordAntigravityAcpAccountCatalog } from "./catalog.js";
 import pkg from "../../../package.json" with { type: "json" };
 import { createAntigravityAcpClient } from "./client.js";
 import { createAntigravityAcpTransport } from "./transport.js";
-import { getAntigravityAcpWorker, workerRuntimeEnv } from "./workers.js";
+import { getAntigravityAcpWorker, isPendingAntigravityAcpAccount, workerRuntimeEnv } from "./workers.js";
 import { isValidAccountId, workerIdForAccount } from "./accounts.js";
 import {
   acquireAntigravityAcpAccountUse,
+  beginNewAntigravityAcpAccount,
   completeAntigravityAcpLogin,
+  discardPendingAntigravityAcpAccount,
   getAntigravityAcpConfigGeneration,
   getAntigravityAcpProfiles,
 } from "./profiles.js";
@@ -24,9 +30,22 @@ export const AGY_LOGIN_MAX_CODE_LENGTH = 512;
 const GOOGLE_LOGIN_HOST = "accounts.google.com";
 const GOOGLE_LOGIN_PATH = /^\/o\/oauth2\/(?:v2\/)?auth\/?$/;
 const CODE_PATTERN = /^[A-Za-z0-9._~:/-]{1,512}$/;
+export const AGY_CALLBACK_TIMEOUT_MS = 15_000;
+export const AGY_CALLBACK_MAX_URL_LENGTH = 4096;
+const SHIM_PROGRAMS = ["xdg-open", "sensible-browser", "x-www-browser", "www-browser", "gnome-open", "kde-open", "open", "gio"];
+// Captures the URL and never falls through to a real opener: the agent must not open a browser on the server host.
+const SHIM_SCRIPT = `#!/bin/sh
+dir="$(cd "$(dirname "$0")" && pwd)"
+url=""
+for a in "$@"; do case "$a" in http://*|https://*) url="$a";; esac; done
+if [ -n "$url" ]; then printf '%s\\n' "$url" >> "$dir/urls"; fi
+exit 0
+`;
 const attempts = new Map();
 let starting = false;
 let spawnFn = defaultSpawn;
+let platformOverride = null;
+const currentPlatform = () => platformOverride || process.platform;
 let clientFactory = (workerId, options) => createAntigravityAcpClient(workerId, createAntigravityAcpTransport, options);
 let timing = {
   urlWaitMs: AGY_LOGIN_URL_WAIT_MS,
@@ -34,6 +53,7 @@ let timing = {
   ttlMs: AGY_LOGIN_TTL_MS,
   exitWaitMs: AGY_LOGIN_EXIT_WAIT_MS,
   verifyWaitMs: AGY_LOGIN_VERIFY_WAIT_MS,
+  callbackMs: AGY_CALLBACK_TIMEOUT_MS,
 };
 
 function genericFailure(code = "login_failed") {
@@ -84,12 +104,119 @@ function extractAuthorizationUrl(text) {
   return null;
 }
 
+/**
+ * Validates the loopback redirect_uri that Agy puts in the authorization URL.
+ * Strict: http, literal loopback host (127.0.0.1, localhost, [::1]), explicit unprivileged port, no credentials/query/hash.
+ * Returns null when absent or invalid; `{ invalid: true }` is never returned, callers distinguish via hasRedirectUri.
+ */
+export function parseLoopbackRedirect(raw) {
+  if (typeof raw !== "string" || raw.length > 512) return null;
+  // WHATWG URL silently normalizes "/../" and "/./", so dot segments and encoded separators are rejected on the raw string.
+  if (/(?:^|\/)\.\.?(?:\/|$)|%2e|%2f|%5c|\\/i.test(raw.replace(/^http:\/\/[^/]*/i, ""))) return null;
+  // The literal host text must already be canonical: URL() would rewrite "127.1", "0x7f.1" or "2130706433" to 127.0.0.1.
+  const rawHost = raw.match(/^http:\/\/([^/?#@]*)/i)?.[1]?.replace(/:\d*$/, "");
+  if (!rawHost || !["127.0.0.1", "localhost", "[::1]"].includes(rawHost)) return null;
+  let url;
+  try { url = new URL(raw); } catch { return null; }
+  if (url.protocol !== "http:" || url.username || url.password || url.hash || url.search) return null;
+  const host = url.hostname;
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== "[::1]") return null;
+  const port = Number(url.port);
+  if (!url.port || !Number.isInteger(port) || port < 1024 || port > 65535) return null;
+  if (!/^\/[A-Za-z0-9._~\-/]*$/.test(url.pathname) || url.pathname.includes("..") || url.pathname.includes("//")) return null;
+  return { host, port, path: url.pathname, ip: host === "[::1]" ? "::1" : "127.0.0.1" };
+}
+
+/** Extracts and validates the callback target; `state` is kept in memory only to match pasted redirects. */
+function callbackFromAuthorizationUrl(authorizationUrl) {
+  const params = new URL(authorizationUrl).searchParams;
+  const redirect = params.get("redirect_uri");
+  if (redirect === null) return { callback: null, ok: true };
+  const callback = parseLoopbackRedirect(redirect);
+  if (!callback) return { callback: null, ok: false };
+  return { callback: { ...callback, state: params.get("state") || "" }, ok: true };
+}
+
+/** Validates a pasted full callback URL against the redirect the agent registered. Returns the request target or null. */
+export function validatePastedCallback(raw, callback) {
+  if (!callback || typeof raw !== "string") return null;
+  const value = raw.trim();
+  if (!value || value.length > AGY_CALLBACK_MAX_URL_LENGTH || /[\s\u0000-\u001f\u007f]/.test(value)) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== "http:" || url.username || url.password || url.hash) return null;
+  if (url.hostname !== callback.host || Number(url.port) !== callback.port || url.pathname !== callback.path) return null;
+  const code = url.searchParams.get("code");
+  if (!code || code.length > 2048 || url.searchParams.has("error")) return null;
+  if (!callback.state || url.searchParams.get("state") !== callback.state) return null;
+  return { ip: callback.ip, port: callback.port, hostHeader: `${callback.host}:${callback.port}`, target: `${url.pathname}${url.search}` };
+}
+
+/** One GET to the literal loopback IP (no DNS, so no rebinding), no redirects, bounded time and body. Never logs the URL. */
+function replayCallback({ ip, port, hostHeader, target }, timeoutMs = AGY_CALLBACK_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => { if (!settled) { settled = true; resolve(value); } };
+    try {
+      const req = http.request({ host: ip, port, path: target, method: "GET", headers: { Host: hostHeader, Connection: "close" }, agent: false, timeout: timeoutMs }, (res) => {
+        const status = res.statusCode || 0;
+        res.resume();
+        res.once("end", () => done(status >= 200 && status < 400));
+        res.once("error", () => done(false));
+        res.once("close", () => done(status >= 200 && status < 400));
+      });
+      req.once("timeout", () => { req.destroy(); done(false); });
+      req.once("error", () => done(false));
+      req.end();
+    } catch { done(false); }
+  });
+}
+
+async function createBrowserShim() {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-agy-shim-"));
+  try {
+    for (const name of SHIM_PROGRAMS) await writeFile(path.join(dir, name), SHIM_SCRIPT, { mode: 0o700 });
+    await writeFile(path.join(dir, "urls"), "", { mode: 0o600 });
+    return dir;
+  } catch {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    return null;
+  }
+}
+
+function startShimWatcher(record) {
+  const sink = path.join(record.shimDir, "urls");
+  record.shimTimer = setInterval(async () => {
+    if (record.terminal || record.url) return;
+    try {
+      const text = (await readFile(sink, "utf8")).slice(0, AGY_LOGIN_MAX_OUTPUT_BYTES);
+      for (const line of text.split("\n")) {
+        const url = validateAgyAuthorizationUrl(line);
+        if (url) { finishUrl(record, url); return; }
+      }
+    } catch {}
+  }, 100);
+  record.shimTimer.unref?.();
+}
+
+function cleanupShim(record) {
+  clearInterval(record.shimTimer);
+  record.shimTimer = null;
+  if (record.shimDir) {
+    const dir = record.shimDir;
+    record.shimDir = null;
+    void rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 function safeWorkerSnapshot(worker) {
   return {
     workerId: worker.workerId,
     launcher: worker.launcher,
     loginLauncher: worker.loginLauncher,
     loginLauncherArgs: worker.loginLauncherArgs || [],
+    loginMode: worker.loginMode,
+    authMethodId: worker.authMethodId,
     launcherArgs: worker.launcherArgs || [],
     isolatedHome: worker.isolatedHome,
     appData: worker.appData,
@@ -99,7 +226,7 @@ function safeWorkerSnapshot(worker) {
 
 async function selectLoginWorker(accountId) {
   if (!isValidAccountId(accountId)) return null;
-  if (!getAntigravityAcpProfiles().some((account) => account.id === accountId)) return null;
+  if (!getAntigravityAcpProfiles().some((account) => account.id === accountId) && !isPendingAntigravityAcpAccount(accountId)) return null;
   const worker = await getAntigravityAcpWorker(workerIdForAccount(accountId));
   return worker && typeof worker.loginLauncher === "string" ? worker : null;
 }
@@ -139,6 +266,8 @@ function failRecord(record, code = "login_failed") {
   record.verifyAbortController?.abort();
   record.releaseUse?.();
   terminateChild(record);
+  cleanupShim(record);
+  if (record.isNewAccount) void discardPendingAntigravityAcpAccount(record.accountId);
   record.resolveUrl?.(genericFailure(code));
   record.resolveExit?.({ exited: record.exited, code: record.exitCode, signal: record.exitSignal });
   record.resolveExit = null;
@@ -147,11 +276,14 @@ function failRecord(record, code = "login_failed") {
 
 function finishUrl(record, url) {
   if (record.terminal || record.url) return;
+  const { callback, ok } = callbackFromAuthorizationUrl(url);
+  if (!ok) { failRecord(record, "login_callback_invalid"); return; }
   clearTimer(record.settleTimer);
   clearTimer(record.urlTimer);
+  record.callback = callback;
   record.url = url;
   record.state = "awaiting_code";
-  record.resolveUrl?.({ ok: true, attemptId: record.attemptId, authorizationUrl: url, expiresIn: Math.ceil(timing.ttlMs / 1000) });
+  record.resolveUrl?.({ ok: true, attemptId: record.attemptId, authorizationUrl: url, expiresIn: Math.ceil(timing.ttlMs / 1000), callback: callback ? { host: callback.host, port: callback.port } : null });
   record.resolveUrl = null;
 }
 
@@ -167,6 +299,64 @@ function isSettledAuthorizationUrl(urlStr, rawBuffer = "") {
   } catch {
     return false;
   }
+}
+
+function collectStrings(value, out, depth = 0) {
+  if (depth > 6) return;
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) value.forEach((item) => collectStrings(item, out, depth + 1));
+  else if (value && typeof value === "object") Object.values(value).forEach((item) => collectStrings(item, out, depth + 1));
+}
+
+function writeRpc(record, message) {
+  try { record.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`); return true; } catch { return false; }
+}
+
+/** ACP login: initialize, then authenticate(methodId). The agent raises the Google URL as a request/notification; nothing else is read. */
+function consumeAcpStdout(record, chunk) {
+  if (record.terminal) return;
+  record.rpcBuffer = ((record.rpcBuffer || "") + (Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || ""))).slice(-AGY_LOGIN_MAX_OUTPUT_BYTES);
+  const lines = record.rpcBuffer.split("\n");
+  record.rpcBuffer = lines.pop();
+  for (const line of lines) {
+    let message;
+    try { message = JSON.parse(line); } catch { continue; }
+    if (!message || message.jsonrpc !== "2.0") continue;
+    if (message.id === 1 && !message.method) {
+      if (message.error || message.result?.protocolVersion !== 1) { failRecord(record, "login_process_failed"); return; }
+      writeRpc(record, { id: 2, method: "authenticate", params: { methodId: record.worker.authMethodId || "oauth-personal" } });
+    } else if (message.id === 2 && !message.method) {
+      if (message.error) { failRecord(record, "login_process_failed"); return; }
+      record.authenticated = true;
+      record.resolveAuth?.(true);
+      record.resolveAuth = null;
+      if (record.callback && record.state === "awaiting_code" && !record.manual && !record.terminal) {
+        // Local browser: the agent's own listener received the redirect; complete without user input.
+        terminateChild(record);
+        void finalizeLogin(record);
+      }
+    } else if (message.method) {
+      if (Object.hasOwn(message, "id") && /elicitation/i.test(message.method)) record.elicitationId = message.id;
+      else if (Object.hasOwn(message, "id")) writeRpc(record, { id: message.id, error: { code: -32601, message: "Method not found" } });
+      if (!record.url) {
+        const strings = [];
+        collectStrings(message.params, strings);
+        const url = extractAuthorizationUrl(strings.join("\n"));
+        if (url) finishUrl(record, url);
+      }
+    }
+  }
+}
+
+function consumeAcpStderr(record, chunk) {
+  if (record.terminal || record.url) return;
+  record.errBuffer = ((record.errBuffer || "") + (Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || ""))).slice(-AGY_LOGIN_MAX_OUTPUT_BYTES);
+  const cut = record.errBuffer.lastIndexOf("\n");
+  if (cut === -1) return;
+  const complete = record.errBuffer.slice(0, cut);
+  record.errBuffer = record.errBuffer.slice(cut + 1);
+  const url = extractAuthorizationUrl(complete);
+  if (url) finishUrl(record, url);
 }
 
 function consumeOutput(record, chunk) {
@@ -231,8 +421,16 @@ function flushOutputBuffer(record) {
 
 function attachChild(record, child) {
   record.child = child;
-  child.stdout?.on?.("data", (chunk) => consumeOutput(record, chunk));
-  child.stderr?.on?.("data", (chunk) => consumeOutput(record, chunk));
+  if (record.worker.loginMode === "acp-authenticate") {
+    child.stdout?.on?.("data", (chunk) => consumeAcpStdout(record, chunk));
+    // Real agy prints the Google URL on stderr and calls xdg-open. Only complete lines are scanned for the
+    // official authorization URL; nothing from stderr is stored or logged otherwise.
+    child.stderr?.on?.("data", (chunk) => consumeAcpStderr(record, chunk));
+    writeRpc(record, { id: 1, method: "initialize", params: { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "zenith-router", version: pkg.version } } });
+  } else {
+    child.stdout?.on?.("data", (chunk) => consumeOutput(record, chunk));
+    child.stderr?.on?.("data", (chunk) => consumeOutput(record, chunk));
+  }
   child.stdout?.once?.("end", () => flushOutputBuffer(record));
   child.stdout?.once?.("close", () => flushOutputBuffer(record));
   child.stderr?.once?.("end", () => flushOutputBuffer(record));
@@ -245,6 +443,8 @@ function attachChild(record, child) {
     clearTimer(record.settleTimer);
     if (!record.url) flushOutputBuffer(record);
     clearTimer(record.exitTimer);
+    record.resolveAuth?.(Boolean(record.authenticated));
+    record.resolveAuth = null;
     record.resolveExit?.({ exited: true, code, signal });
     record.resolveExit = null;
     if (!record.terminal && record.state !== "submitting") failRecord(record, code === 0 ? "login_process_ended" : "login_process_failed");
@@ -301,7 +501,9 @@ async function verifyWorker(record) {
     }));
     if (initialized?.protocolVersion !== 1) return false;
     const session = await withinDeadline(client.newSession({ cwd: client.cwd, mcpServers: [] }));
-    return typeof session?.sessionId === "string" && session.sessionId.length > 0;
+    const ok = typeof session?.sessionId === "string" && session.sessionId.length > 0;
+    if (ok && record.accountId) recordAntigravityAcpAccountCatalog(record.accountId, session);
+    return ok;
   } catch {
     return false;
   } finally {
@@ -329,13 +531,28 @@ function validateCode(code) {
   return CODE_PATTERN.test(extracted);
 }
 
+/**
+ * Starts a Google login. Without `accountId` it adds a NEW account: a random id and folders are made,
+ * but the account is listed only after the login verified. With `accountId` it signs an existing account in again.
+ */
 export async function startAntigravityAcpLogin(binding, accountId) {
   if ([...attempts.values()].some((attempt) => !attempt.terminal) || starting) return genericFailure("login_busy");
   starting = true;
+  let isNewAccount = false;
   try {
+    if (accountId === undefined || accountId === null || accountId === "") {
+      const begun = await beginNewAntigravityAcpAccount();
+      if (!begun.ok) return genericFailure("login_unavailable");
+      accountId = begun.accountId;
+      isNewAccount = true;
+    }
     const worker = await selectLoginWorker(accountId);
-    if (!worker) return genericFailure("login_unavailable");
+    if (!worker) {
+      if (isNewAccount) await discardPendingAntigravityAcpAccount(accountId);
+      return genericFailure("login_unavailable");
+    }
     const record = {
+      isNewAccount,
       attemptId: randomBytes(24).toString("base64url"),
       accountId,
       releaseUse: acquireAntigravityAcpAccountUse(accountId),
@@ -364,10 +581,22 @@ export async function startAntigravityAcpLogin(binding, accountId) {
     record.urlTimer = setTimeout(() => failRecord(record, "login_url_timeout"), timing.urlWaitMs);
     let child;
     try {
-      const env = process.platform === "win32"
+      // No browser shim exists on Windows, so the agent could open a browser on the server host: fail closed.
+      if (currentPlatform() === "win32" && record.worker.loginMode === "acp-authenticate") {
+        failRecord(record, "login_unavailable");
+        return genericFailure("login_unavailable");
+      }
+      const env = currentPlatform() === "win32"
         ? { PATH: `${process.env.SystemRoot || "C:\\Windows"}\\System32;${process.env.SystemRoot || "C:\\Windows"}`, SYSTEMROOT: process.env.SystemRoot || "C:\\Windows" }
         : { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" };
       Object.assign(env, workerRuntimeEnv(record.worker));
+      if (currentPlatform() !== "win32" && record.worker.loginMode === "acp-authenticate") {
+        record.shimDir = await createBrowserShim();
+        if (!record.shimDir) { failRecord(record, "login_unavailable"); return genericFailure("login_unavailable"); }
+        env.PATH = `${record.shimDir}:${env.PATH}`;
+        env.BROWSER = path.join(record.shimDir, "xdg-open");
+        startShimWatcher(record);
+      }
       child = spawnFn(record.worker.loginLauncher, record.worker.loginLauncherArgs || [], {
         cwd: record.worker.workspace,
         env,
@@ -390,30 +619,72 @@ export async function submitAntigravityAcpLogin({ attemptId, binding, code }) {
   const record = attempts.get(attemptId);
   if (!record || record.binding !== binding || record.terminal) return genericFailure("login_attempt_invalid");
   if (record.state !== "awaiting_code") return genericFailure("login_attempt_used");
-  const extractedCode = extractCode(code);
-  if (!validateCode(extractedCode)) return genericFailure("invalid_authorization_code");
+  const acpMode = record.worker.loginMode === "acp-authenticate";
+  if (acpMode && record.callback) {
+    // Remote browser: the user pastes the full failed loopback redirect; it is replayed to the agent's own listener.
+    const target = validatePastedCallback(code, record.callback);
+    if (!target) return genericFailure("invalid_authorization_code");
+    record.state = "submitting";
+    record.manual = true;
+    const delivered = await replayCallback(target, timing.callbackMs);
+    if (record.terminal) return genericFailure(record.errorCode || "login_cancelled");
+    if (!delivered) {
+      // The listener may be gone or the state rejected; the attempt stays usable until it expires.
+      record.state = "awaiting_code";
+      record.manual = false;
+      return genericFailure("login_callback_failed");
+    }
+    return finishAcp(record);
+  }
+  const extractedCode = acpMode ? "" : extractCode(code);
+  if (!acpMode && !validateCode(extractedCode)) return genericFailure("invalid_authorization_code");
   record.state = "submitting";
-  let rawCode = extractedCode;
+  record.manual = true;
+  if (acpMode) {
+    // Elicitation fallback: the agent completes the redirect itself; the submitted value is only a confirmation.
+    if (record.elicitationId !== undefined) writeRpc(record, { id: record.elicitationId, result: { action: "accept" } });
+    return finishAcp(record);
+  }
   try {
     if (!record.child?.stdin || typeof record.child.stdin.write !== "function") {
       failRecord(record, "login_process_failed");
       return genericFailure("login_process_failed");
     }
-    record.child.stdin.write(`${rawCode}\n`);
-    rawCode = "";
+    record.child.stdin.write(`${extractedCode}\n`);
     record.child.stdin.end?.();
   } catch {
-    rawCode = "";
     failRecord(record, "login_process_failed");
     return genericFailure("login_process_failed");
   }
   const exit = await waitForExit(record, timing.exitWaitMs);
-  rawCode = "";
   if (!exit.exited || exit.code !== 0) {
     if (!record.terminal) failRecord(record, "login_process_failed");
     return genericFailure(record.errorCode || "login_process_failed");
   }
-  if (record.terminal) return genericFailure(record.errorCode || "login_process_failed");
+  return finalizeLogin(record);
+}
+
+/** Waits for the agent's authenticate response, then verifies and registers. */
+async function finishAcp(record) {
+  const done = record.authenticated || await new Promise((resolve) => {
+    record.resolveAuth = resolve;
+    record.exitTimer = setTimeout(() => { record.resolveAuth = null; resolve(false); }, timing.exitWaitMs);
+    record.exitTimer.unref?.();
+  });
+  clearTimer(record.exitTimer);
+  if (record.terminal) return genericFailure(record.errorCode || "login_cancelled");
+  terminateChild(record);
+  if (!done) { failRecord(record, "login_process_timeout"); return genericFailure("login_process_timeout"); }
+  return finalizeLogin(record);
+}
+
+function finalizeLogin(record) {
+  if (!record.finalizing) record.finalizing = runFinalize(record);
+  return record.finalizing;
+}
+
+async function runFinalize(record) {
+  record.state = "submitting";
   const verified = await verifyWorker(record);
   if (record.terminal) return genericFailure(record.errorCode || "login_cancelled");
   if (!verified) {
@@ -436,7 +707,7 @@ export async function submitAntigravityAcpLogin({ attemptId, binding, code }) {
   record.errorCode = null;
   clearTimer(record.ttlTimer);
   forgetLater(record);
-  return { ok: true, status: "ready" };
+  return { ok: true, status: "ready", added: record.isNewAccount === true };
 }
 
 export function getAntigravityAcpLoginStatus({ attemptId, binding }) {
@@ -454,7 +725,8 @@ export function cancelAntigravityAcpLogin({ attemptId, binding }) {
   return { ok: true, status: "cancelled" };
 }
 
-export function setAntigravityAcpLoginDependenciesForTests({ spawn, createClient, timings } = {}) {
+export function setAntigravityAcpLoginDependenciesForTests({ spawn, createClient, timings, platform } = {}) {
+  if (typeof platform === "string") platformOverride = platform;
   if (typeof spawn === "function") spawnFn = spawn;
   if (typeof createClient === "function") clientFactory = createClient;
   if (timings && typeof timings === "object") timing = {
@@ -463,6 +735,7 @@ export function setAntigravityAcpLoginDependenciesForTests({ spawn, createClient
     ttlMs: Number.isFinite(timings.ttlMs) ? timings.ttlMs : timing.ttlMs,
     exitWaitMs: Number.isFinite(timings.exitWaitMs) ? timings.exitWaitMs : timing.exitWaitMs,
     verifyWaitMs: Number.isFinite(timings.verifyWaitMs) ? timings.verifyWaitMs : timing.verifyWaitMs,
+    callbackMs: Number.isFinite(timings.callbackMs) ? timings.callbackMs : timing.callbackMs,
   };
 }
 
@@ -478,6 +751,7 @@ export function resetAntigravityAcpLoginForTests() {
   attempts.clear();
   starting = false;
   spawnFn = defaultSpawn;
+  platformOverride = null;
   clientFactory = (workerId, options) => createAntigravityAcpClient(workerId, createAntigravityAcpTransport, options);
   timing = {
     urlWaitMs: AGY_LOGIN_URL_WAIT_MS,
@@ -485,6 +759,7 @@ export function resetAntigravityAcpLoginForTests() {
     ttlMs: AGY_LOGIN_TTL_MS,
     exitWaitMs: AGY_LOGIN_EXIT_WAIT_MS,
     verifyWaitMs: AGY_LOGIN_VERIFY_WAIT_MS,
+    callbackMs: AGY_CALLBACK_TIMEOUT_MS,
   };
 }
 

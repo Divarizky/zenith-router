@@ -4,9 +4,10 @@ import pkg from "../../package.json" with { type: "json" };
 import { createAntigravityAcpClient } from "../services/antigravityAcp/client.js";
 import { createAntigravityAcpTransport } from "../services/antigravityAcp/transport.js";
 import { parseAntigravityQuotaMessage } from "../services/antigravityAcp/quota.js";
+import { parseSessionModelCatalog, recordAntigravityAcpAccountCatalog } from "../services/antigravityAcp/catalog.js";
 import { registerExecutor } from "./base.js";
 import {
-  snapshotAntigravityAcpCandidates,
+  snapshotAntigravityAcpCandidatesForModel,
   isAntigravityAcpBindingCurrent,
   setAntigravityAcpProfileStatus,
   isAntigravityAcpEnabled,
@@ -206,8 +207,11 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
 
   const promptText = requestText(body);
   if (!promptText) return openAiError("ACP accepts only model plus plain-text messages; tools and generation options are unsupported", "invalid_request_error", "acp_unsupported_request", 400);
-  const candidates = snapshotAntigravityAcpCandidates();
-  if (!candidates.length) return openAiError("No Antigravity ACP worker is configured", "configuration_error", "acp_unavailable", 503);
+  const requestedModel = String(body.model || "").replace(/^(?:antigravity-acp|agy-acp)\//i, "");
+  if (!requestedModel) return openAiError("ACP requires a model", "invalid_request_error", "model_not_found", 404);
+  const candidates = snapshotAntigravityAcpCandidatesForModel(requestedModel);
+  let modelMissing = false;
+  if (!candidates.length) return openAiError("No Antigravity ACP worker is configured or none supports the requested model", "configuration_error", "acp_unavailable", 503);
 
   let ready = null;
   for (const { profile, binding } of candidates) {
@@ -243,6 +247,30 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
         setStatus("unavailable");
         return openAiError("ACP worker returned an invalid session", "upstream_error", "acp_protocol_error", 502);
       }
+      // Refresh this account's catalog from the live session, then require the requested model. No silent default.
+      const catalog = recordAntigravityAcpAccountCatalog(profile.id, session) || parseSessionModelCatalog(session);
+      if (!catalog || (catalog.method !== "config_option" && !catalog.models.length)) {
+        setStatus("ready");
+        return openAiError("ACP worker did not report a model catalog; the requested model cannot be selected", "upstream_error", "acp_model_catalog_unavailable", 502);
+      }
+      if (!catalog.models.some((m) => m.id === requestedModel)) {
+        modelMissing = true;
+        setStatus("ready");
+        continue;
+      }
+      const selected = catalog.method === "config_option"
+        ? (typeof client.setConfigOption === "function" ? client.setConfigOption({ sessionId: session.sessionId, configId: catalog.configId, value: requestedModel }) : null)
+        : (typeof client.setModel === "function" ? client.setModel({ sessionId: session.sessionId, modelId: requestedModel }) : null);
+      if (!selected) throw Object.assign(new Error("model selection unsupported"), { code: "ACP_MODEL_SELECT_UNSUPPORTED" });
+      const selectResult = await selected;
+      if (catalog.method === "config_option" && Array.isArray(selectResult?.configOptions)) {
+        const opt = selectResult.configOptions.find((o) => o?.id === catalog.configId);
+        if (opt && opt.currentValue !== undefined && opt.currentValue !== requestedModel) {
+          throw Object.assign(new Error("model selection not applied"), { code: "ACP_MODEL_SELECT_REJECTED" });
+        }
+      }
+      if (signal?.aborted) return openAiError("Request cancelled", "client_closed", "client_closed_request", 499);
+      if (!isAntigravityAcpBindingCurrent(binding)) continue;
       setStatus("ready");
       ready = { client, sessionId: session.sessionId, accountId: profile.id, release: acquireAntigravityAcpAccountUse(profile.id) };
       keepClient = true;
@@ -263,6 +291,7 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
       }
     }
   }
+  if (!ready && modelMissing) return openAiError(`Model '${requestedModel}' is not available on any ACP account`, "invalid_request_error", "model_not_found", 404);
   if (!ready) return openAiError("No configured Antigravity ACP worker is currently available", "upstream_error", "acp_workers_unavailable", 503);
   if (signal?.aborted) {
     try { await ready.client.close?.(); } catch {}

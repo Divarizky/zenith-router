@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, chmod, writeFile, rm, realpath, stat } from "node:fs/pr
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import { runInNewContext } from "node:vm";
+import { renderAgyAccountsCard } from "../src/ui/pages/agyLogin.js";
 import { PassThrough, Writable } from "node:stream";
 import pkg from "../package.json" with { type: "json" };
 import { initDb } from "../src/db/index.js";
@@ -27,8 +29,37 @@ import { executeAntigravityAcp, setAntigravityAcpTransportFactory } from "../src
 import { AntigravityAcpTransport } from "../src/services/antigravityAcp/transport.js";
 import { handleChat } from "../src/gateway/chat.js";
 import { renderProviderDetailPage, handleSaveAntigravityAcp } from "../src/ui/pages/providers.js";
-import { getAntigravityAcpWorker, getAntigravityAcpWorkers, setAntigravityAcpWorkerConfigPathForTests, setAntigravityAcpWorkerLoaderForTests, setAntigravityAcpAutoDiscoveryForTests, setAntigravityAcpProvisionRootForTests } from "../src/services/antigravityAcp/workers.js";
+import { getAntigravityAcpWorker, getAntigravityAcpWorkers, workerRuntimeEnv, setAntigravityAcpWorkerLoaderForTests, setAntigravityAcpAutoDiscoveryForTests, setAntigravityAcpProvisionRootForTests } from "../src/services/antigravityAcp/workers.js";
 import { createAntigravityAcpClient } from "../src/services/antigravityAcp/client.js";
+
+test("rendered ACP login script starts a new account when clicked", async () => {
+  const html = renderAgyAccountsCard({ accounts: [] });
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  const calls = [];
+  const box = { hidden: true, innerHTML: "", children: [], appendChild(n) { this.children.push(n); } };
+  const elements = { "agy-acp-login": box, "agy-acp-submit": {}, "agy-acp-cancel": {} };
+  const popup = { closed: false, close() {} };
+  const window = { open: () => popup };
+  runInNewContext(script, {
+    window,
+    document: { getElementById: (id) => elements[id], createElement: () => ({}) },
+    setInterval: () => 0, clearInterval() {}, location: { assign() {}, pathname: "/" },
+    fetch: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return { json: async () => ({ attemptId: "attempt", authorizationUrl: "https://accounts.google.com/o/oauth2/auth?state=test" }) };
+    },
+    URL, URLSearchParams,
+    alert: () => { throw new Error("unexpected login error"); },
+  });
+  window.zrAgyAcpLogin("", { dataset: { placeholder: "code", submit: "submit" } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, [{ url: "/dashboard/providers/antigravity-acp/login/start", body: {} }]);
+  assert.equal(box.hidden, false);
+  assert.equal(popup.location, "https://accounts.google.com/o/oauth2/auth?state=test");
+  // DOM is built with textContent/properties, never innerHTML with server data.
+  assert.equal(box.children.find((n) => n.href)?.href, "https://accounts.google.com/o/oauth2/auth?state=test");
+});
 
 async function reset(profiles = []) {
   initDb(":memory:");
@@ -67,7 +98,8 @@ function protocolFixture({ authAt = null } = {}) {
       let response;
       if (message.method === authAt) response = { jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "private fixture detail" } };
       else if (message.method === "initialize") response = { jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1 } };
-      else if (message.method === "session/new") response = { jsonrpc: "2.0", id: message.id, result: { sessionId: "fixture-session" } };
+      else if (message.method === "session/new") response = { jsonrpc: "2.0", id: message.id, result: { sessionId: "fixture-session", configOptions: [{ id: "model", category: "model", type: "select", options: [{ value: "gemini-3.8-flash", name: "Flash" }] }] } };
+      else if (message.method === "session/set_config_option") response = { jsonrpc: "2.0", id: message.id, result: {} };
       else if (message.method === "session/prompt") {
         child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "agent_message_chunk", messageId: "fixture-message", content: { type: "text", text: "fixture answer" } } } })}\n`);
         response = authAt === "prompt-error" ? { jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "private fixture detail" } } : { jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } };
@@ -80,13 +112,15 @@ function protocolFixture({ authAt = null } = {}) {
   return child;
 }
 
-function fakeClient({ initialize = async () => ({ protocolVersion: 1 }), session = async () => ({ sessionId: "session-1" }), prompt = async () => ({ stopReason: "end_turn" }), cancel = async () => {}, update = null } = {}) {
+function fakeClient({ initialize = async () => ({ protocolVersion: 1 }), session = async () => ({ sessionId: "session-1", configOptions: [{ id: "model", category: "model", type: "select", options: [{ value: "gemini-3.8-flash", name: "Flash" }] }] }), prompt = async () => ({ stopReason: "end_turn" }), cancel = async () => {}, update = null } = {}) {
   const calls = [];
   let updateListener = null;
   const client = {
     cwd: "/srv/zenith/workers/agy-account-1",
     initialize: async (params) => { calls.push(["initialize", params]); return initialize(params); },
     newSession: async (params) => { calls.push(["newSession", params]); return session(params); },
+    setConfigOption: async (params) => { calls.push(["setConfigOption", params]); return {}; },
+    setModel: async (params) => { calls.push(["setModel", params]); return {}; },
     prompt: async (params) => { calls.push(["prompt", params]); (updateListener || update)?.({ sessionId: "session-1", update: { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "answer" } } }); return prompt(params); },
     cancel: async (params) => { calls.push(["cancel", params]); return cancel(params); },
     onUpdate: (callback) => { updateListener = callback; return () => { updateListener = null; }; },
@@ -95,51 +129,10 @@ function fakeClient({ initialize = async () => ({ protocolVersion: 1 }), session
   return { client, calls };
 }
 
-test("deployment worker map accepts only canonical isolated launchers and rejects duplicates", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-workers-"));
-  const configPath = path.join(dir, "workers.json");
-  setAntigravityAcpWorkerLoaderForTests(null);
-  const launcher = path.join(dir, "launch-a");
-  const workspace = path.join(dir, "workspace-a");
-  await writeFile(launcher, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
-  await mkdir(workspace);
-  await chmod(workspace, 0o700);
-  await chmod(launcher, 0o700);
-  const valid = [{ workerId: "agy-worker-a", namespace: "agy-worker-a", launcher, workspace }];
-  try {
-    setAntigravityAcpWorkerConfigPathForTests(configPath);
-    await writeFile(configPath, JSON.stringify(valid), { mode: 0o600 });
-    assert.equal((await getAntigravityAcpWorkers()).length, 1);
-    assert.equal((await getAntigravityAcpWorker("agy-worker-a")).workspace, await realpath(workspace));
-    assert.equal(await getAntigravityAcpWorker("unknown"), null);
-
-    for (const [target, mode] of [[launcher, 0o770], [launcher, 0o707], [workspace, 0o770], [workspace, 0o707]]) {
-      const original = 0o700;
-      await chmod(target, mode);
-      assert.deepEqual(await getAntigravityAcpWorkers(), [], `${target === launcher ? "launcher" : "workspace"} mode ${mode.toString(8)} must fail closed`);
-      await chmod(target, original);
-    }
-    assert.equal((await getAntigravityAcpWorkers()).length, 1);
-
-    setAntigravityAcpWorkerConfigPathForTests(configPath);
-    await writeFile(configPath, JSON.stringify([
-      ...valid,
-      { workerId: "agy-worker-b", namespace: "agy-worker-b", launcher: path.join(dir, "alias", "..", "launch-a"), workspace: path.join(dir, "workspace-b") },
-    ]), { mode: 0o600 });
-    await mkdir(path.join(dir, "workspace-b"));
-    assert.deepEqual(await getAntigravityAcpWorkers(), []);
-  } finally {
-    setAntigravityAcpWorkerConfigPathForTests(null);
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("missing worker map derives one isolated worker per account and rejects unsafe binaries", async () => {
+test("one isolated worker is derived per account and unsafe binaries are rejected", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-autodiscovery-"));
-  const configPath = path.join(dir, "missing.json");
-  const binary = path.join(dir, "agy");
+  const binary = path.join(dir, "agy_acp_server");
   setAntigravityAcpWorkerLoaderForTests(null);
-  setAntigravityAcpWorkerConfigPathForTests(configPath);
   try {
     await writeFile(binary, "#!/bin/sh\\nexit 0\\n", { mode: 0o700 });
     await chmod(binary, 0o700);
@@ -152,43 +145,63 @@ test("missing worker map derives one isolated worker per account and rejects uns
     const [worker] = await getAntigravityAcpWorkers();
     assert.equal(worker.workerId, `agy-worker-${added.account.id}`);
     assert.equal(worker.launcher, await realpath(binary));
-    assert.deepEqual(worker.launcherArgs, ["acp", "--stdio"]);
-    assert.deepEqual(worker.loginLauncherArgs, ["acp", "--login"]);
+    assert.deepEqual(worker.launcherArgs, []);
+    assert.deepEqual(worker.loginLauncherArgs, []); assert.equal(worker.loginMode, "acp-authenticate"); assert.equal(worker.authMethodId, "oauth-personal");
     assert.equal(worker.isolatedHome, path.join(provisionRoot, added.account.id, "home"));
     for (const dirPath of [worker.workspace, worker.isolatedHome]) {
       const info = await import("node:fs/promises").then(({ stat }) => stat(dirPath));
       assert.equal(info.mode & 0o777, 0o700);
     }
     assert.equal(worker.appData, path.join(provisionRoot, added.account.id, "appdata"));
+    // Other-writable is never trusted.
+    await chmod(binary, 0o707);
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    await chmod(binary, 0o702);
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    // Group-writable by this user's own primary group is the Linux default (umask 002) and is accepted.
     await chmod(binary, 0o775);
-    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    assert.equal((await getAntigravityAcpWorkers()).length, 1, "own-group writable binary is accepted");
     await chmod(binary, 0o700);
-    setAntigravityAcpAutoDiscoveryForTests([binary]);
-    await writeFile(configPath, "{ invalid", { mode: 0o600 });
-    assert.deepEqual(await getAntigravityAcpWorkers(), []);
-    await writeFile(configPath, JSON.stringify([{
-      workerId: "agy-explicit-test", namespace: "agy-explicit-test", launcher: binary, workspace: worker.workspace,
-    }]), { mode: 0o600 });
-    assert.equal((await getAntigravityAcpWorkers()).length, 1, "valid worker config must load when mode is 0600");
-    await chmod(configPath, 0o666);
-    assert.deepEqual(await getAntigravityAcpWorkers(), [], "valid worker config must fail closed when group/other writable");
     assert.equal((await realpath(binary)), binary);
   } finally {
     setAntigravityAcpAutoDiscoveryForTests(null);
     setAntigravityAcpProvisionRootForTests(null);
-    setAntigravityAcpWorkerConfigPathForTests(null);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a group-writable agy binary owned by a foreign group is rejected", async () => {
+  const { stat, chown } = await import("node:fs/promises");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-foreigngroup-"));
+  const binary = path.join(dir, "agy_acp_server");
+  setAntigravityAcpWorkerLoaderForTests(null);
+  try {
+    await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o770 });
+    await chmod(binary, 0o770);
+    // A supplementary group of the current user that is not its primary group, when one exists.
+    const primary = process.getgid();
+    const foreign = (process.getgroups?.() || []).find((g) => g !== primary);
+    if (foreign === undefined) return; // no second group available on this host; nothing to prove
+    await chown(binary, process.getuid(), foreign);
+    assert.equal((await stat(binary)).gid, foreign);
+    setAntigravityAcpProvisionRootForTests(path.join(dir, "root"));
+    setAntigravityAcpAutoDiscoveryForTests([binary]);
+    initDb(":memory:");
+    await setAntigravityAcpProfiles([{ id: ID1, name: "one", enabled: true }]);
+    assert.deepEqual(await getAntigravityAcpWorkers(), [], "foreign-group writable binary must fail closed");
+  } finally {
+    setAntigravityAcpAutoDiscoveryForTests(null);
+    setAntigravityAcpProvisionRootForTests(null);
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("auto-provisioning rejects symlinked provision roots without modifying their targets", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-symlink-"));
-  const configPath = path.join(dir, "missing.json");
-  const binary = path.join(dir, "agy");
+  const binary = path.join(dir, "agy_acp_server");
   const victim = path.join(dir, "victim");
   const provisionRoot = path.join(dir, "provision-root");
   setAntigravityAcpWorkerLoaderForTests(null);
-  setAntigravityAcpWorkerConfigPathForTests(configPath);
   try {
     await writeFile(binary, "#!/bin/sh\\nexit 0\\n", { mode: 0o700 });
     await chmod(binary, 0o700);
@@ -205,7 +218,6 @@ test("auto-provisioning rejects symlinked provision roots without modifying thei
   } finally {
     setAntigravityAcpAutoDiscoveryForTests(null);
     setAntigravityAcpProvisionRootForTests(null);
-    setAntigravityAcpWorkerConfigPathForTests(null);
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -228,7 +240,7 @@ test("ACP worker client uses only allowlisted launch data and ACP v1 methods", a
     return transport;
   });
   assert.deepEqual(calls[0], ["spawn", {
-    command: "/test/agy-1", args: ["acp", "--stdio"], cwd: "/test/worker-1", env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: "/test/isolated-home", GEMINI_HOME: "/test/isolated-home/.gemini", AGY_ACP_FORCE_FILE_STORAGE: "1" },
+    command: "/test/agy-1", args: ["acp", "--stdio"], cwd: "/test/worker-1", env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: "/test/isolated-home", GEMINI_HOME: "/test/isolated-home/.gemini", AGY_ACP_FORCE_FILE_STORAGE: "1", ...(process.platform === "linux" ? { DBUS_SESSION_BUS_ADDRESS: "disabled:", XDG_RUNTIME_DIR: "/test/isolated-home/run" } : {}) },
   }]);
   assert.equal(calls[0][1].env.HOME, "/test/isolated-home");
   assert.equal("token" in calls[0][1].env, false);
@@ -275,7 +287,9 @@ test("ACP dashboard handler only toggles enablement and renders the account list
   assert.deepEqual(getAntigravityAcpProfiles(), [TWO_PROFILES[0]]);
   const html = renderProviderDetailPage(3000, "antigravity-acp");
   assert.match(html, /primary/);
-  assert.match(html, /accounts\/add/);
+  assert.match(html, /accounts\/rename/);
+  assert.match(html, /zrAgyAcpLogin\('', this\)/);
+  assert.doesNotMatch(html, /accounts\/add|name="name" maxlength="40" required autocomplete="off" placeholder/);
   assert.doesNotMatch(html, /name="launcher"|name="cwd"|name="env"/);
 });
 
@@ -293,7 +307,7 @@ test("two configured ACP profiles have separate safe statuses", async () => {
   await reset(TWO_PROFILES);
   assert.equal(isAntigravityAcpEnabled(), true);
   assert.equal(getAntigravityAcpProfiles().length, 2);
-  assert.equal(getProviderModels(getProvider("antigravity-acp")).length, 1);
+  assert.equal(getProviderModels(getProvider("antigravity-acp")).length, 0); // no model is listed before discovery
   assert.equal(resolveModel("antigravity-acp/gemini-3.8-flash")?.provider.id, "antigravity-acp");
   assert.equal(setAntigravityAcpProfileStatus(ID1, "ready"), true);
   assert.equal(setAntigravityAcpProfileStatus(ID2, "needs_login"), true);
@@ -318,21 +332,19 @@ test("ACP account list rejects duplicate IDs/names, non-hex IDs, unknown fields 
 
 async function derivedEnv(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-accounts-"));
-  const binary = path.join(dir, "agy");
+  const binary = path.join(dir, "agy_acp_server");
   await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   await chmod(binary, 0o700);
   initDb(":memory:");
   resetAntigravityAcpRuntimeStateForTests();
   setAntigravityAcpClockForTests(null);
   setAntigravityAcpWorkerLoaderForTests(null);
-  setAntigravityAcpWorkerConfigPathForTests(path.join(dir, "missing.json"));
   setAntigravityAcpAutoDiscoveryForTests([binary]);
   const root = path.join(dir, "acp");
   setAntigravityAcpProvisionRootForTests(root);
   try { await fn({ dir, root }); } finally {
     setAntigravityAcpAutoDiscoveryForTests(null);
     setAntigravityAcpProvisionRootForTests(null);
-    setAntigravityAcpWorkerConfigPathForTests(null);
     setAntigravityAcpClockForTests(null);
     await rm(dir, { recursive: true, force: true });
   }
@@ -486,9 +498,10 @@ test("ACP requests negotiate exactly v1 and return assistant output from session
   assert.equal(data.choices[0].message.content, "answer");
   assert.match(data.id, /^chatcmpl-acp-[\da-f-]{36}$/);
   assert.doesNotMatch(data.id, /session-1/);
-  assert.deepEqual(calls.slice(0, 3), [
+  assert.deepEqual(calls.slice(0, 4), [
     ["initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "zenith-router", version: pkg.version } }],
     ["newSession", { cwd: "/srv/zenith/workers/agy-account-1", mcpServers: [] }],
+    ["setConfigOption", { sessionId: "session-1", configId: "model", value: "gemini-3.8-flash" }],
     ["prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "user: hello" }] }],
   ]);
 });
@@ -734,4 +747,186 @@ test("prompt failure is ambiguous and never replays to another worker", async ()
   assert.match(text, /acp_outcome_unknown/);
   assert.doesNotMatch(text, /private account message/);
   assert.equal(calls.some(([name]) => name === "cancel"), false);
+});
+
+test("model catalog: configOptions has priority, legacy is fallback, nothing invented", async () => {
+  const { parseSessionModelCatalog } = await import("../src/services/antigravityAcp/catalog.js");
+  const both = parseSessionModelCatalog({
+    configOptions: [{ id: "m", category: "model", type: "select", options: [{ value: "a", name: "A" }, { group: "g", options: [{ value: "b", name: "B" }] }] }],
+    models: { availableModels: [{ modelId: "legacy" }] },
+  });
+  assert.equal(both.method, "config_option");
+  assert.deepEqual(both.models.map((m) => m.id), ["a", "b"]);
+  const legacy = parseSessionModelCatalog({ models: { availableModels: [{ modelId: "x", name: "X" }, { modelId: "x" }] } });
+  assert.deepEqual(legacy, { method: "legacy", configId: null, models: [{ id: "x", name: "X" }] });
+  assert.equal(parseSessionModelCatalog({ configOptions: [{ category: "mode", type: "select", id: "q", options: [] }] }), null);
+  assert.equal(parseSessionModelCatalog({}), null);
+});
+
+test("requested model is selected via set_config_option before prompt; legacy uses set_model", async () => {
+  await reset(TWO_PROFILES);
+  const { client, calls } = fakeClient();
+  const res = await executeAntigravityAcp({ body: BODY, createClient: async () => client });
+  assert.equal(res.status, 200);
+  const names = calls.map((c) => c[0]);
+  assert.ok(names.indexOf("setConfigOption") > names.indexOf("newSession") && names.indexOf("setConfigOption") < names.indexOf("prompt"));
+  assert.deepEqual(calls.find((c) => c[0] === "setConfigOption")[1], { sessionId: "session-1", configId: "model", value: "gemini-3.8-flash" });
+
+  await reset(TWO_PROFILES);
+  const legacy = fakeClient({ session: async () => ({ sessionId: "session-1", models: { availableModels: [{ modelId: "gemini-3.8-flash" }] } }) });
+  assert.equal((await executeAntigravityAcp({ body: BODY, createClient: async () => legacy.client })).status, 200);
+  const l = legacy.calls.map((c) => c[0]);
+  assert.ok(l.includes("setModel") && l.indexOf("setModel") < l.indexOf("prompt"));
+});
+
+test("unsupported model or missing catalog never prompts; model is routed to the account that has it", async () => {
+  await reset(TWO_PROFILES);
+  const none = fakeClient();
+  const res = await executeAntigravityAcp({ body: { ...BODY, model: "agy-acp/unknown" }, createClient: async () => none.client });
+  assert.equal(res.status, 404);
+  assert.ok(!none.calls.some((c) => c[0] === "prompt"));
+
+  await reset(TWO_PROFILES);
+  const bare = fakeClient({ session: async () => ({ sessionId: "session-1" }) });
+  const r2 = await executeAntigravityAcp({ body: BODY, createClient: async () => bare.client });
+  assert.equal(r2.status, 502);
+  assert.ok(!bare.calls.some((c) => c[0] === "prompt" || c[0] === "setModel" || c[0] === "setConfigOption"));
+
+  await reset(TWO_PROFILES);
+  const first = fakeClient({ session: async () => ({ sessionId: "session-1", models: { availableModels: [{ modelId: "other" }] } }) });
+  const second = fakeClient();
+  const clients = { [W1]: first.client, [W2]: second.client };
+  const r3 = await executeAntigravityAcp({ body: BODY, createClient: async (workerId) => clients[workerId] });
+  assert.equal(r3.status, 200);
+  assert.ok(!first.calls.some((c) => c[0] === "prompt"));
+  assert.ok(second.calls.some((c) => c[0] === "prompt"));
+});
+
+test("catalog is merged into models, ignores logged-out accounts, and is invalidated on removal", async () => {
+  const { recordAntigravityAcpAccountCatalog, getAntigravityAcpAccountCatalog, resetAntigravityAcpCatalogForTests } = await import("../src/services/antigravityAcp/catalog.js");
+  const { listAntigravityAcpModels } = await import("../src/services/antigravityAcp/profiles.js");
+  const { getProvider, getProviderModels } = await import("../src/providers/index.js");
+  await reset(TWO_PROFILES);
+  resetAntigravityAcpCatalogForTests();
+  recordAntigravityAcpAccountCatalog(ID1, { models: { availableModels: [{ modelId: "m1" }, { modelId: "shared" }] } });
+  recordAntigravityAcpAccountCatalog(ID2, { models: { availableModels: [{ modelId: "shared" }, { modelId: "m2" }] } });
+  const root = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-cat-"));
+  setAntigravityAcpProvisionRootForTests(root);
+  setAntigravityAcpWorkerLoaderForTests(null); // derived mode, no token files: logged out
+  assert.deepEqual(listAntigravityAcpModels(), []);
+  setAntigravityAcpProvisionRootForTests(null);
+  await rm(root, { recursive: true, force: true });
+  resetAntigravityAcpCatalogForTests(); // restart: reloaded from the store
+  assert.ok(getAntigravityAcpAccountCatalog(ID1));
+  setAntigravityAcpWorkerLoaderForTests(async () => []);
+  assert.deepEqual(listAntigravityAcpModels().map((m) => m.id), ["m1", "shared", "m2"]);
+  assert.deepEqual(getProviderModels(getProvider("antigravity-acp")).map((m) => m.id), ["m1", "shared", "m2"]);
+  await setAntigravityAcpProfiles([TWO_PROFILES[1]]);
+  assert.equal(getAntigravityAcpAccountCatalog(ID1), null);
+  assert.deepEqual(listAntigravityAcpModels().map((m) => m.id), ["shared", "m2"]);
+});
+
+test("ACP stays in the oauth dashboard group without becoming OAuth or leaving noAuth/free", async () => {
+  const { getProvider } = await import("../src/providers/index.js");
+  const p = getProvider("antigravity-acp");
+  assert.equal(p.noAuth, true);
+  assert.equal(p.category, "free");
+  await reset();
+  const { renderProvidersPage } = await import("../src/ui/pages/providers.js");
+  const html = renderProvidersPage(20120, {});
+  const oauthAt = html.indexOf("OAuth Providers");
+  const freeAt = html.indexOf("Free Tier Providers");
+  const acpAt = html.indexOf("antigravity-acp");
+  assert.ok(oauthAt >= 0 && acpAt > oauthAt && (freeAt < 0 || acpAt < freeAt || freeAt < oauthAt));
+  const { getOAuthFlow } = await import("../src/services/oauth/providers.js");
+  assert.equal(getOAuthFlow("antigravity-acp"), null);
+});
+
+test("catalog: empty model select is authoritative and clears stale catalog", async () => {
+  const { parseSessionModelCatalog, recordAntigravityAcpAccountCatalog, getAntigravityAcpAccountCatalog, resetAntigravityAcpCatalogForTests } = await import("../src/services/antigravityAcp/catalog.js");
+  await reset(TWO_PROFILES);
+  resetAntigravityAcpCatalogForTests();
+  const empty = parseSessionModelCatalog({ configOptions: [{ id: "m", category: "model", type: "select", options: [] }], models: { availableModels: [{ modelId: "legacy" }] } });
+  assert.deepEqual(empty, { method: "config_option", configId: "m", models: [] });
+  recordAntigravityAcpAccountCatalog(ID1, { models: { availableModels: [{ modelId: "old" }] } });
+  assert.ok(getAntigravityAcpAccountCatalog(ID1));
+  recordAntigravityAcpAccountCatalog(ID1, {}); // unrecognised: stale must go
+  assert.equal(getAntigravityAcpAccountCatalog(ID1), null);
+  recordAntigravityAcpAccountCatalog(ID1, { models: { availableModels: [{ modelId: "old" }] } });
+  recordAntigravityAcpAccountCatalog(ID1, { configOptions: [{ id: "m", category: "model", type: "select", options: [] }] });
+  assert.deepEqual(getAntigravityAcpAccountCatalog(ID1)?.models, []);
+});
+
+test("catalog cache follows underlying store changes", async () => {
+  const { recordAntigravityAcpAccountCatalog, getAntigravityAcpAccountCatalog } = await import("../src/services/antigravityAcp/catalog.js");
+  await reset(TWO_PROFILES);
+  recordAntigravityAcpAccountCatalog(ID1, { models: { availableModels: [{ modelId: "m1" }] } });
+  const { setSetting } = await import("../src/services/settings.js");
+  setSetting("antigravity_acp_model_catalog", "{}");
+  assert.equal(getAntigravityAcpAccountCatalog(ID1), null);
+});
+
+const sel = (values, id = "model") => ({ sessionId: "session-1", configOptions: [{ id, category: "model", type: "select", options: values.map((value) => ({ value, name: value })) }] });
+const promptsOf = (c) => c.calls.filter((x) => x[0] === "prompt");
+
+test("selection isolation: stale/unknown catalogs per account never prompt the wrong account", async () => {
+  await reset(TWO_PROFILES);
+  // Account 1 has only other-model (stale for our request), account 2 has the model but under another configId.
+  const a = fakeClient({ session: async () => sel(["other-model"], "cfg-a") });
+  const b = fakeClient({ session: async () => sel(["gemini-3.8-flash"], "cfg-b") });
+  const clients = { [W1]: a.client, [W2]: b.client };
+  const res = await executeAntigravityAcp({ body: BODY, createClient: async (id) => clients[id] });
+  assert.equal(res.status, 200);
+  assert.equal(promptsOf(a).length, 0);
+  assert.ok(!a.calls.some((c) => c[0] === "setConfigOption"));
+  assert.deepEqual(b.calls.find((c) => c[0] === "setConfigOption")[1], { sessionId: "session-1", configId: "cfg-b", value: "gemini-3.8-flash" });
+  assert.equal(promptsOf(b).length, 1);
+
+  // Account 1 now has a known (other) catalog, so it is skipped before any worker is started; unknown account 2 is still tried.
+  const started = [];
+  const b2 = fakeClient({ session: async () => sel(["gemini-3.8-flash"], "cfg-b") });
+  const res2 = await executeAntigravityAcp({ body: BODY, createClient: async (id) => { started.push(id); return id === W2 ? b2.client : null; } });
+  assert.equal(res2.status, 200);
+  assert.deepEqual(started, [W2]);
+});
+
+test("selection isolation: empty model select is 404 with no select or prompt on any account", async () => {
+  await reset(TWO_PROFILES);
+  const a = fakeClient({ session: async () => sel([]) });
+  const b = fakeClient({ session: async () => sel([]) });
+  const clients = { [W1]: a.client, [W2]: b.client };
+  const res = await executeAntigravityAcp({ body: BODY, createClient: async (id) => clients[id] });
+  assert.equal(res.status, 404);
+  for (const c of [a, b]) assert.ok(!c.calls.some((x) => ["prompt", "setConfigOption", "setModel"].includes(x[0])));
+});
+
+test("selection isolation: rejected or mismatched set_config_option never prompts and is not replayed", async () => {
+  const cases = {
+    rejected: async () => { throw Object.assign(new Error("nope"), { code: -32602 }); },
+    mismatch: async () => ({ configOptions: [{ id: "model", currentValue: "other-model" }] }),
+  };
+  for (const [name, set] of Object.entries(cases)) {
+    await reset(TWO_PROFILES);
+    const a = fakeClient({ session: async () => sel(["gemini-3.8-flash"]) });
+    a.client.setConfigOption = async (p) => { a.calls.push(["setConfigOption", p]); return set(); };
+    const b = fakeClient({ session: async () => sel(["gemini-3.8-flash"]) });
+    const clients = { [W1]: a.client, [W2]: b.client };
+    const res = await executeAntigravityAcp({ body: BODY, createClient: async (id) => clients[id] });
+    assert.equal(promptsOf(a).length, 0, name);
+    assert.ok(promptsOf(b).length <= 1, name);
+    if (res.status !== 200) assert.equal(promptsOf(b).length, 0, name);
+    assert.ok(a.calls.some((x) => x[0] === "close"), name);
+    assert.equal(promptsOf(a).length + promptsOf(b).length, res.status === 200 ? 1 : 0, name);
+  }
+});
+
+test("workerRuntimeEnv isolates D-Bus session bus on Linux", () => {
+  const env = workerRuntimeEnv({ isolatedHome: "/tmp/agy-test-home" });
+  assert.equal(env.HOME, "/tmp/agy-test-home");
+  assert.equal(env.GEMINI_HOME, path.join("/tmp/agy-test-home", ".gemini"));
+  assert.equal(env.AGY_ACP_FORCE_FILE_STORAGE, "1");
+  if (process.platform === "linux") {
+    assert.equal(env.DBUS_SESSION_BUS_ADDRESS, "disabled:");
+    assert.equal(env.XDG_RUNTIME_DIR, path.join("/tmp/agy-test-home", "run"));
+  }
 });

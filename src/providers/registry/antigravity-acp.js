@@ -12,6 +12,6 @@ export default {
     format: "openai",
     baseUrl: "http://127.0.0.1/antigravity-acp",
   },
-  // AC-01 deliberately exposes one model while the ACP surface is validated.
-  models: [{ id: "gemini-3.8-flash", name: "Gemini 3.8 Flash (ACP)" }],
+  // Models come only from per-account ACP discovery (see getProviderModels); none are invented here.
+  models: [],
 };

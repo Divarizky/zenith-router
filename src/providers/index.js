@@ -20,7 +20,7 @@ import xkiro from "./registry/xkiro.js";
 import { listCustomModels, listImportedModels, listSyncedModels, isModelDisabled, listRetiredModels } from "../services/modelOverrides.js";
 import { resolveCapabilities } from "./capabilities.js";
 import { codexThinkingLevelsFor } from "./codexTiers.js";
-import { isAntigravityAcpEnabled } from "../services/antigravityAcp/profiles.js";
+import { isAntigravityAcpEnabled, listAntigravityAcpModels } from "../services/antigravityAcp/profiles.js";
 import antigravityAcp from "./registry/antigravity-acp.js";
 
 /**
@@ -206,6 +206,10 @@ export function getProviderModels(p) {
     const capabilities = resolveCapabilities(m.id, storedCaps);
     return capabilities ? { ...m, capabilities } : m;
   };
+
+  if (p.id === "antigravity-acp") {
+    return listAntigravityAcpModels().map((m) => withCaps({ id: m.id, name: m.name, source: "synced" }));
+  }
 
   const retired = p.catalogRefresh ? new Set(listRetiredModels(p.id).map((m) => m.model_id)) : new Set();
   const staticModels = p.models

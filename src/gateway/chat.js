@@ -18,9 +18,6 @@ export async function handleChat(c) {
     beforeRoute: (body, c) => {
       const model = String(body.model || "");
       if (!/^(?:antigravity-acp|agy-acp)\//i.test(model)) return null;
-      if (model.replace(/^(?:antigravity-acp|agy-acp)\//i, "") !== "gemini-3.8-flash") {
-        return c.json({ error: { message: `Model '${model}' not found in ACP registry`, type: "invalid_request_error", code: "model_not_found" } }, 404);
-      }
       return executeAntigravityAcp({ body, signal: c.req.raw.signal });
     },
     envelope: openAIEnvelope,

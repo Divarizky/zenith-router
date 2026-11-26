@@ -99,6 +99,7 @@ test("happy path uses the trusted login launcher, verifies ACP v1, and marks the
         HOME: WORKER.isolatedHome,
         GEMINI_HOME: `${WORKER.isolatedHome}/.gemini`,
         AGY_ACP_FORCE_FILE_STORAGE: "1",
+        ...(process.platform === "linux" ? { DBUS_SESSION_BUS_ADDRESS: "disabled:", XDG_RUNTIME_DIR: `${WORKER.isolatedHome}/run` } : {}),
       });
       assert.equal(options.cwd, WORKER.workspace);
       child = fakeChild({ onCode: (_code, process) => queueMicrotask(() => process.emit("exit", 0, null)) });
@@ -115,7 +116,7 @@ test("happy path uses the trusted login launcher, verifies ACP v1, and marks the
   const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   const submitted = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code_123" });
-  assert.deepEqual(submitted, { ok: true, status: "ready" });
+  assert.deepEqual(submitted, { ok: true, status: "ready", added: false });
   assert.deepEqual(getAntigravityAcpProfiles(), [ACCOUNT]);
 });
 
@@ -184,7 +185,7 @@ test("login works for a third account and rejects unknown or malformed account i
   });
   const started = await startAntigravityAcpLogin("session-a", ID_THIRD);
   assert.equal(started.ok, true);
-  assert.deepEqual(await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" }), { ok: true, status: "ready" });
+  assert.deepEqual(await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" }), { ok: true, status: "ready", added: false });
 
   assert.equal((await startAntigravityAcpLogin("session-a", "d".repeat(32))).code, "login_unavailable");
   assert.equal((await startAntigravityAcpLogin("session-a", "../etc")).code, "login_unavailable");
@@ -356,7 +357,7 @@ test("completeAntigravityAcpLogin fails closed for an unknown account or a chang
   assert.deepEqual(await completeAntigravityAcpLogin(ID_OTHER), { ok: false, reason: "stale" });
   assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: { ...WORKER, launcher: "/opt/other/runtime" } }), { ok: false, reason: "stale" });
   assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: WORKER, shouldCommit: () => false }), { ok: false, reason: "cancelled" });
-  assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: WORKER }), { ok: true });
+  assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: WORKER }), { ok: true, account: ACCOUNT });
 });
 
 test("cancel during worker resolution in registerAntigravityAcpWorker aborts registration and keeps profiles clean", async () => {
@@ -507,4 +508,232 @@ test("bare carriage return followed by text does not append to URL query value",
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, expectedUrl);
   child.kill();
+});
+
+// Memakai penurunan worker yang sebenarnya (tanpa loader override) di root sementara.
+async function withRealWorkers(run) {
+  const { mkdtemp, writeFile, chmod, rm } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const pathMod = await import("node:path");
+  const workers = await import("../src/services/antigravityAcp/workers.js");
+  const dir = await mkdtemp(pathMod.join(os.tmpdir(), "zenith-acp-newacct-"));
+  const binary = pathMod.join(dir, "agy_acp_server");
+  await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  await chmod(binary, 0o700);
+  const root = pathMod.join(dir, "root");
+  resetAntigravityAcpLoginForTests();
+  initDb(":memory:");
+  resetAntigravityAcpRuntimeStateForTests();
+  workers.resetAntigravityAcpWorkerStateForTests();
+  workers.setAntigravityAcpWorkerLoaderForTests(null);
+  workers.setAntigravityAcpAutoDiscoveryForTests([binary]);
+  workers.setAntigravityAcpProvisionRootForTests(root);
+  try {
+    await run({ dir, root, binary, workers });
+  } finally {
+    resetAntigravityAcpLoginForTests();
+    workers.resetAntigravityAcpWorkerStateForTests();
+    workers.setAntigravityAcpAutoDiscoveryForTests(null);
+    workers.setAntigravityAcpProvisionRootForTests(null);
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** Fake official ACP server: answers initialize, then authenticate raises the Google URL and completes on elicitation accept. */
+function acpChild({ initError = false, authError = false, noUrl = false, sent = [] } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.exited = false;
+  const out = (m) => child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...m })}\n`);
+  child.stdin = new Writable({
+    write(chunk, _e, cb) {
+      for (const line of chunk.toString().split("\n").filter(Boolean)) {
+        const m = JSON.parse(line);
+        sent.push(m);
+        if (m.method === "initialize") out(initError ? { id: m.id, error: { code: -1, message: "x" } } : { id: m.id, result: { protocolVersion: 1, authMethods: [{ id: "oauth-personal" }] } });
+        else if (m.method === "authenticate") {
+          if (authError) out({ id: m.id, error: { code: -1, message: "x" } });
+          else if (!noUrl) out({ id: 77, method: "elicitation/create", params: { mode: "url", url: URL, message: "Sign in" } });
+        } else if (m.id === 77) out({ id: 2, result: {} });
+      }
+      cb();
+    },
+  });
+  child.kill = (signal = "SIGTERM") => { if (!child.exited) { child.exited = true; queueMicrotask(() => child.emit("exit", null, signal)); } return true; };
+  return child;
+}
+
+function approvingChild() { return acpChild(); }
+
+const okClient = async (workerId) => ({
+  cwd: workerId ? (await (await import("../src/services/antigravityAcp/workers.js")).getAntigravityAcpWorker(workerId))?.workspace : "ignored",
+  async initialize() { return { protocolVersion: 1 }; },
+  async newSession() { return { sessionId: "s" }; },
+  async close() {},
+});
+
+test("adding an account needs no name: it is listed only after the login verified, with a default name", async () => {
+  await withRealWorkers(async ({ root }) => {
+    let spawnedEnv;
+    setAntigravityAcpLoginDependenciesForTests({
+      spawn: (_cmd, _args, options) => { spawnedEnv = options.env; return approvingChild(); },
+      createClient: async (workerId) => {
+        const client = await okClient();
+        const { getAntigravityAcpWorker } = await import("../src/services/antigravityAcp/workers.js");
+        client.cwd = (await getAntigravityAcpWorker(workerId)).workspace;
+        return client;
+      },
+    });
+    assert.deepEqual(getAntigravityAcpProfiles(), []);
+    const started = await startAntigravityAcpLogin("session-a");
+    assert.equal(started.ok, true);
+    // Mid-login: folders exist, but nothing is listed yet.
+    assert.deepEqual(getAntigravityAcpProfiles(), []);
+    assert.match(spawnedEnv.GEMINI_HOME, /\/home\/\.gemini$/);
+    assert.ok(spawnedEnv.GEMINI_HOME.startsWith(root));
+
+    const done = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" });
+    assert.deepEqual(done, { ok: true, status: "ready", added: true });
+    const [account] = getAntigravityAcpProfiles();
+    assert.match(account.id, /^[0-9a-f]{32}$/);
+    assert.equal(account.name, "Akun 1");
+    assert.equal(account.enabled, true);
+  });
+});
+
+test("worker resolution ignores any deployment map: only account-derived workers exist", async () => {
+  await withRealWorkers(async ({ workers }) => {
+    const { workerIdForAccount } = await import("../src/services/antigravityAcp/accounts.js");
+    // Before any account exists there is nothing to resolve, whatever else is on disk.
+    assert.deepEqual(await workers.getAntigravityAcpWorkers(), []);
+    assert.equal(await workers.getAntigravityAcpWorker("agy-worker-a"), null);
+    assert.equal(await workers.getAntigravityAcpWorker(workerIdForAccount(ID)), null);
+
+    await setAntigravityAcpProfiles([ACCOUNT]);
+    const [worker] = await workers.getAntigravityAcpWorkers();
+    assert.equal(worker.workerId, workerIdForAccount(ID));
+    assert.equal(typeof worker.loginLauncher, "string");
+    assert.equal((await workers.getAntigravityAcpWorker(workerIdForAccount(ID))).workerId, worker.workerId);
+
+    setAntigravityAcpLoginDependenciesForTests({ spawn: () => approvingChild(), createClient: async () => okClient() });
+    const started = await startAntigravityAcpLogin("session-a", ID);
+    assert.equal(started.ok, true, "re-login of a listed account starts without any worker map");
+    cancelAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a" });
+  });
+});
+
+test("a cancelled or failed first login leaves no account and no folders behind", async () => {
+  await withRealWorkers(async ({ root }) => {
+    const { readdir } = await import("node:fs/promises");
+    const entries = async () => readdir(root).catch(() => []);
+
+    // Cancelled before the code is entered.
+    setAntigravityAcpLoginDependenciesForTests({ spawn: () => acpChild() });
+    const first = await startAntigravityAcpLogin("session-a");
+    assert.equal(first.ok, true);
+    assert.equal((await entries()).length, 1, "folders exist while the login runs");
+    cancelAntigravityAcpLogin({ attemptId: first.attemptId, binding: "session-a" });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepEqual(getAntigravityAcpProfiles(), []);
+    assert.deepEqual(await entries(), [], "cancelled login removes the new folders");
+
+    // Verification fails after a successful agy exit.
+    setAntigravityAcpLoginDependenciesForTests({
+      spawn: () => approvingChild(),
+      createClient: async () => ({ cwd: "x", async initialize() { return { protocolVersion: 2 }; }, async newSession() { return {}; }, async close() {} }),
+    });
+    const second = await startAntigravityAcpLogin("session-a");
+    const result = await submitAntigravityAcpLogin({ attemptId: second.attemptId, binding: "session-a", code: "raw-code" });
+    assert.equal(result.code, "login_verification_failed");
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepEqual(getAntigravityAcpProfiles(), []);
+    assert.deepEqual(await entries(), [], "failed verification removes the new folders");
+  });
+});
+
+test("default names fill the first free slot and accounts can be renamed", async () => {
+  const { renameAntigravityAcpAccount } = await import("../src/services/antigravityAcp/profiles.js");
+  const { nextDefaultAccountName } = await import("../src/services/antigravityAcp/accounts.js");
+  assert.equal(nextDefaultAccountName([]), "Akun 1");
+  assert.equal(nextDefaultAccountName([{ name: "Akun 1" }, { name: "akun 2" }]), "Akun 3");
+  assert.equal(nextDefaultAccountName([{ name: "Akun 2" }]), "Akun 1");
+
+  reset();
+  await setAntigravityAcpProfiles([ACCOUNT, { id: ID_OTHER, name: "other", enabled: true }]);
+  assert.deepEqual(renameAntigravityAcpAccount(ID, "kerja"), { ok: true });
+  assert.equal(getAntigravityAcpProfiles()[0].name, "kerja");
+  assert.equal(renameAntigravityAcpAccount(ID, "OTHER").reason, "duplicate_name");
+  assert.equal(renameAntigravityAcpAccount(ID, "").reason, "invalid_name");
+  assert.equal(renameAntigravityAcpAccount("c".repeat(32), "x").reason, "not_found");
+});
+
+test("official ACP login: initialize, authenticate(oauth-personal), URL from elicitation, isolated env, no code written", async () => {
+  await withRealWorkers(async ({ workers, binary }) => {
+    const sent = [];
+    let spawned;
+    setAntigravityAcpLoginDependenciesForTests({
+      spawn: (command, args, options) => { spawned = { command, args, options }; return acpChild({ sent }); },
+      createClient: okClient,
+    });
+    const started = await startAntigravityAcpLogin("s", undefined);
+    assert.equal(started.ok, true);
+    assert.equal(started.authorizationUrl, URL);
+    assert.match(binary, /agy_acp_server$/);
+    assert.equal(spawned.command, (await import("node:fs/promises")).realpath ? await (await import("node:fs/promises")).realpath(binary) : binary);
+    assert.deepEqual(spawned.args, []);
+    assert.equal(spawned.options.env.AGY_ACP_FORCE_FILE_STORAGE, "1");
+    assert.ok(spawned.options.env.HOME.includes("/home"));
+    assert.equal(spawned.options.env.GEMINI_HOME, `${spawned.options.env.HOME}/.gemini`);
+    assert.deepEqual(sent.map((m) => m.method).slice(0, 2), ["initialize", "authenticate"]);
+    assert.equal(sent[1].params.methodId, "oauth-personal");
+    const done = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "s", code: "secret-code-xyz" });
+    assert.equal(done.ok, true);
+    assert.equal(JSON.stringify(sent).includes("secret-code-xyz"), false);
+    assert.equal(workers.isDerivedWorkerMode(), true);
+  });
+});
+
+test("official ACP login failures: initialize error, authenticate error, and missing URL fail closed", async () => {
+  for (const opts of [{ initError: true }, { authError: true }, { noUrl: true }]) {
+    await withRealWorkers(async () => {
+      setAntigravityAcpLoginDependenciesForTests({
+        spawn: () => acpChild(opts), createClient: okClient,
+        timings: { urlWaitMs: 60, ttlMs: 300, exitWaitMs: 60, verifyWaitMs: 60 },
+      });
+      const started = await startAntigravityAcpLogin("s", undefined);
+      assert.equal(started.ok, false);
+      assert.deepEqual(getAntigravityAcpProfiles(), []);
+    });
+  }
+});
+
+test("agy CLI is never discovered: only agy_acp_server qualifies", async () => {
+  await withRealWorkers(async ({ dir, workers }) => {
+    const { writeFile, chmod } = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    const cli = pathMod.join(dir, "agy");
+    await writeFile(cli, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    await chmod(cli, 0o700);
+    workers.setAntigravityAcpAutoDiscoveryForTests([]);
+    assert.deepEqual(await workers.getAntigravityAcpWorkers(), []);
+  });
+});
+
+test(".par binary is discovered and gets --uid= on Linux only; plain binary gets no args", async () => {
+  await withRealWorkers(async ({ dir, workers }) => {
+    const { writeFile, chmod } = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    const par = pathMod.join(dir, "agy_acp_server.par");
+    await writeFile(par, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    await chmod(par, 0o700);
+    workers.setAntigravityAcpAutoDiscoveryForTests([par]);
+    await setAntigravityAcpProfiles([ACCOUNT]);
+    const [worker] = await workers.getAntigravityAcpWorkers();
+    assert.match(worker.launcher, /agy_acp_server\.par$/);
+    const expected = process.platform === "linux" ? ["--uid="] : [];
+    assert.deepEqual(worker.launcherArgs, expected);
+    assert.deepEqual(worker.loginLauncherArgs, expected);
+    assert.deepEqual(workers.serverArgsFor("/x/agy_acp_server"), []);
+  });
 });

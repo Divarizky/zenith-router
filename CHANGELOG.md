@@ -5,6 +5,10 @@ Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model g
 ### Perubahan
 
 - **Provider HTTP/OAuth `antigravity` dihapus**: Antigravity kini hanya lewat ACP (`antigravity-acp`) dengan banyak akun terisolasi (folder per akun, `GEMINI_HOME` sendiri, tanpa batas akun). Login dilakukan per akun via browser, dan akun yang kena "Usage Limit Reached" dilewati sampai reset. Model yang tersedia hanya `agy-acp/gemini-3.8-flash` (text-only).
+- **Login Antigravity ACP satu tombol**: akun baru ditambah lewat satu tombol "Tambah akun via Agy" tanpa mengetik nama dulu. Akun baru hanya masuk daftar setelah login terverifikasi (`initialize` + `session/new`), dengan nama default `Akun N` yang bisa diganti. Login yang dibatalkan atau gagal membersihkan folder barunya, jadi tidak ada akun yatim.
+- **Login ACP resmi**: login memakai `initialize` lalu `authenticate(oauth-personal)` ke `agy_acp_server`; URL Google diambil dari elicitation. Binary `.par` terdeteksi dan di Linux dijalankan dengan `--uid=` (sesuai registry Troupe).
+- **Callback login ACP**: `redirect_uri` harus loopback ketat, kalau tidak login gagal tertutup. Browser lokal selesai otomatis; browser remote menempel URL redirect penuh yang dicocokkan (host, port, path, `state`) lalu diputar ulang sekali ke listener loopback agent. Shim pembuka browser mencegah agent membuka browser di host server. Di Windows login ACP gagal tertutup (`login_unavailable`) karena shim belum ada. Belum diverifikasi dengan login Google nyata; tes memakai agent palsu.
+- **Peta worker eksplisit dihapus**: `~/.config/zenith-router/antigravity-acp-workers.json` tidak lagi dibaca. Sebelumnya file itu mematikan penurunan worker per akun sehingga login gagal dengan "Login Agy tidak tersedia". Worker kini selalu diturunkan dari akun.
 
 ### Fitur
 

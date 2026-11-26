@@ -6,9 +6,9 @@ import {
   submitAntigravityAcpLogin,
 } from "../../services/antigravityAcp/login.js";
 import {
-  addAntigravityAcpAccount,
   listAntigravityAcpProfiles,
   removeAntigravityAcpAccount,
+  renameAntigravityAcpAccount,
 } from "../../services/antigravityAcp/profiles.js";
 import { escapeHtml } from "../html.js";
 import { t } from "../i18n/index.js";
@@ -19,7 +19,7 @@ const STATUS_KEYS = { ready: "status_ready", needs_login: "status_needs_login", 
 function statusFor(code) {
   if (code === "login_busy") return 409;
   if (code === "login_attempt_invalid") return 404;
-  if (code === "invalid_authorization_code" || code === "login_attempt_used") return 400;
+  if (code === "invalid_authorization_code" || code === "login_callback_failed" || code === "login_attempt_used") return 400;
   return 502;
 }
 
@@ -37,7 +37,7 @@ export async function handleAgyLoginStart(c) {
   const body = await input(c);
   const result = await startAntigravityAcpLogin(binding(c), typeof body.accountId === "string" ? body.accountId : "");
   if (!result.ok) return c.json({ ok: false, error: result.code }, statusFor(result.code));
-  return c.json({ ok: true, attemptId: result.attemptId, authorizationUrl: result.authorizationUrl, expiresIn: result.expiresIn }, 202);
+  return c.json({ ok: true, attemptId: result.attemptId, authorizationUrl: result.authorizationUrl, expiresIn: result.expiresIn, callback: result.callback || null }, 202);
 }
 
 export async function handleAgyLoginSubmit(c) {
@@ -48,7 +48,7 @@ export async function handleAgyLoginSubmit(c) {
     binding: binding(c),
   });
   if (!result.ok) return c.json({ ok: false, error: result.code }, statusFor(result.code));
-  return c.json({ ok: true, status: result.status });
+  return c.json({ ok: true, status: result.status, added: result.added });
 }
 
 export async function handleAgyLoginStatus(c) {
@@ -71,10 +71,10 @@ export async function handleAgyLoginCancel(c) {
   return c.json({ ok: true, status: result.status });
 }
 
-export async function handleAgyAccountAdd(c) {
+export async function handleAgyAccountRename(c) {
   const body = await input(c);
-  const result = await addAntigravityAcpAccount(typeof body.name === "string" ? body.name : "");
-  const code = result.ok ? "added" : result.reason === "invalid_name" || result.reason === "duplicate_name" ? "err_name" : "err_generic";
+  const result = renameAntigravityAcpAccount(typeof body.id === "string" ? body.id : "", typeof body.name === "string" ? body.name : "");
+  const code = result.ok ? "renamed" : result.reason === "invalid_name" || result.reason === "duplicate_name" ? "err_name" : "err_generic";
   return c.redirect(`${BACK}?acp_notice=${code}`);
 }
 
@@ -85,9 +85,9 @@ export async function handleAgyAccountRemove(c) {
   return c.redirect(`${BACK}?acp_notice=${code}`);
 }
 
-const NOTICE_CODES = new Set(["added", "removed", "err_name", "err_busy", "err_generic"]);
+const NOTICE_CODES = new Set(["added", "relogin", "removed", "renamed", "err_name", "err_busy", "err_generic"]);
 
-const LOGIN_SCRIPT = `
+const LOGIN_SCRIPT = String.raw`
 <script>
 (function () {
   var attemptId = null, popup = null;
@@ -97,35 +97,43 @@ const LOGIN_SCRIPT = `
   }
   function box() { return document.getElementById('agy-acp-login'); }
   function msg(text) { var el = document.getElementById('agy-acp-login-msg'); if (el) el.textContent = text; }
-  function extractCode(value) {
-    var text = value.trim();
-    try {
-      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return new URL(text).searchParams.get('code') || text;
-      if (/(?:^|[?&])code=/.test(text)) return new URLSearchParams(text.replace(/^.*?\?/, '')).get('code') || text;
-    } catch (_) {}
-    return text;
-  }
   window.zrAgyAcpLogin = function (id, btn) {
     var t = btn.dataset;
     window.zrAgyAcpCancel();
     popup = window.open('about:blank', '_blank');
-    post('/dashboard/providers/antigravity-acp/login/start', { accountId: id }).then(function (r) {
+    post('/dashboard/providers/antigravity-acp/login/start', id ? { accountId: id } : {}).then(function (r) {
       if (r.error || !r.attemptId) { if (popup) popup.close(); popup = null; return alert(t.failed); }
       attemptId = r.attemptId;
       if (popup) popup.location = r.authorizationUrl;
       box().hidden = false;
-      box().innerHTML = '<a class="btn-nb" target="_blank" rel="noopener" href="' + r.authorizationUrl + '">Buka Halaman Login Google</a> <label for="agy-acp-code">Kode otorisasi</label> <input id="agy-acp-code" type="text" autocomplete="off" class="search-cli-input" placeholder="' + t.placeholder + '" /> <button type="button" class="btn-nb" id="agy-acp-submit">' + t.submit + '</button> <button type="button" class="btn-nb" id="agy-acp-cancel">Batal</button> <span id="agy-acp-login-msg" class="hint"></span>';
-      document.getElementById('agy-acp-cancel').onclick = function () { window.zrAgyAcpCancel(); box().innerHTML = ''; box().hidden = true; };
-      document.getElementById('agy-acp-submit').onclick = function () {
-        var code = extractCode(document.getElementById('agy-acp-code').value);
+      var b = box(); b.innerHTML = '';
+      function el(tag, props) { var e = document.createElement(tag); Object.keys(props || {}).forEach(function (k) { e[k] = props[k]; }); return e; }
+      var link = el('a', { className: 'btn-nb', target: '_blank', rel: 'noopener', href: r.authorizationUrl, textContent: t.open });
+      var hint = el('p', { className: 'hint', textContent: r.callback ? t.hint : t.hintCode });
+      var input = el('input', { id: 'agy-acp-code', type: 'text', autocomplete: 'off', className: 'search-cli-input', placeholder: t.placeholder });
+      var submit = el('button', { type: 'button', className: 'btn-nb', id: 'agy-acp-submit', textContent: t.submit });
+      var cancel = el('button', { type: 'button', className: 'btn-nb', id: 'agy-acp-cancel', textContent: t.cancel });
+      var note = el('span', { id: 'agy-acp-login-msg', className: 'hint', textContent: t.waiting });
+      [link, hint, input, submit, cancel, note].forEach(function (n) { b.appendChild(n); });
+      var myAttempt = attemptId;
+      var poll = setInterval(function () {
+        if (attemptId !== myAttempt) return clearInterval(poll);
+        post('/dashboard/providers/antigravity-acp/login/status', { attemptId: myAttempt }).then(function (j) {
+          if (attemptId !== myAttempt) return;
+          if (j.status === 'ready') { clearInterval(poll); attemptId = null; location.assign(location.pathname + '?acp_notice=added'); }
+          else if (j.error || j.status === 'failed' || j.status === 'cancelled') { clearInterval(poll); msg(t.failed); }
+        }).catch(function () {});
+      }, 2000);
+      cancel.onclick = function () { clearInterval(poll); window.zrAgyAcpCancel(); };
+      submit.onclick = function () {
+        var code = input.value.trim();
         if (!code) return;
-        this.disabled = true;
-        var self = this;
+        submit.disabled = true;
         post('/dashboard/providers/antigravity-acp/login/submit', { attemptId: attemptId, code: code }).then(function (j) {
-          if (j.status === 'ready') { attemptId = null; return location.reload(); }
-          msg(j.error === 'invalid_authorization_code' ? t.invalid : t.failed);
-          self.disabled = false;
-        }).catch(function () { msg(t.failed); self.disabled = false; });
+          if (j.status === 'ready') { clearInterval(poll); attemptId = null; return location.assign(location.pathname + '?acp_notice=' + (j.added ? 'added' : 'relogin')); }
+          msg(j.error === 'invalid_authorization_code' ? t.invalid : j.error === 'login_callback_failed' ? t.callbackFailed : t.failed);
+          submit.disabled = false;
+        }).catch(function () { msg(t.failed); submit.disabled = false; });
       };
     }).catch(function () { if (popup) popup.close(); popup = null; alert(t.failed); });
   };
@@ -143,12 +151,17 @@ const LOGIN_SCRIPT = `
 export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(), enabled = false, lang, notice } = {}) {
   const tr = (key) => t(`agyAcp.${key}`, {}, lang);
   const noticeKey = NOTICE_CODES.has(notice) ? notice : null;
+  const loginAttrs = `data-open="${escapeHtml(tr("open_login"))}" data-hint="${escapeHtml(tr("login_hint"))}" data-hint-code="${escapeHtml(tr("login_hint_code"))}" data-cancel="${escapeHtml(tr("cancel"))}" data-waiting="${escapeHtml(tr("login_waiting"))}" data-callback-failed="${escapeHtml(tr("callback_failed"))}" data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
   const rows = accounts.map((account) => {
     const status = STATUS_KEYS[account.status] ? account.status : "unavailable";
     const until = account.limitedUntil ? ` ${escapeHtml(tr("limited_until"))} ${escapeHtml(new Date(account.limitedUntil).toISOString().slice(0, 16).replace("T", " "))} UTC` : "";
-    const dataAttrs = `data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
+    const dataAttrs = `data-open="${escapeHtml(tr("open_login"))}" data-hint="${escapeHtml(tr("login_hint"))}" data-hint-code="${escapeHtml(tr("login_hint_code"))}" data-cancel="${escapeHtml(tr("cancel"))}" data-waiting="${escapeHtml(tr("login_waiting"))}" data-callback-failed="${escapeHtml(tr("callback_failed"))}" data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
     return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:12px;align-items:center;">
-      <span>${escapeHtml(account.name)}</span>
+      <form action="${BACK}/accounts/rename" method="POST" style="margin:0;display:flex;gap:6px;align-items:center;">
+        <input type="hidden" name="id" value="${escapeHtml(account.id)}" />
+        <input name="name" value="${escapeHtml(account.name)}" maxlength="40" required autocomplete="off" aria-label="${escapeHtml(tr("rename"))}" class="search-cli-input acp-worker-input" style="min-width:0;" />
+        <button type="submit" class="btn-nb">${escapeHtml(tr("rename"))}</button>
+      </form>
       <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(tr(STATUS_KEYS[status]))}${until}</span>
       <button type="button" class="btn-nb" ${dataAttrs} onclick="zrAgyAcpLogin('${escapeHtml(account.id)}', this)">${escapeHtml(tr("login"))}</button>
       <form action="${BACK}/accounts/remove" method="POST" onsubmit="return confirm(this.dataset.confirm)" data-confirm="${escapeHtml(tr("remove_confirm"))}" style="margin:0;">
@@ -178,13 +191,9 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
         ${rows}
         <div id="agy-acp-login" hidden></div>
         <section class="rack-chassis" style="padding:14px;border:2px solid var(--border);display:grid;gap:10px;">
-          <strong>Tambah Akun</strong>
-          <p class="hint">Step 1: Beri nama &amp; tambah akun → Step 2: Klik Login Google.</p>
-          <form action="${BACK}/accounts/add" method="POST" style="display:grid;gap:8px;margin:0;">
-            <label for="agy-account-name">Nama akun</label>
-            <input id="agy-account-name" name="name" maxlength="40" required autocomplete="off" placeholder="${escapeHtml(tr("name_placeholder"))}" class="search-cli-input acp-worker-input" style="border-radius: 0; width:100%;" />
-            <button type="submit" class="btn-nb">${escapeHtml(tr("add"))}</button>
-          </form>
+          <strong>${escapeHtml(tr("add_title"))}</strong>
+          <p class="hint">${escapeHtml(tr("add_hint"))}</p>
+          <button type="button" class="btn-nb" ${loginAttrs} onclick="zrAgyAcpLogin('', this)">${escapeHtml(tr("add_via_agy"))}</button>
         </section>
       </div>
     </div>${LOGIN_SCRIPT}`;

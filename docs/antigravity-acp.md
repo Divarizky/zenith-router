@@ -1,62 +1,45 @@
 # Antigravity ACP (preview)
 
-The ACP integration is a separate local-agent route, not the existing Antigravity HTTP API executor. It is opt-in and exposes only `agy-acp/gemini-3.8-flash`; the regular `antigravity` provider remains unchanged.
+The ACP integration is a separate local-agent route, not the existing Antigravity HTTP API executor. It is opt-in and exposes only models discovered from the logged-in accounts (none are hardcoded); the regular `antigravity` provider remains unchanged.
 
 ## Safety contract
 
 - ACP is disabled by default. A profile configuration alone does not enable it.
 - Accounts are unlimited. Each account stores only a random 32-character hex `id`, a unique `name` (at most 40 characters, compared case-insensitively), and an `enabled` flag. List order is routing order. Duplicate ids or names, non-hex ids, and extra fields are rejected; dashboard input cannot choose a command, arguments, environment, credentials, or working directory.
-- An explicit deployment worker map at `~/.config/zenith-router/antigravity-acp-workers.json` has priority and allowlists exact worker IDs/namespaces and absolute launcher/workspace paths. If present, even an empty, malformed, symlinked, or insecure map fails closed; Zenith never falls back to discovery. Only when the map is absent does Zenith auto-discover a trusted `agy` executable and derive one worker per account (`agy-worker-<id>`) with isolated `home`, `appdata`, and `workspace` directories under `~/.config/zenith-router/acp/<id>/`. Each worker runs with `HOME` (and `USERPROFILE`/`APPDATA` on Windows) set to its own folder, `GEMINI_HOME=<home>/.gemini`, and `AGY_ACP_FORCE_FILE_STORAGE=1`, so the Agy token stays in `<home>/.gemini/antigravity-acp/acp_token.json` of that account only. Entries in an explicit map cannot contain arguments, env, or credentials. POSIX candidates must be executable and not group/other-writable; Windows deployments must enforce equivalent ACLs externally. ACP remains opt-in. Zenith does not read tokens/keyrings, switch OS users, or claim isolation has been verified.
+- Workers are always derived from accounts; there is no deployment worker map. Zenith auto-discovers a trusted `agy_acp_server`/`agy_acp_server.par` executable (POSIX: executable, not group/other-writable, with a non-writable parent directory) and derives one worker per account (`agy-worker-<id>`) with isolated `home`, `appdata`, and `workspace` directories under `~/.config/zenith-router/acp/<id>/`, mode `0700`, rejecting symlinked or non-directory paths. Each worker runs with `HOME` (and `USERPROFILE`/`APPDATA` on Windows) set to its own folder, `GEMINI_HOME=<home>/.gemini`, and `AGY_ACP_FORCE_FILE_STORAGE=1`, so the Agy token stays in `<home>/.gemini/antigravity-acp/acp_token.json` of that account only. Zenith does not read tokens/keyrings, switch OS users, or claim isolation has been verified. A leftover `antigravity-acp-workers.json` from the earlier preview is ignored.
 - A trusted server-side adapter maps the configured worker ID to a pre-provisioned local worker. The adapter must negotiate ACP v1 explicitly. Zenith sends text-only chat prompts, supports non-streaming JSON and OpenAI-compatible SSE text deltas (bounded to 1 MiB), and rejects tools, generation options, and multimodal content. Filesystem, terminal, and permission requests are denied by the adapter. No quota-based retry or generic Zenith account/model/combo fallback is enabled; only the narrowly documented pre-dispatch worker selection below applies.
 - Another account may be tried only after local preflight confirms an account is unavailable, `needs_login`, or limited, or ACP returns the coded `-32000` authentication-required error during initialize/session setup, before `session/prompt`. Any prompt error/disconnect is an unknown outcome and is not replayed.
 - Client cancellation uses ACP v1 `session/cancel` with the active `sessionId`. Usage is not reported because the supported ACP surface does not provide a verified Zenith usage contract.
 
 The `/v1/chat/completions` ACP path is intercepted before generic HTTP routing so generic status-based account/model/combo fallback does not reinterpret ACP errors. Streaming emits deltas before `session/prompt` resolves, followed by a finish chunk and `[DONE]`; post-dispatch failures emit a generic SSE error frame and are never replayed. Abort during initialize/session setup prevents prompt dispatch. Abort/disconnect after dispatch sends `session/cancel` and closes the worker transport. Unsupported tools, generation options, and non-text message content fail with a 400 response rather than being silently dropped.
 
-The deployment file is an array with at most 256 entries, for example:
-
-```json
-[
-  {
-    "workerId": "agy-worker-a",
-    "namespace": "agy-worker-a",
-    "launcher": "/opt/zenith/acp/launch-worker-a",
-    "workspace": "/srv/zenith/acp/worker-a"
-  }
-]
-```
-
-Each launcher must itself enforce the separate account/OS sandbox and start an ACP v1 stdio endpoint. For an explicit map, this application does not provision launcher scripts, accounts, keyrings, or sign-in state. When the map is absent, Zenith uses the discovered `agy` binary directly with fixed ACP arguments and isolated data directories; it does not read tokens/keyrings or claim OS-account isolation has been verified.
-
 ## Accounts and limits
 
-- Adding an account only creates its folders. The account starts as `needs_login` and is never selected for requests until a login has been verified.
+- Adding an account is one action: **Add account via Agy**. No name is typed first. Zenith makes a random id and the isolated folders and starts the Google login. The account is listed only after the login was verified (ACP v1 `initialize` and `session/new`), under the first free default name (`Akun 1`, `Akun 2`, ...). A cancelled, expired, or failed first login removes the new folders again, so no half-created account is left. The name is only a label and can be renamed from the list (same rules: at most 40 characters, unique case-insensitively).
+- A listed account whose token file is missing is `needs_login` and is not selected for requests until its login has been verified again with its **Login** button.
 - Login state is read from the presence of a non-empty `acp_token.json` in the account folder. Zenith never reads the file contents.
 - Removing an account deletes `acp_token.json` and `acp_business_token.json`, then the account folder, then the list entry. It is refused while a request or login uses the account.
 - When Agy answers with the "Usage Limit Reached" text, the account is marked limited in memory until the reset time Agy reported, or for 5 hours when none was reported. Limited accounts are skipped for new requests and become eligible again after the reset. The request that hit the limit is never replayed on another account, because the limit text arrives after `session/prompt`.
 
 ## Browser login MVP
 
-The Antigravity provider's **Login via Agy** action is a browser-only bootstrap for one chosen account (an explicitly mapped worker or an automatically derived one). It is separate from the existing **Login via Zenith OAuth** action, which remains available and unchanged.
+The Antigravity ACP provider's **Add account via Agy** and per-account **Login** actions are a browser-only bootstrap for one account. The earlier HTTP/OAuth Antigravity provider no longer exists.
 
-When the explicit worker map is absent and a safe `agy` binary is discovered, the same binary is used for login with isolated home/app-data directories. An explicit map remains the priority override; add `loginLauncher` to exactly one worker entry to enable login for mapped workers. That launcher must be an externally provisioned, non-group/world-writable executable in the same worker isolation and workspace as `launcher`; it must run `agy acp --login` and print the official Google authorization URL in this documented machine-readable shape:
+Login uses the official ACP server (`agy_acp_server`, or `agy_acp_server.par` as shipped in the Troupe registry; on Linux a `.par` binary is always started with the fixed argument `--uid=`). It runs with the account's isolated `HOME`/`GEMINI_HOME` and `AGY_ACP_FORCE_FILE_STORAGE=1`. Zenith sends `initialize` (protocol v1), then `authenticate` with `methodId: oauth-personal`; the server raises the Google authorization URL as a URL `elicitation` request. Zenith validates that it is an official `accounts.google.com` URL and shows it in the dashboard. The URL is taken from an elicitation, from stderr, or from a captured opener call (POSIX only: a private shim shadows `xdg-open`/`BROWSER` so the agent never opens a browser on the server host). The `redirect_uri` in it must be a strict loopback URL (`http`, `127.0.0.1`/`localhost`/`[::1]`, explicit port >= 1024, no query); otherwise the attempt fails closed (`login_callback_invalid`). Local browser: the browser reaches the agent's own listener and Zenith completes when `authenticate` returns. Remote browser: the redirect page fails to load; the user pastes the full failed URL, which must match the registered host, port, path and `state`, and Zenith replays it once (GET, literal loopback IP, no redirects, bounded time) to the agent's listener. A refused or unreachable listener leaves the attempt retryable until it expires. For an agent without a loopback redirect, a pasted value is only a confirmation and is never forwarded. **Windows fails closed**: ACP login is unavailable there (`login_unavailable`) because the browser shim is not implemented. After `authenticate` returns, Zenith verifies with `initialize` + `session/new` before listing the account. The `agy` CLI is not used. The `AGY_LOGIN_URL=` text line below applies only to the legacy CLI path and is kept for the URL parser.
 
 ```text
 AGY_LOGIN_URL=https://accounts.google.com/o/oauth2/v2/auth?...
 ```
 
-Zenith also accepts that same official URL when an Agy version prefixes it with human-readable text. Only `https://accounts.google.com/o/oauth2/v2/auth` (or `/o/oauth2/auth`) URLs with a query string are passed to the browser. URLs supplied by the browser are never accepted. Example deployment entry:
+Zenith also accepts that same official URL when an Agy version prefixes it with human-readable text. Only `https://accounts.google.com/o/oauth2/v2/auth` (or `/o/oauth2/auth`) URLs with a query string are passed to the browser. URLs supplied by the browser are never accepted.
 
-```json
-{
-  "workerId": "agy-worker-a",
-  "namespace": "agy-worker-a",
-  "launcher": "/opt/zenith/acp/launch-worker-a",
-  "loginLauncher": "/opt/zenith/acp/login-worker-a",
-  "workspace": "/srv/zenith/acp/worker-a"
-}
-```
+The dashboard starts the login with server-side fixed arguments and a minimal environment (plus the isolated `HOME`/`USERPROFILE` when provisioned), never browser-selected command, arguments, environment, or cwd. It relays only the short raw authorization code (not a redirect URL) to the original process stdin. Attempts are bound to the authenticated dashboard session, expire after two minutes, accept one submission, and are cleaned up on cancel, timeout, or process failure. A successful process exit is not sufficient: Zenith verifies ACP v1 `initialize` and `session/new` through the account's worker before marking the account ready (and, for a new account, listing it). Completion fails closed if the account was removed, the derived worker changed, or verification failed. Zenith never reads or persists Agy tokens, keyrings, email, or account output.
 
-The dashboard starts the trusted login launcher with server-side fixed arguments and a minimal environment (plus the isolated `HOME`/`USERPROFILE` when provisioned), never browser-selected command, arguments, environment, or cwd. It relays only the short raw authorization code (not a redirect URL) to the original process stdin. Attempts are bound to the authenticated dashboard session, expire after two minutes, accept one submission, and are cleaned up on cancel, timeout, or process failure. A successful process exit is not sufficient: Zenith verifies ACP v1 `initialize` and `session/new` through the worker runtime launcher before marking the account ready. Completion fails closed if the account was removed, the worker mapping changed, or verification failed. Zenith never reads or persists Agy tokens, keyrings, email, or account output.
+Automated tests use fake child processes and offline ACP fixtures only. Before relying on an account, complete one real browser login on a disposable Google account and confirm that `<home>/.gemini/antigravity-acp/acp_token.json` appears inside the account folder.
 
-Live testing is intentionally out of scope for this MVP. Before a real deployment, an administrator must provision and review both launchers, confirm the Agy CLI output shape, ensure the worker's keyring is isolated, and manually complete a browser login on a disposable account. Automated tests use fake child processes and offline ACP fixtures only.
+## Model catalog and selection
+
+- Each account's catalog is read from `session/new` (at login verification and on every request session): `configOptions` with category `model` and type `select` first, otherwise legacy `models.availableModels`. Nothing is invented; an unrecognised shape gives no models.
+- Catalogs are stored per account id (setting `antigravity_acp_model_catalog`, no secrets), survive restarts, are replaced on refresh, and are dropped when the account is removed. `/v1/models` lists the union over enabled, logged-in accounts.
+- A request routes to an account whose catalog has the model (unknown catalogs are checked on the live session). Before `session/prompt`, Zenith calls `session/set_config_option` (config option catalogs) or `session/set_model` (legacy). No default model is used silently; a missing model gives 404, a missing catalog 502, and the prompt is never sent or replayed in those cases.
+- In the dashboard ACP is shown under the OAuth/login group only; the provider stays `noAuth`/`free` in the registry and uses no OAuth flow.

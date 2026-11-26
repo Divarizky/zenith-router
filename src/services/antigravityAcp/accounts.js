@@ -16,6 +16,16 @@ export function normalizeAccountName(name) {
   return name;
 }
 
+/** First free "Akun N" label for a new account; the name is only a label and can be changed later. */
+export function nextDefaultAccountName(existing, prefix = "Akun") {
+  const taken = new Set(existing.map((a) => accountNameKey(a.name)));
+  for (let n = 1; n <= existing.length + 1; n += 1) {
+    const candidate = `${prefix} ${n}`;
+    if (!taken.has(accountNameKey(candidate))) return candidate;
+  }
+  return `${prefix} ${existing.length + 1}`;
+}
+
 export function accountNameKey(name) {
   return name.toLocaleLowerCase("en-US");
 }

@@ -74,7 +74,7 @@ import {
   handleAgyLoginSubmit,
   handleAgyLoginStatus,
   handleAgyLoginCancel,
-  handleAgyAccountAdd,
+  handleAgyAccountRename,
   handleAgyAccountRemove,
 } from "./ui/pages/agyLogin.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
@@ -215,7 +215,7 @@ app.post("/dashboard/oauth/start", handleOAuthStart);
 app.post("/dashboard/oauth/poll", handleOAuthPoll);
 app.post("/dashboard/oauth/manual", handleOAuthManual);
 app.post("/dashboard/oauth/cancel", handleOAuthCancel);
-app.post("/dashboard/providers/antigravity-acp/accounts/add", handleAgyAccountAdd);
+app.post("/dashboard/providers/antigravity-acp/accounts/rename", handleAgyAccountRename);
 app.post("/dashboard/providers/antigravity-acp/accounts/remove", handleAgyAccountRemove);
 app.post("/dashboard/providers/antigravity-acp/login/start", handleAgyLoginStart);
 app.post("/dashboard/providers/antigravity-acp/login/submit", handleAgyLoginSubmit);

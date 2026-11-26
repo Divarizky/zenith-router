@@ -43,6 +43,7 @@ import {
   extractWarpNode,
 } from "./proxyPools.js";
 import { probeStreamError } from "./streamProbe.js";
+import { ensureKiroProfileArn } from "./kiroProfile.js";
 import {
   ACCOUNT_PARK_MS,
   clearStrikes,
@@ -367,6 +368,20 @@ function buildErrorPayload(targetFormat, type, message, code) {
   return targetFormat === "claude"
     ? { type: "error", error: { type, message } }
     : { error: { message, type, code } };
+}
+
+function kiroProfileUnavailableResponse(targetFormat) {
+  return new Response(
+    JSON.stringify(
+      buildErrorPayload(
+        targetFormat,
+        "invalid_request_error",
+        "Kiro account profile is unavailable. Reconnect this Kiro account or import it again.",
+        "kiro_profile_unavailable"
+      )
+    ),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
 }
 
 // The account stayed at its concurrency cap for the whole queue wait. Sending
@@ -806,7 +821,9 @@ export async function executeWithFallback({
     if (!profileArn) return bodyText;
     try {
       const parsed = JSON.parse(bodyText);
-      if (!parsed.profileArn) parsed.profileArn = profileArn;
+      // Never trust a profileArn supplied by the client; the selected
+      // connection's account-owned value is authoritative.
+      parsed.profileArn = profileArn;
       return JSON.stringify(parsed);
     } catch {
       return bodyText;
@@ -916,6 +933,24 @@ export async function executeWithFallback({
       }
     }
 
+    const proxyEntry = rotationEntries.length > 0 ? rotationEntries[attempt - 1] ?? null : null;
+    if (hybridProtonBlocked && proxyEntry?.adapter === "proton") break;
+    const proxyUrl = proxyEntry ? proxyEntry.url : egressPolicy === "direct" || scopedPolicy ? null : requireResolvedProxy(connection);
+    if (requireProxy && (!proxyUrl || validateProxyAddress(proxyUrl))) {
+      return { ok: false, response: new Response(JSON.stringify({ error: { code: "proxy_required", message: "This fallback requires a valid proxy." } }), { status: 503, headers: { "content-type": "application/json" } }) };
+    }
+
+    // Kiro's profile is account-owned metadata, not client input. Resolve it
+    // after refresh and before the account slot or executor can dispatch chat.
+    if (provider.id === "kiro") {
+      const profile = await ensureKiroProfileArn(connection, { proxyUrl });
+      if (!profile.ok) {
+        lastFailureResponse = kiroProfileUnavailableResponse(targetFormat);
+        continue;
+      }
+      connection = profile.connection;
+    }
+
     const headers = { ...baseHeaders };
     // The upstream checks the session id against metadata.user_id, so both
     // have to come from the same request body.
@@ -923,12 +958,6 @@ export async function executeWithFallback({
       provider.id === "claude" ? extractClaudeSessionId(payload?.metadata?.user_id) : null;
     applyConnectionAuth(headers, connection, { claudeSessionId, adaptiveThinking });
     const url = resolveUrl(connection);
-    const proxyEntry = rotationEntries.length > 0 ? rotationEntries[attempt - 1] ?? null : null;
-    if (hybridProtonBlocked && proxyEntry?.adapter === "proton") break;
-    const proxyUrl = proxyEntry ? proxyEntry.url : egressPolicy === "direct" || scopedPolicy ? null : requireResolvedProxy(connection);
-    if (requireProxy && (!proxyUrl || validateProxyAddress(proxyUrl))) {
-      return { ok: false, response: new Response(JSON.stringify({ error: { code: "proxy_required", message: "This fallback requires a valid proxy." } }), { status: 503, headers: { "content-type": "application/json" } }) };
-    }
 
     let releaseSlot = null;
     try {
@@ -1148,12 +1177,21 @@ export async function executeWithFallback({
           return { ok: false, response: lastFailureResponse };
         }
         connection = refreshed;
-        applyConnectionAuth(headers, connection, { adaptiveThinking });
         const retryProxyUrl = proxyEntry
           ? proxyEntry.url
           : egressPolicy === "direct" || scopedPolicy
             ? null
             : requireResolvedProxy(connection);
+        if (provider.id === "kiro") {
+          const profile = await ensureKiroProfileArn(connection, { proxyUrl: retryProxyUrl });
+          if (!profile.ok) {
+            lastFailureResponse = kiroProfileUnavailableResponse(targetFormat);
+            if (attempt < maxAttempts) continue;
+            return { ok: false, response: lastFailureResponse };
+          }
+          connection = profile.connection;
+        }
+        applyConnectionAuth(headers, connection, { adaptiveThinking });
 
         try {
           releaseSlot = await acquireAccountSlot(connection, signal, { purpose });

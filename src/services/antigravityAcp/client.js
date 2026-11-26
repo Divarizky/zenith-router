@@ -24,9 +24,12 @@ export async function createAntigravityAcpClient(workerId, createTransport, { si
   try {
     transport = createTransport({
       command: worker.launcher,
-      args: [],
+      args: worker.launcherArgs || [],
       cwd: worker.workspace,
-      env: { ...MINIMAL_ENV },
+      env: {
+        ...MINIMAL_ENV,
+        ...(worker.isolatedHome ? { HOME: worker.isolatedHome, ...(process.platform === "win32" ? { USERPROFILE: worker.isolatedHome } : {}) } : {}),
+      },
     });
   } catch {
     throw Object.assign(new Error("ACP worker could not be started"), { code: "ACP_LOCAL_UNAVAILABLE" });

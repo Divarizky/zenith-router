@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, chmod, writeFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, chmod, writeFile, rm, realpath, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -21,7 +21,7 @@ import { executeAntigravityAcp, setAntigravityAcpTransportFactory } from "../src
 import { AntigravityAcpTransport } from "../src/services/antigravityAcp/transport.js";
 import { handleChat } from "../src/gateway/chat.js";
 import { renderProviderDetailPage, handleSaveAntigravityAcp } from "../src/ui/pages/providers.js";
-import { getAntigravityAcpWorker, getAntigravityAcpWorkers, setAntigravityAcpWorkerConfigPathForTests, setAntigravityAcpWorkerLoaderForTests } from "../src/services/antigravityAcp/workers.js";
+import { getAntigravityAcpWorker, getAntigravityAcpWorkers, setAntigravityAcpWorkerConfigPathForTests, setAntigravityAcpWorkerLoaderForTests, setAntigravityAcpAutoDiscoveryForTests } from "../src/services/antigravityAcp/workers.js";
 import { createAntigravityAcpClient } from "../src/services/antigravityAcp/client.js";
 
 async function reset(profiles = []) {
@@ -119,8 +119,47 @@ test("deployment worker map accepts only canonical isolated launchers and reject
   }
 });
 
+test("missing worker map auto-provisions isolated agy worker and rejects unsafe binaries", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-autodiscovery-"));
+  const configPath = path.join(dir, "missing.json");
+  const binary = path.join(dir, "agy");
+  setAntigravityAcpWorkerLoaderForTests(null);
+  setAntigravityAcpWorkerConfigPathForTests(configPath);
+  try {
+    await writeFile(binary, "#!/bin/sh\\nexit 0\\n", { mode: 0o700 });
+    await chmod(binary, 0o700);
+    setAntigravityAcpAutoDiscoveryForTests([binary]);
+    const [worker] = await getAntigravityAcpWorkers();
+    assert.equal(worker.workerId, "agy-worker-default");
+    assert.equal(worker.launcher, await realpath(binary));
+    assert.deepEqual(worker.launcherArgs, ["acp", "--stdio"]);
+    assert.deepEqual(worker.loginLauncherArgs, ["acp", "--login"]);
+    assert.equal(worker.isolatedHome, path.join(os.homedir(), ".config", "zenith-router", "acp", "default", "home"));
+    for (const dirPath of [worker.workspace, worker.isolatedHome, path.join(os.homedir(), ".config", "zenith-router", "acp", "default", "appdata")]) {
+      const info = await import("node:fs/promises").then(({ stat }) => stat(dirPath));
+      assert.equal(info.mode & 0o777, 0o700);
+    }
+    await chmod(binary, 0o775);
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    await chmod(binary, 0o700);
+    await unlink(binary);
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    setAntigravityAcpAutoDiscoveryForTests([binary]);
+    await writeFile(configPath, "{ invalid", { mode: 0o600 });
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+    await writeFile(configPath, "[]", { mode: 0o600 });
+    await chmod(configPath, 0o666);
+    assert.deepEqual(await getAntigravityAcpWorkers(), []);
+  } finally {
+    setAntigravityAcpAutoDiscoveryForTests(null);
+    setAntigravityAcpWorkerConfigPathForTests(null);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("ACP worker client uses only allowlisted launch data and ACP v1 methods", async () => {
   await reset();
+  setAntigravityAcpWorkerLoaderForTests(async () => [{ workerId: "agy-account-1", namespace: "agy-account-1", launcher: "/test/agy-1", launcherArgs: ["acp", "--stdio"], isolatedHome: "/test/isolated-home", workspace: "/test/worker-1" }]);
   const calls = [];
   const listeners = new Map();
   const transport = {
@@ -136,9 +175,9 @@ test("ACP worker client uses only allowlisted launch data and ACP v1 methods", a
     return transport;
   });
   assert.deepEqual(calls[0], ["spawn", {
-    command: "/test/agy-1", args: [], cwd: "/test/worker-1", env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+    command: "/test/agy-1", args: ["acp", "--stdio"], cwd: "/test/worker-1", env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: "/test/isolated-home" },
   }]);
-  assert.equal("HOME" in calls[0][1].env, false);
+  assert.equal(calls[0][1].env.HOME, "/test/isolated-home");
   assert.equal("token" in calls[0][1].env, false);
   assert.deepEqual(await client.initialize({ protocolVersion: 1 }), { protocolVersion: 1 });
   assert.deepEqual(await client.newSession({ cwd: client.cwd, mcpServers: [] }), { sessionId: "s1" });

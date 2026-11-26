@@ -87,6 +87,9 @@ function safeWorkerSnapshot(worker) {
     workerId: worker.workerId,
     launcher: worker.launcher,
     loginLauncher: worker.loginLauncher,
+    loginLauncherArgs: worker.loginLauncherArgs || [],
+    launcherArgs: worker.launcherArgs || [],
+    isolatedHome: worker.isolatedHome,
     workspace: worker.workspace,
   };
 }
@@ -343,9 +346,16 @@ export async function startAntigravityAcpLogin(binding) {
     record.urlTimer = setTimeout(() => failRecord(record, "login_url_timeout"), timing.urlWaitMs);
     let child;
     try {
-      child = spawnFn(record.worker.loginLauncher, [], {
+      const env = process.platform === "win32"
+        ? { PATH: `${process.env.SystemRoot || "C:\\Windows"}\\System32;${process.env.SystemRoot || "C:\\Windows"}`, SYSTEMROOT: process.env.SystemRoot || "C:\\Windows" }
+        : { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" };
+      if (record.worker.isolatedHome) {
+        env.HOME = record.worker.isolatedHome;
+        if (process.platform === "win32") env.USERPROFILE = record.worker.isolatedHome;
+      }
+      child = spawnFn(record.worker.loginLauncher, record.worker.loginLauncherArgs || [], {
         cwd: record.worker.workspace,
-        env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+        env,
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
       });

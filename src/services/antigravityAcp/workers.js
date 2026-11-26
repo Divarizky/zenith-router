@@ -1,4 +1,4 @@
-import { lstat, stat, realpath, readFile } from "node:fs/promises";
+import { lstat, stat, realpath, readFile, mkdir, chmod } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
@@ -7,6 +7,7 @@ const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const MAX_CONFIG_BYTES = 32 * 1024;
 let configPath = DEFAULT_CONFIG;
 let loaderOverride = null;
+let discoveryPathsOverride = null;
 
 /** Test hook; runtime callers must never derive worker launch data from requests. */
 export function setAntigravityAcpWorkerLoaderForTests(loader) {
@@ -15,6 +16,63 @@ export function setAntigravityAcpWorkerLoaderForTests(loader) {
 
 export function setAntigravityAcpWorkerConfigPathForTests(filePath) {
   configPath = typeof filePath === "string" && path.isAbsolute(filePath) ? filePath : DEFAULT_CONFIG;
+}
+
+/** Isolate auto-discovery from host-installed binaries in unit tests. */
+export function setAntigravityAcpAutoDiscoveryForTests(paths) {
+  discoveryPathsOverride = Array.isArray(paths) ? paths.filter((item) => typeof item === "string") : null;
+}
+
+function candidatePaths() {
+  if (discoveryPathsOverride) return discoveryPathsOverride;
+  const home = os.homedir();
+  const candidates = process.platform === "win32"
+    ? [path.join(process.env.LOCALAPPDATA || "", "Programs", "Antigravity", "bin", "agy.cmd"), path.join(process.env.USERPROFILE || home, ".local", "bin", "agy.exe")]
+    : [path.join(home, ".local", "bin", "agy"), "/usr/local/bin/agy", "/usr/bin/agy"];
+  if (process.platform === "darwin") candidates.splice(2, 0, "/Applications/Antigravity.app/Contents/Resources/app/bin/agy", "/opt/homebrew/bin/agy");
+  const pathValue = process.env.PATH || "";
+  for (const entry of pathValue.split(path.delimiter)) {
+    if (!entry || !path.isAbsolute(entry) || entry === ".") continue;
+    candidates.push(...(process.platform === "win32" ? ["agy.exe", "agy.cmd", "agy.bat"] : ["agy"]).map((name) => path.join(entry, name)));
+  }
+  return [...new Set(candidates)];
+}
+
+async function findAgyBinary() {
+  for (const candidate of candidatePaths()) {
+    try {
+      const resolved = await realpath(candidate);
+      const info = await stat(resolved);
+      if (!info.isFile() || (process.platform !== "win32" && (!(info.mode & 0o111) || (info.mode & 0o022)))) continue;
+      if (process.platform !== "win32") {
+        const parent = await stat(path.dirname(resolved));
+        if (!parent.isDirectory() || (parent.mode & 0o022)) continue;
+      }
+      return resolved;
+    } catch {}
+  }
+  return null;
+}
+
+async function provisionDefaultWorker() {
+  const agy = await findAgyBinary();
+  if (!agy) return [];
+  const root = path.join(os.homedir(), ".config", "zenith-router", "acp", "default");
+  const paths = { workspace: path.join(root, "workspace"), homeDir: path.join(root, "home"), appDataDir: path.join(root, "appdata") };
+  try {
+    for (const dir of [path.join(os.homedir(), ".config", "zenith-router", "acp"), root, ...Object.values(paths)]) {
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      if (process.platform !== "win32") await chmod(dir, 0o700);
+    }
+  } catch { return []; }
+  const win = process.platform === "win32";
+  return [Object.freeze({
+    workerId: "agy-worker-default", namespace: "agy-worker-default", launcher: agy,
+    launcherArgs: Object.freeze(["acp", "--stdio"]),
+    loginLauncher: agy,
+    loginLauncherArgs: Object.freeze(["acp", "--login"]),
+    workspace: paths.workspace, isolatedHome: paths.homeDir,
+  })];
 }
 
 async function canonicalWorker(entry) {
@@ -59,8 +117,14 @@ async function canonicalWorker(entry) {
 
 async function loadWorkers() {
   if (loaderOverride) return loaderOverride();
+  let info;
   try {
-    const info = await lstat(configPath);
+    info = await lstat(configPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return provisionDefaultWorker();
+    return [];
+  }
+  try {
     if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_CONFIG_BYTES || (process.platform !== "win32" && (info.mode & 0o022) !== 0)) throw new Error("worker config invalid");
     const parsed = JSON.parse(await readFile(configPath, "utf8"));
     if (!Array.isArray(parsed) || parsed.length > 2) throw new Error("worker config invalid");

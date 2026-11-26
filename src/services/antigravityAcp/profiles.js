@@ -98,7 +98,7 @@ export async function registerAntigravityAcpWorker(workerId, {
   if (typeof workerId !== "string" || expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
   const worker = await getAntigravityAcpWorker(workerId);
   if (!worker || expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
-  if (expectedWorker && (worker.launcher !== expectedWorker.launcher || worker.workspace !== expectedWorker.workspace || worker.loginLauncher !== expectedWorker.loginLauncher)) {
+  if (expectedWorker && (worker.launcher !== expectedWorker.launcher || worker.workspace !== expectedWorker.workspace || worker.loginLauncher !== expectedWorker.loginLauncher || worker.isolatedHome !== expectedWorker.isolatedHome || JSON.stringify(worker.launcherArgs || []) !== JSON.stringify(expectedWorker.launcherArgs || []) || JSON.stringify(worker.loginLauncherArgs || []) !== JSON.stringify(expectedWorker.loginLauncherArgs || []))) {
     return { ok: false, reason: "stale" };
   }
   if (typeof shouldCommit === "function" && !shouldCommit()) return { ok: false, reason: "cancelled" };

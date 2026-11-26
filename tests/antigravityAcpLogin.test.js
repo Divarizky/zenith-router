@@ -31,6 +31,9 @@ const WORKER = {
   namespace: "agy-login-worker",
   launcher: "/opt/agy/runtime",
   loginLauncher: "/opt/agy/login",
+  loginLauncherArgs: ["acp", "--login"],
+  launcherArgs: ["acp", "--stdio"],
+  isolatedHome: "/opt/agy/home",
   workspace: "/opt/agy/workspace",
 };
 
@@ -82,8 +85,8 @@ test("happy path uses the trusted login launcher, verifies ACP v1, and registers
   setAntigravityAcpLoginDependenciesForTests({
     spawn: (command, args, options) => {
       assert.equal(command, WORKER.loginLauncher);
-      assert.deepEqual(args, []);
-      assert.deepEqual(options.env, { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" });
+      assert.deepEqual(args, WORKER.loginLauncherArgs);
+      assert.deepEqual(options.env, { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: WORKER.isolatedHome });
       assert.equal(options.cwd, WORKER.workspace);
       child = fakeChild({ onCode: (_code, process) => queueMicrotask(() => process.emit("exit", 0, null)) });
       queueMicrotask(() => child.stdout.write(`AGY_LOGIN_URL=${URL}\n`));

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { proxyFetch } from "../../executors/proxy.js";
 import { antigravityUserAgent } from "../antigravityIdentity.js";
 import { claudeUserAgent } from "../claudeIdentity.js";
+import { buildKiroIdentityHeaders } from "../kiroIdentity.js";
 
 // Login flows for OAuth providers, ported from the upstream OAuth provider definitions.
 // Client ids are the public ones shipped in each vendor's own CLI/IDE.
@@ -160,19 +161,54 @@ export async function fetchCopilotToken(githubToken, { proxyUrl = null } = {}) {
 }
 
 /** Kiro Builder ID tokens carry no profileArn; requests 403 without it. */
-export async function fetchKiroProfileArn(accessToken, { proxyUrl = null } = {}) {
+const KIRO_PROFILE_URL = "https://codewhisperer.us-east-1.amazonaws.com/ListAvailableProfiles";
+const KIRO_PROFILE_TIMEOUT_MS = 10000;
+let kiroProfileFetchOverride = null;
+
+/** Swap only the profile-discovery transport in tests; normal OAuth proxying is unchanged. */
+export function setKiroProfileFetch(fn) {
+  kiroProfileFetchOverride = fn || null;
+}
+
+function discoveredKiroArn(value) {
+  const arn = typeof value === "string" ? value.trim() : "";
+  // Discovery must return a complete ARN-shaped value; an empty or partial
+  // profile object is not safe to attach to another request.
+  return /^arn:[^\s:]+:[^\s:]+:[^\s:]*:[^\s:]*:[^\s]+$/.test(arn) ? arn : null;
+}
+
+export async function discoverKiroProfiles(accessToken, { proxyUrl = null, connectionId = null } = {}) {
   try {
-    const res = await oauthFetch("https://codewhisperer.us-east-1.amazonaws.com/ListAvailableProfiles", {
+    const init = {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(KIRO_PROFILE_TIMEOUT_MS),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        ...buildKiroIdentityHeaders({ kind: "transport", connectionId }),
+      },
       body: JSON.stringify({ maxResults: 10 }),
-    }, { proxyUrl });
-    if (!res.ok) return null;
+    };
+    const res = await (kiroProfileFetchOverride
+      ? kiroProfileFetchOverride(KIRO_PROFILE_URL, init, { proxyUrl })
+      : oauthFetch(KIRO_PROFILE_URL, init, { proxyUrl }));
+    if (!res.ok) return { ok: false, reason: "http" };
     const data = await res.json();
-    return data.profiles?.find((p) => p.arn?.trim())?.arn?.trim() || null;
+    const candidates = [
+      ...(Array.isArray(data?.profiles) ? data.profiles.map((profile) => profile?.arn || profile?.profileArn) : []),
+      data?.profileArn,
+    ];
+    const arns = [...new Set(candidates.map(discoveredKiroArn).filter(Boolean))];
+    return { ok: true, arns };
   } catch {
-    return null;
+    return { ok: false, reason: "failed" };
   }
+}
+
+export async function fetchKiroProfileArn(accessToken, options = {}) {
+  const result = await discoverKiroProfiles(accessToken, options);
+  return result.ok && result.arns.length === 1 ? result.arns[0] : null;
 }
 
 const AWS_REGION = /^[a-z]{2}-[a-z]+-\d{1,2}$/;

@@ -1,158 +1,208 @@
+import { randomUUID } from "node:crypto";
 import { getSetting, setSetting } from "../settings.js";
-import { getAntigravityAcpWorker } from "./workers.js";
+import {
+  ACCOUNTS_SETTING, accountNameKey, getAccounts, normalizeAccountName, validateAccounts, workerIdForAccount, isValidAccountId,
+} from "./accounts.js";
+import {
+  accountHasLoginFile, getAntigravityAcpWorker, isDerivedWorkerMode, provisionAntigravityAcpAccountDirs, removeAntigravityAcpAccountDirs,
+} from "./workers.js";
+import { DEFAULT_LIMIT_MS } from "./quota.js";
 
 const ENABLED_SETTING = "antigravity_acp_enabled";
-const PROFILES_SETTING = "antigravity_acp_profiles";
-const MAX_PROFILES = 2;
-const WORKER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const VALID_STATUSES = new Set(["ready", "needs_login", "unavailable"]);
 const profileStatuses = new Map();
+const limitedUntil = new Map();
+const activeUse = new Map();
 let configGeneration = 0;
+let clock = () => Date.now();
 
-/** Synchronously snapshots enabled candidates (priority order) with bindings from one config read. */
-export function snapshotAntigravityAcpCandidates() {
-  const generation = configGeneration;
-  return getAntigravityAcpProfiles().filter((p) => p.enabled).sort((a, b) => a.priority - b.priority)
-    .map((profile) => ({ profile, binding: { profileId: profile.id, workerId: profile.workerId, generation } }));
+/** Test hook for the limit clock only. */
+export function setAntigravityAcpClockForTests(fn) {
+  clock = typeof fn === "function" ? fn : () => Date.now();
 }
 
-/** True only while the binding still matches the live slot configuration. */
-export function isAntigravityAcpBindingCurrent(binding) {
-  if (!binding || binding.generation !== configGeneration) return false;
-  const profile = getAntigravityAcpProfiles().find(({ id }) => id === binding.profileId);
-  return profile?.enabled === true && profile.workerId === binding.workerId;
-}
-
-/** ACP stays opt-in even when profiles have been provisioned. */
-export function isAntigravityAcpEnabled() {
-  return getSetting(ENABLED_SETTING, "false") === "true";
-}
-
-export function setAntigravityAcpEnabled(enabled) {
-  if (typeof enabled !== "boolean") return false;
-  if (enabled && !getAntigravityAcpProfiles().some((profile) => profile.enabled)) return false;
-  return setSetting(ENABLED_SETTING, enabled ? "true" : "false") !== null;
-}
-
-function parseProfiles(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    return validateAntigravityAcpProfiles(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Profiles contain only allowlisted local worker IDs and routing priority.
- * Commands, arguments, environment, cwd, and credentials are never accepted here.
- */
-export function validateAntigravityAcpProfiles(profiles) {
-  if (!Array.isArray(profiles) || profiles.length > MAX_PROFILES) return false;
-  const workerIds = new Set();
-  const ids = new Set();
-  const priorities = new Set();
-  for (const profile of profiles) {
-    if (!profile || typeof profile !== "object" || Array.isArray(profile)) return false;
-    if (Object.keys(profile).some((key) => !["id", "workerId", "priority", "enabled"].includes(key))) return false;
-    if (typeof profile.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/.test(profile.id)) return false;
-    if (typeof profile.workerId !== "string" || !WORKER_ID_PATTERN.test(profile.workerId)) return false;
-    if (!Number.isInteger(profile.priority) || profile.priority < 0 || profile.priority > 1) return false;
-    if (typeof profile.enabled !== "boolean") return false;
-    if (ids.has(profile.id) || workerIds.has(profile.workerId) || priorities.has(profile.priority)) return false;
-    ids.add(profile.id);
-    workerIds.add(profile.workerId);
-    priorities.add(profile.priority);
-  }
-  return true;
+export function resetAntigravityAcpRuntimeStateForTests() {
+  profileStatuses.clear();
+  limitedUntil.clear();
+  activeUse.clear();
 }
 
 export function getAntigravityAcpProfiles() {
-  return parseProfiles(getSetting(PROFILES_SETTING, "[]"));
+  return getAccounts();
 }
 
 export function getAntigravityAcpConfigGeneration() {
   return configGeneration;
 }
 
-function applyProfilesUpdate(profiles) {
-  const serialized = JSON.stringify(profiles);
-  const changed = getSetting(PROFILES_SETTING, "[]") !== serialized;
-  const result = setSetting(PROFILES_SETTING, serialized);
-  if (result === null) return false;
-  if (changed) configGeneration += 1;
+function isLimited(id) {
+  const until = limitedUntil.get(id);
+  if (until === undefined) return false;
+  if (until > clock()) return true;
+  limitedUntil.delete(id);
+  return false;
+}
+
+function needsLogin(id) {
+  return isDerivedWorkerMode() && !accountHasLoginFile(id);
+}
+
+/** Marks an account limited until the reported reset, or five hours when none was reported. */
+export function markAntigravityAcpAccountLimited(accountId, resetAt = null) {
+  if (!getAccounts().some(({ id }) => id === accountId)) return false;
+  const now = clock();
+  const until = Number.isFinite(resetAt) && resetAt > now ? resetAt : now + DEFAULT_LIMIT_MS;
+  limitedUntil.set(accountId, until);
+  return true;
+}
+
+export function getAntigravityAcpAccountLimitedUntil(accountId) {
+  return isLimited(accountId) ? limitedUntil.get(accountId) : null;
+}
+
+/** Counts an in-flight request/login against an account so it cannot be deleted underneath it. Returns a release function. */
+export function acquireAntigravityAcpAccountUse(accountId) {
+  activeUse.set(accountId, (activeUse.get(accountId) || 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (activeUse.get(accountId) || 1) - 1;
+    if (left <= 0) activeUse.delete(accountId); else activeUse.set(accountId, left);
+  };
+}
+
+/** Synchronously snapshots routable accounts in list order; limited and needs_login accounts are skipped. */
+export function snapshotAntigravityAcpCandidates() {
+  const generation = configGeneration;
+  return getAccounts().filter((a) => a.enabled && !isLimited(a.id) && !needsLogin(a.id) && !(isDerivedWorkerMode() && profileStatuses.get(a.id) === "needs_login"))
+    .map((profile) => ({ profile: { ...profile, workerId: workerIdForAccount(profile.id) }, binding: { profileId: profile.id, workerId: workerIdForAccount(profile.id), generation } }));
+}
+
+/** True only while the binding still matches the live account configuration. */
+export function isAntigravityAcpBindingCurrent(binding) {
+  if (!binding || binding.generation !== configGeneration) return false;
+  const account = getAccounts().find(({ id }) => id === binding.profileId);
+  return account?.enabled === true && workerIdForAccount(account.id) === binding.workerId;
+}
+
+/** ACP stays opt-in even when accounts have been provisioned. */
+export function isAntigravityAcpEnabled() {
+  return getSetting(ENABLED_SETTING, "false") === "true";
+}
+
+export function setAntigravityAcpEnabled(enabled) {
+  if (typeof enabled !== "boolean") return false;
+  if (enabled && !getAccounts().some((account) => account.enabled)) return false;
+  return setSetting(ENABLED_SETTING, enabled ? "true" : "false") !== null;
+}
+
+function writeAccounts(next, { bump }) {
+  if (!validateAccounts(next)) return false;
+  if (setSetting(ACCOUNTS_SETTING, JSON.stringify(next)) === null) return false;
+  // Pure appends must not invalidate bindings of in-flight requests to other accounts.
+  if (bump) configGeneration += 1;
   profileStatuses.clear();
   return true;
 }
 
+/** Creates the account entry and its isolated folders only; the account starts as needs_login. */
+export async function addAntigravityAcpAccount(name) {
+  const clean = normalizeAccountName(name);
+  if (clean === null) return { ok: false, reason: "invalid_name" };
+  const accounts = getAccounts();
+  if (accounts.some((a) => accountNameKey(a.name) === accountNameKey(clean))) return { ok: false, reason: "duplicate_name" };
+  const id = randomUUID().replaceAll("-", "");
+  if (!await provisionAntigravityAcpAccountDirs(id)) return { ok: false, reason: "provision_failed" };
+  // Re-read: another add may have committed while folders were being created.
+  const current = getAccounts();
+  if (current.some((a) => accountNameKey(a.name) === accountNameKey(clean))) {
+    await removeAntigravityAcpAccountDirs(id);
+    return { ok: false, reason: "duplicate_name" };
+  }
+  const account = { id, name: clean, enabled: true };
+  if (!writeAccounts([...current, account], { bump: false })) {
+    await removeAntigravityAcpAccountDirs(id);
+    return { ok: false, reason: "invalid" };
+  }
+  return { ok: true, account: { ...account } };
+}
+
+/** Deletes token files, the account folder, then the list entry. Refuses while a request or login uses the account. */
+export async function removeAntigravityAcpAccount(accountId) {
+  if (!isValidAccountId(accountId)) return { ok: false, reason: "invalid_id" };
+  const accounts = getAccounts();
+  if (!accounts.some((a) => a.id === accountId)) return { ok: false, reason: "not_found" };
+  if (activeUse.has(accountId)) return { ok: false, reason: "account_busy" };
+  const release = acquireAntigravityAcpAccountUse(accountId);
+  try {
+    if (!await removeAntigravityAcpAccountDirs(accountId)) return { ok: false, reason: "cleanup_failed" };
+    if (!writeAccounts(getAccounts().filter((a) => a.id !== accountId), { bump: true })) return { ok: false, reason: "invalid" };
+    limitedUntil.delete(accountId);
+    return { ok: true };
+  } finally {
+    release();
+  }
+}
+
+export function setAntigravityAcpAccountEnabled(accountId, enabled) {
+  if (typeof enabled !== "boolean") return false;
+  const accounts = getAccounts();
+  if (!accounts.some((a) => a.id === accountId)) return false;
+  return writeAccounts(accounts.map((a) => (a.id === accountId ? { ...a, enabled } : a)), { bump: true });
+}
+
+/** Replaces the whole ordered list (order = routing order). Strict allowlist validation applies. */
+export async function setAntigravityAcpProfiles(profiles, { expectedGeneration = null } = {}) {
+  if (!validateAccounts(profiles)) return false;
+  if (expectedGeneration !== null && expectedGeneration !== configGeneration) return false;
+  const prev = getAccounts();
+  const appendOnly = profiles.length >= prev.length && prev.every((a, i) => JSON.stringify(a) === JSON.stringify(profiles[i]));
+  return writeAccounts(profiles, { bump: !appendOnly });
+}
+
 /**
- * Registers a trusted worker after an out-of-band bootstrap (for example Agy
- * login) without replacing another slot. The generation and worker snapshot
- * make the commit fail closed when an admin changed the mapping mid-attempt.
+ * Called after a verified login. Fails closed when the account vanished or the worker mapping
+ * changed while the attempt ran. Clears stale runtime state so the account becomes routable.
  */
-export async function registerAntigravityAcpWorker(workerId, {
-  expectedGeneration = configGeneration,
-  expectedWorker = null,
-  shouldCommit = null,
-} = {}) {
-  if (typeof workerId !== "string" || expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
-  const worker = await getAntigravityAcpWorker(workerId);
-  if (!worker || expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
+export async function completeAntigravityAcpLogin(accountId, { expectedWorker = null, shouldCommit = null } = {}) {
+  if (!getAccounts().some((a) => a.id === accountId)) return { ok: false, reason: "stale" };
+  const worker = await getAntigravityAcpWorker(workerIdForAccount(accountId));
+  if (!worker || !getAccounts().some((a) => a.id === accountId)) return { ok: false, reason: "stale" };
   if (expectedWorker && (worker.launcher !== expectedWorker.launcher || worker.workspace !== expectedWorker.workspace || worker.loginLauncher !== expectedWorker.loginLauncher || worker.isolatedHome !== expectedWorker.isolatedHome || JSON.stringify(worker.launcherArgs || []) !== JSON.stringify(expectedWorker.launcherArgs || []) || JSON.stringify(worker.loginLauncherArgs || []) !== JSON.stringify(expectedWorker.loginLauncherArgs || []))) {
     return { ok: false, reason: "stale" };
   }
   if (typeof shouldCommit === "function" && !shouldCommit()) return { ok: false, reason: "cancelled" };
-  if (expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
-  const profiles = getAntigravityAcpProfiles();
-  const existing = profiles.find((profile) => profile.workerId === workerId);
-  if (existing) return { ok: true, added: false, profile: { ...existing } };
-  if (profiles.length >= MAX_PROFILES) return { ok: false, reason: "full" };
-  const usedIds = new Set(profiles.map((profile) => profile.id));
-  const usedPriorities = new Set(profiles.map((profile) => profile.priority));
-  const priority = [0, 1].find((candidate) => !usedPriorities.has(candidate));
-  if (priority === undefined) return { ok: false, reason: "full" };
-  let suffix = 1;
-  while (usedIds.has(`worker-${suffix}`)) suffix += 1;
-  const profile = { id: `worker-${suffix}`, workerId, priority, enabled: true };
-  const nextProfiles = [...profiles, profile];
-  if (!validateAntigravityAcpProfiles(nextProfiles)) return { ok: false, reason: "stale" };
-  if (typeof shouldCommit === "function" && !shouldCommit()) return { ok: false, reason: "cancelled" };
-  if (expectedGeneration !== configGeneration) return { ok: false, reason: "stale" };
-  if (!applyProfilesUpdate(nextProfiles)) return { ok: false, reason: "stale" };
-  return { ok: true, added: true, profile };
-}
-
-export async function setAntigravityAcpProfiles(profiles, { expectedGeneration = null } = {}) {
-  if (!validateAntigravityAcpProfiles(profiles)) return false;
-  for (const profile of profiles) {
-    if (!await getAntigravityAcpWorker(profile.workerId)) return false;
-  }
-  if (expectedGeneration !== null && expectedGeneration !== configGeneration) return false;
-  return applyProfilesUpdate(profiles);
+  profileStatuses.delete(accountId);
+  limitedUntil.delete(accountId);
+  return { ok: true };
 }
 
 /** Status is runtime-only and contains no process output or secret-bearing details. */
 export function setAntigravityAcpProfileStatus(profileId, status, binding = undefined) {
   if (!VALID_STATUSES.has(status)) return false;
-  const profile = getAntigravityAcpProfiles().find(({ id }) => id === profileId);
-  if (!profile) return false;
+  if (!getAccounts().some(({ id }) => id === profileId)) return false;
   if (binding !== undefined && (!binding || binding.profileId !== profileId || !isAntigravityAcpBindingCurrent(binding))) return false;
   profileStatuses.set(profileId, status);
   return true;
 }
 
 export function getAntigravityAcpProfileStatus(profileId) {
-  const profile = getAntigravityAcpProfiles().find(({ id }) => id === profileId);
-  if (!profile || !profile.enabled) return "unavailable";
-  return profileStatuses.get(profileId) || "unavailable";
+  const account = getAccounts().find(({ id }) => id === profileId);
+  if (!account || !account.enabled) return "unavailable";
+  if (isLimited(profileId)) return "limited";
+  if (needsLogin(profileId)) return "needs_login";
+  return profileStatuses.get(profileId) || (isDerivedWorkerMode() ? "ready" : "unavailable");
 }
 
 export function listAntigravityAcpProfiles() {
-  return getAntigravityAcpProfiles().map((profile) => ({
-    id: profile.id,
-    workerId: profile.workerId,
-    priority: profile.priority,
-    enabled: profile.enabled,
-    status: getAntigravityAcpProfileStatus(profile.id),
+  return getAccounts().map((account, index) => ({
+    id: account.id,
+    name: account.name,
+    workerId: workerIdForAccount(account.id),
+    priority: index,
+    enabled: account.enabled,
+    status: getAntigravityAcpProfileStatus(account.id),
+    limitedUntil: getAntigravityAcpAccountLimitedUntil(account.id),
   }));
 }

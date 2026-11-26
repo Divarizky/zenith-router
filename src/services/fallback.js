@@ -5,16 +5,12 @@ import {
   getModelLockDetails,
   setConnectionCooldown,
   updateConnectionLastUsed,
-  getAntigravityModelsByConnection,
-  getAntigravityAccountModels,
   MODEL_LOCK_MAX_MS,
 } from "../db/index.js";
-import { getProvider, getProviderModels, resolveProviderRuntime } from "../providers/index.js";
+import { getProvider, getProviderModels } from "../providers/index.js";
 import { adaptPayloadForProvider, MODEL_ACCESS_DENIED_403 } from "../providers/params.js";
 import { disableModel } from "./modelOverrides.js";
 import { isQuotaBlocking, isQuotaProbeDue, syncProviderQuota } from "./quota.js";
-import { isAntigravityPoolExhausted } from "./antigravityPools.js";
-import { buildAntigravityFamilies, normalizeEffort } from "./antigravityCatalog.js";
 import { isConnectionInCooldown, applyConnectionAuth } from "./auth.js";
 import { extractClaudeSessionId } from "./claudeIdentity.js";
 import { applyClaudeOAuthCloaking, isClaudeOAuthToken } from "./claudeCloaking.js";
@@ -68,13 +64,6 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   const providerDef = getProvider(providerId);
   const connections = getConnections(providerId);
 
-  // Antigravity publishes a per-subscription model list, so an account that
-  // does not carry the model is skipped instead of costing a wasted 403. The
-  // gate fails open: an account that has never synced has no rows and stays
-  // eligible, and the quota cache only expires with a new sync.
-  const antigravityInventory = providerDef?.id === "antigravity" && model ? getAntigravityModelsByConnection() : null;
-  const request = { providerDef, model, effort };
-
   const candidates = connections.filter(
     (c) =>
       c.is_active === 1 &&
@@ -89,7 +78,7 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   // getConnections already returns the provider in priority order, so the first
   // account left after filtering is the highest-ranked one that can serve. A
   // spare is reached only while every account above it is unavailable.
-  const available = candidates.filter((c) => servesModel(c, request, antigravityInventory));
+  const available = candidates;
 
   // One account whose cached quota says spent but carries no reset time is
   // probed once per window, highest priority first. Routing skips exhausted
@@ -102,17 +91,11 @@ export function listAvailableConnections(providerId, { model = null, effort = un
       c.is_active === 1 &&
       isQuotaProbeDue(c) &&
       !isConnectionInCooldown(c, model) &&
-      !resolveConnectionProxy(c).blocked &&
-      servesModel(c, request, antigravityInventory)
+      !resolveConnectionProxy(c).blocked
   );
   // A probe only runs when nothing healthy can serve. Placing it ahead of a
   // healthy account would let a lower-priority, stale-cache account jump the queue.
   if (quotaProbe && available.length === 0) available.push(quotaProbe);
-
-  if (antigravityInventory && normalizeEffort(effort)) {
-    // Stable sort: exact max wins; otherwise keep the legacy xhigh preference.
-    available.sort((a, b) => antigravityTierPriority(b, request, antigravityInventory) - antigravityTierPriority(a, request, antigravityInventory));
-  }
 
   if (available.length === 0 && providerDef?.noAuth) {
     if (!isVirtualInCooldown(providerId, model)) {
@@ -130,45 +113,6 @@ export function listAvailableConnections(providerId, { model = null, effort = un
   }
 
   return available;
-}
-
-/**
- * True when the model may be sent to this account. Only Antigravity is gated
- * today: its catalog is per subscription, and its 5h or weekly pool limit can
- * block a model group until the reset. Everything else always passes. An account
- * with no synced rows passes unless its pool is exhausted. The effort resolves against this
- * account's own variants, the same way the executor resolves it.
- */
-function servesModel(connection, { providerDef, model, effort }, inventory) {
-  if (!inventory || !connection.id) return true;
-  const rows = inventory.get(connection.id);
-  const hasRows = Boolean(rows && rows.size > 0);
-  // Without synced rows the runtime cannot be resolved, so the requested id is checked against its pool.
-  const runtimeId = hasRows ? (resolveProviderRuntime(providerDef, model, effort, rows)?.id ?? model) : model;
-  // A pool limit applies even before the first inventory sync.
-  if (isAntigravityPoolExhausted(connection.credentials?.quota, runtimeId)) return false;
-  if (!hasRows) return true;
-
-  const row = rows.get(runtimeId);
-  if (!row) return false;
-  const isExhausted = typeof row.quota_remaining === "number" && row.quota_remaining === 0;
-  const hasFutureReset = Number(row.quota_reset_at || 0) > Date.now();
-  return !(isExhausted && hasFutureReset);
-}
-
-function antigravityTierPriority(connection, { providerDef, model, effort }, inventory) {
-  const wanted = normalizeEffort(effort);
-  const rows = inventory?.get(connection.id);
-  if (!wanted || wanted === "off" || !rows?.size) return 0;
-  const family = buildAntigravityFamilies(
-    Object.fromEntries([...rows].map(([id, row]) => [id, { displayName: row.display_name }]))
-  ).get(model);
-  if (!family) return 0;
-  const runtime = resolveProviderRuntime(providerDef, model, effort, rows);
-  if (!runtime) return 0;
-  if (family.variants[wanted] === runtime.id ||
-      (family.tiered === runtime.id && runtime.thinkingLevel === wanted)) return 2;
-  return wanted === "max" && family.variants.xhigh === runtime.id ? 1 : 0;
 }
 
 export function getNextConnection(providerId, triedIds = [], model = null, effort = undefined) {
@@ -284,86 +228,6 @@ function isReasoningRejected(res, errText) {
   );
 }
 
-/**
- * Google's Cloud Code answers a model it cannot serve with this wording. When
- * the name it reports is not one we asked for, the upstream translated the
- * request into its own internal alias and routed it to a backend that does not
- * serve that alias for this API version. The account itself is healthy — the
- * same model served the previous request — so the failure is transient even
- * though the status is 404.
- */
-const TRANSIENT_UPSTREAM_404 = /models\/([\w.-]+) is not found for API version [^,]+, or is not supported for generateContent/i;
-
-// How often a transient upstream 404 is retried on the same account.
-const MAX_TRANSIENT_NOT_FOUND_RETRIES = 1;
-
-// Same-account retries for a 429 that means contention, not exhaustion.
-const MAX_SOFT_RATE_LIMIT_RETRIES = 1;
-
-/**
- * A 429 from a provider that serialises its turns means the account was pushed
- * while another turn was still running, not that its quota is spent. Locking the
- * model for a minute (and parking the whole account after two such failures)
- * would punish a healthy account for the router's own scheduling.
- */
-function isSoftRateLimitResponse(provider, res) {
-  return res.status === 429 && provider?.softRateLimit === true;
-}
-
-function parsedErrorPayload(bodyText) {
-  try {
-    return JSON.parse(bodyText);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Nous fair-share throttles are authoritative model/account cooldowns, not
- * short-lived serialized-turn contention. Retrying the same account after the
- * local 2.5s throttle only repeats a several-minute upstream refusal.
- */
-function isNousFairShareRateLimit(provider, res, bodyText) {
-  if (provider?.id !== "nous" || res?.status !== 429) return false;
-  const payload = parsedErrorPayload(bodyText);
-  const error = payload?.error && typeof payload.error === "object" ? payload.error : payload || {};
-  return error.reason === "rate_limited" || /fair.?share\s+rate\s+limit/i.test(String(error.message || ""));
-}
-
-// Only Cloud Code speaks this wording, so no other provider is affected by
-// mistaking its own 404 for a transient one. Antigravity is the only provider
-// that talks to Cloud Code.
-const CLOUD_CODE_PROVIDERS = new Set(["antigravity"]);
-
-/**
- * The model ids this request can have put on the wire: the routed id, plus the
- * runtime id the executor resolves it to. A 404 that names one of these means
- * the model really is unavailable here, so it is reported as is.
- */
-function sentModelIds(provider, modelId, effort, connection) {
-  const ids = new Set(modelId ? [modelId] : []);
-  if (CLOUD_CODE_PROVIDERS.has(provider?.id) && connection?.id) {
-    try {
-      const rows = getAntigravityAccountModels(connection.id);
-      const picked = resolveProviderRuntime(provider, modelId, effort, rows?.size ? rows : null);
-      if (picked?.id) ids.add(picked.id);
-    } catch {}
-  }
-  return ids;
-}
-
-function isTransientUpstreamNotFound(res, errText, sentIds, provider) {
-  if (res.status !== 404) return false;
-  if (!CLOUD_CODE_PROVIDERS.has(provider?.id)) return false;
-  const match = TRANSIENT_UPSTREAM_404.exec(errText || "");
-  if (!match) return false;
-  const reported = match[1].toLowerCase();
-  for (const id of sentIds) {
-    if (String(id).toLowerCase() === reported) return false;
-  }
-  return true;
-}
-
 function buildErrorPayload(targetFormat, type, message, code) {
   return targetFormat === "claude"
     ? { type: "error", error: { type, message } }
@@ -405,6 +269,39 @@ function freeTierModelIds(provider, modelId) {
     if (m.source === "synced" || String(m.id).endsWith(":free")) ids.add(m.id);
   }
   return ids;
+}
+
+// Same-account retries for a 429 that means contention, not exhaustion.
+const MAX_SOFT_RATE_LIMIT_RETRIES = 1;
+
+/**
+ * A 429 from a provider that serialises its turns means the account was pushed
+ * while another turn was still running, not that its quota is spent. Locking the
+ * model for a minute (and parking the whole account after two such failures)
+ * would punish a healthy account for the router's own scheduling.
+ */
+function isSoftRateLimitResponse(provider, res) {
+  return res.status === 429 && provider?.softRateLimit === true;
+}
+
+function parsedErrorPayload(bodyText) {
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Nous fair-share throttles are authoritative model/account cooldowns, not
+ * short-lived serialized-turn contention. Retrying the same account after the
+ * local 2.5s throttle only repeats a several-minute upstream refusal.
+ */
+function isNousFairShareRateLimit(provider, res, bodyText) {
+  if (provider?.id !== "nous" || res?.status !== 429) return false;
+  const payload = parsedErrorPayload(bodyText);
+  const error = payload?.error && typeof payload.error === "object" ? payload.error : payload || {};
+  return error.reason === "rate_limited" || /fair.?share\s+rate\s+limit/i.test(String(error.message || ""));
 }
 
 /**
@@ -880,9 +777,6 @@ export async function executeWithFallback({
     rotationEntries.length > 0 ? rotationEntries.length : Math.max(1, available.length);
   let lastFailureResponse = null;
   let hybridProtonBlocked = false;
-  // A transient upstream 404 is retried on the same account this many times
-  // before it is reported to the client.
-  let transientNotFoundRetries = 0;
   // Same-account retries spent on a soft 429.
   let softRateLimitRetries = 0;
   // The account a same-account retry goes back to.
@@ -907,14 +801,7 @@ export async function executeWithFallback({
       // Koneksi virtual dipakai ulang; yang berganti per percobaan hanya proxy.
       connection = available[0] || { id: null, provider: provider.id, auth_type: "none", is_active: 1 };
     } else {
-      // Do not let session affinity override an untried, eligible exact-tier account.
-      const inventory = provider.id === "antigravity" && modelId && normalizeEffort(effort)
-        ? getAntigravityModelsByConnection() : null;
-      const request = { providerDef: provider, model: modelId, effort };
-      const tiers = inventory ? available.filter((c) => !triedIds.includes(c.id))
-        .map((c) => [c, antigravityTierPriority(c, request, inventory)]) : [];
-      const bestTier = Math.max(0, ...tiers.map(([, rank]) => rank));
-      const pinCandidates = bestTier ? tiers.filter(([, rank]) => rank === bestTier).map(([c]) => c) : available;
+      const pinCandidates = available;
       const pinned = pickPinnedConnection(pinCandidates, triedIds, pin);
       // A pin that points at an eligible but full account hands the turn to an idle sibling.
       const pinnedFull = !pinned && pin ? pinnedAccountIsFull(pinCandidates, pin) : false;
@@ -1065,34 +952,6 @@ export async function executeWithFallback({
       triedIds.pop();
       attempt--;
       continue;
-    }
-
-    // Upstream answered 404 for a model it does serve, because the request was
-    // routed to a backend that does not know that model for this API version.
-    // The account is healthy, so it is neither cooled down nor locked, and the
-    // model stays available: another account takes over, and the same account
-    // is retried once when no other one is left.
-    if (isTransientUpstreamNotFound(res, errText, sentModelIds(provider, modelId, effort, connection), provider)) {
-      const hasOtherAccount = listAvailableConnections(provider.id, { model: modelId, effort }).some(
-        (c) => c.id && !triedIds.includes(c.id)
-      );
-      if (hasOtherAccount) {
-        captureLine(
-          `[FAILOVER] request_id=${attemptId} provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, pindah ke akun lain`
-        );
-        continue;
-      }
-      if (transientNotFoundRetries < MAX_TRANSIENT_NOT_FOUND_RETRIES) {
-        transientNotFoundRetries++;
-        captureLine(
-          `[RETRY] request_id=${attemptId} provider=${provider.id} account="${connection.name || connection.id}" transient 404 upstream, mengulang ke akun yang sama`
-        );
-        // Hold this account back so the next round runs the same request
-        // against it again.
-        retryConnection = connection;
-        attempt--;
-        continue;
-      }
     }
 
     // Model- or request-level denial: no cooldown, other models stay usable.

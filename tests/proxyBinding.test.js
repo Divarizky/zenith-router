@@ -166,7 +166,6 @@ test("guard - no traffic path reads the manual proxy address outside the resolve
     "src/services/fallback.js",
     "src/services/tokenRefresh.js",
     "src/services/modelImport.js",
-    "src/services/quota/antigravity.js",
     "src/services/quota/claude.js",
     "src/services/quota/codex.js",
     "src/services/quota/github.js",

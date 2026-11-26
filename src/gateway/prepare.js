@@ -5,7 +5,6 @@ import { repairClaudeToolPairing } from "../translator/toolPairing.js";
 import { applyTokenSaver, tokenSaverOptions } from "../services/tokenSaver.js";
 import { captureLine } from "../services/logger.js";
 import { getAllSettings } from "../services/settings.js";
-import { effortFromRequest } from "../services/antigravityCatalog.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -101,9 +100,6 @@ export function prepareUpstreamRequest({
     adaptiveThinking: provider.id === "claude" && sourceFormat !== FORMATS.CLAUDE && upstreamPayload?.thinking?.type === "adaptive",
     // Tool-name map of this request only (see translator/gemini.js).
     toolNames: translatedPayload?.__toolNames,
-    // The pivot body drops the client's thinking fields, so the level is read
-    // from the original body and carried to the executor out of band.
-    effort: effortFromRequest(sourceFormat, body),
     baseHeaders,
     executor: getExecutor(provider),
     startTime,

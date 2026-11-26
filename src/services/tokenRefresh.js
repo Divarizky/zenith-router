@@ -125,22 +125,6 @@ const REFRESHERS = {
     };
   },
 
-  async antigravity(creds, proxyUrl) {
-    const cfg = OAUTH_CONFIG.antigravity;
-    const t = await postForm(
-      cfg.tokenUrl,
-      {
-        grant_type: "refresh_token",
-        refresh_token: creds.refresh_token,
-        client_id: cfg.clientId,
-        client_secret: cfg.clientSecret,
-      },
-      "Google",
-      proxyUrl
-    );
-    return { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: expiresAt(t.expires_in) };
-  },
-
   async cline(creds, proxyUrl) {
     const body = await postJson(
       OAUTH_CONFIG.cline.refreshUrl,

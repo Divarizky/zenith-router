@@ -224,28 +224,6 @@ CREATE TABLE IF NOT EXISTS synced_models (
   PRIMARY KEY (provider, model_id)
 );
 
--- Antigravity account inventory: the Recommended agent model list and per-model
--- quota/attributes from fetchAvailableModels, one row per (account, model).
--- Rows are replaced on every sync, so a model that vanishes from the account
--- disappears instead of lingering.
-CREATE TABLE IF NOT EXISTS antigravity_account_models (
-  connection_id INTEGER NOT NULL,
-  model_id TEXT NOT NULL,
-  display_name TEXT,
-  recommended INTEGER NOT NULL DEFAULT 0,
-  quota_remaining REAL,
-  quota_reset_at INTEGER,
-  max_tokens INTEGER,
-  max_output_tokens INTEGER,
-  supports_images INTEGER,
-  supports_thinking INTEGER,
-  current_tier TEXT,
-  synced_at INTEGER NOT NULL,
-  PRIMARY KEY (connection_id, model_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_ag_models_model ON antigravity_account_models (model_id);
-
 -- Last free model sync attempt per provider, shown on the provider page.
 CREATE TABLE IF NOT EXISTS model_sync_state (
   provider TEXT PRIMARY KEY,
@@ -329,6 +307,10 @@ export function initDb(dbPath = null) {
  * skips existing tables, so an index on a new column would fail before the column exists.
  */
 function migrateSchema(db) {
+  // Provider HTTP/OAuth `antigravity` was removed in favour of ACP accounts, so its
+  // per-account model inventory has no reader left. Idempotent on fresh databases.
+  db.exec("DROP INDEX IF EXISTS idx_ag_models_model");
+  db.exec("DROP TABLE IF EXISTS antigravity_account_models");
   const lockColumns = db.prepare("PRAGMA table_info(connection_model_locks)").all();
   if (lockColumns.length && !lockColumns.some((col) => col.name === "locked_at")) {
     db.exec("ALTER TABLE connection_model_locks ADD COLUMN locked_at INTEGER");
@@ -611,7 +593,6 @@ export function deleteConnection(id) {
   const provider = getConnectionById(key)?.provider;
   db.exec("BEGIN");
   try {
-    db.prepare(`DELETE FROM antigravity_account_models WHERE connection_id = ?`).run(key);
     db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ?`).run(key);
     const res = db.prepare(`DELETE FROM connections WHERE id = ?`).run(key);
     if (provider) renumberConnections(db, provider);
@@ -738,165 +719,11 @@ export function getModelLockDetails(connectionId, model) {
     )
     .get(Number(connectionId), String(model), now);
   if (!row) return null;
-  if (lockReleasedBySync(db, connectionId, String(model), row.locked_at)) {
-    db.prepare(`DELETE FROM connection_model_locks WHERE connection_id = ? AND model = ?`).run(
-      Number(connectionId),
-      String(model)
-    );
-    return null;
-  }
   return { until: Number(row.locked_until), reason: row.reason || null, lockedAt: row.locked_at || null };
 }
 
 export function getModelLockUntil(connectionId, model) {
   return getModelLockDetails(connectionId, model)?.until || null;
-}
-
-/**
- * Antigravity only: a lock is released when the account's model inventory was
- * synced after the lock was taken and the model (or a variant of it, such as
- * `gemini-3.8-flash-high` for `gemini-3.8-flash`) still has quota left. Only the
- * model and its own variants count, so a sibling model's quota never releases it.
- * Other providers have no inventory, so their locks run out by the cap or the clock.
- */
-function lockReleasedBySync(db, connectionId, model, lockedAt) {
-  if (!lockedAt) return false;
-  const conn = db.prepare(`SELECT provider FROM connections WHERE id = ?`).get(Number(connectionId));
-  if (conn?.provider !== "antigravity") return false;
-  const row = db
-    .prepare(
-      `SELECT MAX(synced_at) AS synced_at,
-              MAX(CASE WHEN model_id = ? OR model_id IN (?, ?, ?, ?) THEN quota_remaining END) AS remaining
-       FROM antigravity_account_models WHERE connection_id = ?`
-    )
-    .get(model, `${model}-high`, `${model}-low`, `${model}-medium`, `${model}-tiered`, Number(connectionId));
-  if (!row || row.synced_at == null) return false;
-  return Number(row.synced_at) > Number(lockedAt) && Number(row.remaining) > 0;
-}
-
-/**
- * Reset times arrive as ISO strings from parseResetTime and as epoch ms from
- * tests; the column is INTEGER, so both are normalized here.
- */
-function toEpochMs(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
-}
-
-/**
- * Whole-list replacement, so a model that vanished upstream stops routing.
- */
-export function replaceAntigravityAccountModels(connectionId, currentTier, entries) {
-  const db = getDb();
-  const now = Date.now();
-  const del = db.prepare("DELETE FROM antigravity_account_models WHERE connection_id = ?");
-  const ins = db.prepare(`INSERT INTO antigravity_account_models
-    (connection_id, model_id, display_name, recommended, quota_remaining, quota_reset_at,
-     max_tokens, max_output_tokens, supports_images, supports_thinking, current_tier, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  db.exec("BEGIN");
-  try {
-    del.run(Number(connectionId));
-    for (const e of entries || []) {
-      ins.run(
-        Number(connectionId),
-        String(e.modelId),
-        e.displayName ?? null,
-        e.recommended ? 1 : 0,
-        typeof e.quotaRemaining === "number" ? e.quotaRemaining : null,
-        toEpochMs(e.quotaResetAt),
-        typeof e.maxTokens === "number" ? e.maxTokens : null,
-        typeof e.maxOutputTokens === "number" ? e.maxOutputTokens : null,
-        e.supportsImages === undefined ? null : e.supportsImages ? 1 : 0,
-        e.supportsThinking === undefined ? null : e.supportsThinking ? 1 : 0,
-        currentTier ?? null,
-        now
-      );
-    }
-    db.exec("COMMIT");
-  } catch (err) {
-    try { db.exec("ROLLBACK"); } catch {}
-    throw err;
-  }
-  return (entries || []).length;
-}
-
-/**
- * Cross-account union of synced Antigravity models, with the accounts carrying each.
- */
-export function getAntigravityModelInventory() {
-  const rows = getDb()
-    .prepare(
-      `SELECT a.connection_id, a.model_id, a.display_name, a.quota_remaining, a.quota_reset_at,
-              a.max_tokens, a.max_output_tokens, a.supports_images, a.supports_thinking,
-              a.current_tier, c.is_active
-       FROM antigravity_account_models a
-       JOIN connections c ON c.id = a.connection_id
-       WHERE a.recommended = 1 AND c.provider = 'antigravity'`
-    )
-    .all();
-  const inventory = new Map();
-  for (const r of rows) {
-    if (!inventory.has(r.model_id)) inventory.set(r.model_id, { displayName: r.display_name, accounts: [] });
-    inventory.get(r.model_id).accounts.push(r);
-  }
-  for (const entry of inventory.values()) {
-    entry.accounts = entry.accounts.filter((a) => a.is_active === 1);
-  }
-  return inventory;
-}
-
-/** Every synced Antigravity model row, used to rebuild the family catalog. */
-export function getAntigravityInventoryRows() {
-  return getDb()
-    .prepare(
-      `SELECT a.connection_id, a.model_id, a.display_name, a.supports_images, a.supports_thinking,
-              a.max_tokens, a.max_output_tokens, c.is_active
-       FROM antigravity_account_models a
-       JOIN connections c ON c.id = a.connection_id
-       WHERE c.provider = 'antigravity' AND c.is_active = 1`
-    )
-    .all();
-}
-
-/**
- * Per-account model ids for routing: every model the account can see, not just
- * the Recommended ones, because catalog aliases resolve to upstream ids
- * (e.g. gemini-3.8-flash -> gemini-3.8-flash-tiered).
- */
-export function getAntigravityModelsByConnection() {
-  const rows = getDb()
-    .prepare(
-      `SELECT a.connection_id, a.model_id, a.display_name, a.recommended, a.current_tier,
-              a.quota_remaining, a.quota_reset_at
-       FROM antigravity_account_models a
-       JOIN connections c ON c.id = a.connection_id
-       WHERE c.provider = 'antigravity' AND c.is_active = 1`
-    )
-    .all();
-  const byConnection = new Map();
-  for (const r of rows) {
-    if (!byConnection.has(r.connection_id)) byConnection.set(r.connection_id, new Map());
-    byConnection.get(r.connection_id).set(r.model_id, r);
-  }
-  return byConnection;
-}
-
-/**
- * Synced Antigravity models of one account, keyed by runtime model id.
- */
-export function getAntigravityAccountModels(connectionId) {
-  const rows = getDb()
-    .prepare(
-      `SELECT model_id, display_name, quota_remaining, quota_reset_at
-       FROM antigravity_account_models WHERE connection_id = ?`
-    )
-    .all(connectionId);
-  return new Map(rows.map((r) => [r.model_id, r]));
 }
 
 /**

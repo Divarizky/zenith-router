@@ -12,7 +12,6 @@ export const FREE_TIER_BUDGETS = {
 };
 
 export const FREE_TIER_TOS = {
-  antigravity: "avoid",
   opencode: "avoid",
   kiro: "avoid",
   xkiro: "caution",

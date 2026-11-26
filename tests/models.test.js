@@ -10,7 +10,6 @@ test("Provider Registry - contains core providers", () => {
     "codex",
     "github",
     "kiro",
-    "antigravity",
     "glm",
     "opencode",
     "kilocode",
@@ -94,7 +93,7 @@ test("Provider Registry - new providers use expected configs", () => {
   assert.ok(!fbIds.has("z-ai/glm-5.2"), "withdrawn 2026-08-31");
 });
 
-test("Provider Registry - aligned configs for codex, github, kiro, and antigravity", () => {
+test("Provider Registry - aligned configs for codex, github, and kiro", () => {
   const codex = getProvider("codex");
   assert.strictEqual(codex.transport.baseUrl, "https://chatgpt.com/backend-api/codex/responses");
   assert.strictEqual(codex.transport.headers.originator, "codex_cli_rs");
@@ -110,9 +109,6 @@ test("Provider Registry - aligned configs for codex, github, kiro, and antigravi
   assert.ok(Array.isArray(kiro.transport.baseUrls));
   assert.strictEqual(kiro.transport.headers["Accept"], "application/vnd.amazon.eventstream");
 
-  const ag = getProvider("antigravity");
-  assert.strictEqual(ag.transport.baseUrls[0], "https://daily-cloudcode-pa.googleapis.com");
-  assert.ok(ag.transport.headers["User-Agent"].startsWith("antigravity/cli/"));
 });
 
 test("Provider Registry - getAvailableModels aggregates model list with provider prefixes", () => {
@@ -176,31 +172,4 @@ test("GET /v1/models - publishes capabilities and token limits, and omits them w
   // model yang detail kemampuannya belum diketahui.
   const claimed = find("oc/big-pickle");
   assert.deepEqual(claimed.capabilities, { tools: true });
-});
-
-test("GET /v1/models - Antigravity menggabungkan keluarga bawaan dengan inventaris akun", async () => {
-  const { initDb, addConnection, replaceAntigravityAccountModels } = await import("../src/db/index.js");
-  const { getProviderModels, getProvider } = await import("../src/providers/index.js");
-  initDb(":memory:");
-  const conn = addConnection({ provider: "antigravity", name: "pro", auth_type: "oauth", credentials: {} });
-  replaceAntigravityAccountModels(conn.id, "free-tier", [
-    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true },
-    { modelId: "claude-opus-5-5-high", displayName: "Claude Opus 5.5 (High)", recommended: true },
-    { modelId: "gemini-3.8-flash-high", displayName: "Gemini 3.8 Flash (High)", recommended: true },
-    { modelId: "chat_20706", displayName: "internal", recommended: false },
-  ]);
-
-  const models = getProviderModels(getProvider("antigravity"));
-  const ids = models.map((m) => m.id);
-  assert.ok(ids.includes("gemini-4-argon"), "keluarga khusus langganan masuk katalog");
-  assert.ok(ids.includes("claude-opus-5-5"), "keluarga Claude 5.5 masuk katalog");
-  assert.ok(!ids.includes("gemini-4-argon-medium"), "varian runtime tidak lagi jadi entri katalog");
-  assert.ok(!ids.includes("chat_20706"), "model internal tidak masuk katalog");
-  assert.strictEqual(ids.filter((i) => i === "gemini-3.8-flash").length, 1, "tidak ada duplikat");
-
-  const argon = models.find((m) => m.id === "gemini-4-argon");
-  assert.strictEqual(argon.variants.medium, "gemini-4-argon-medium", "inventaris mengisi varian keluarga");
-  const flash = models.find((m) => m.id === "gemini-3.8-flash");
-  assert.strictEqual(flash.tiered, "gemini-3.8-flash-tiered", "keluarga tiered tetap punya bucket tiered");
-  assert.strictEqual(argon.source, "builtin", "keluarga bawaan ditandai builtin");
 });

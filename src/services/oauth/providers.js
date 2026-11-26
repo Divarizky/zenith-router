@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { proxyFetch } from "../../executors/proxy.js";
-import { antigravityUserAgent } from "../antigravityIdentity.js";
 import { claudeUserAgent } from "../claudeIdentity.js";
 import { buildKiroIdentityHeaders } from "../kiroIdentity.js";
 
@@ -82,22 +81,6 @@ export const OAUTH_CONFIG = {
       codex_cli_simplified_flow: "true",
       originator: "codex_cli_rs",
     },
-  },
-  antigravity: {
-    clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
-    clientSecret: "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",
-    authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-    tokenUrl: "https://oauth2.googleapis.com/token",
-    userInfoUrl: "https://www.googleapis.com/oauth2/v1/userinfo",
-    scopes: [
-      "https://www.googleapis.com/auth/cloud-platform",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/userinfo.profile",
-      "https://www.googleapis.com/auth/cclog",
-      "https://www.googleapis.com/auth/experimentsandconfigs",
-    ],
-    loadCodeAssistUrl: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-    onboardUserUrl: "https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser",
   },
   cline: {
     authorizeUrl: "https://api.cline.bot/api/v1/auth/authorize",
@@ -358,82 +341,6 @@ const codex = {
         account_id: auth.chatgpt_account_id || id.account_id,
         plan_type: auth.chatgpt_plan_type || id.plan_type,
       },
-    };
-  },
-};
-
-const antigravity = {
-  flowType: "authorization_code",
-  buildAuthUrl({ redirectUri, state }) {
-    const cfg = OAUTH_CONFIG.antigravity;
-    const params = new URLSearchParams({
-      client_id: cfg.clientId,
-      response_type: "code",
-      redirect_uri: redirectUri,
-      scope: cfg.scopes.join(" "),
-      state,
-      access_type: "offline",
-      prompt: "consent",
-    });
-    return `${cfg.authorizeUrl}?${params}`;
-  },
-  async exchange({ code, redirectUri, proxyUrl = null }) {
-    const cfg = OAUTH_CONFIG.antigravity;
-    const res = await oauthFetch(cfg.tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: cfg.clientId,
-        client_secret: cfg.clientSecret,
-        code,
-        redirect_uri: redirectUri,
-      }),
-    }, { proxyUrl });
-    const t = await readJson(res, "Google token exchange");
-
-    const userRes = await oauthFetch(`${cfg.userInfoUrl}?alt=json`, {
-      headers: { Authorization: `Bearer ${t.access_token}` },
-    }, { proxyUrl });
-    const user = userRes.ok ? await userRes.json() : {};
-
-    // loadCodeAssist gives the Cloud Code project every request must name.
-    const headers = {
-      Authorization: `Bearer ${t.access_token}`,
-      "Content-Type": "application/json",
-      "User-Agent": antigravityUserAgent(),
-    };
-    // agy 1.4.0 sends ideType as the string "ANTIGRAVITY". The numeric form only
-    // works without platform and returns the legacy catalog. Verified against a live account.
-    const metadata = { ideType: "ANTIGRAVITY" };
-    let projectId = "";
-    let tierId = "legacy-tier";
-    try {
-      const loadRes = await oauthFetch(cfg.loadCodeAssistUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ metadata }),
-      }, { proxyUrl });
-      if (loadRes.ok) {
-        const data = await loadRes.json();
-        projectId = data.cloudaicompanionProject?.id || data.cloudaicompanionProject || "";
-        tierId = data.allowedTiers?.find((x) => x.isDefault && x.id)?.id?.trim() || tierId;
-      }
-    } catch {}
-
-    // Onboarding can take a while; it must not block saving the account.
-    if (projectId) {
-      oauthFetch(cfg.onboardUserUrl, { method: "POST", headers, body: JSON.stringify({ tierId, metadata }) }, { proxyUrl }).catch(
-        () => {}
-      );
-    }
-
-    return {
-      access_token: t.access_token,
-      refresh_token: t.refresh_token,
-      expires_in: t.expires_in,
-      email: user.email,
-      extra: projectId ? { project_id: projectId } : {},
     };
   },
 };
@@ -839,7 +746,7 @@ const nous = {
   },
 };
 
-export const OAUTH_FLOWS = { claude, codex, antigravity, cline, github, kilocode, kiro, glm, nous };
+export const OAUTH_FLOWS = { claude, codex, cline, github, kilocode, kiro, glm, nous };
 
 export function getOAuthFlow(providerId) {
   return OAUTH_FLOWS[providerId] || null;

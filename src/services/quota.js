@@ -1,4 +1,4 @@
-import { getConnectionById, getConnections, mergeConnectionCredentials, replaceAntigravityAccountModels } from "../db/index.js";
+import { getConnectionById, getConnections, mergeConnectionCredentials } from "../db/index.js";
 import { fetchLiveQuota } from "./quota/index.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { logQuiet } from "./logger.js";
@@ -47,7 +47,7 @@ function toEpochMs(value) {
  * Latest reset timestamp advertised by a cached quota snapshot, or null when
  * the provider does not publish one. Providers describe resets in different
  * shapes, so every place a timestamp can appear is read: top-level fields,
- * per-window rows, GLM-style session/weekly rows, and Antigravity pools. The
+ * per-window rows, GLM-style session/weekly rows, and pools. The
  * latest one wins: an account stays spent until its last window resets.
  */
 export function quotaResetAt(quota) {
@@ -167,15 +167,6 @@ export async function syncProviderQuota(connection, { quiet = false } = {}) {
   // Only the quota key is written: `connection` is a snapshot from before the
   // awaits above, and its tokens may already have been rotated by a refresh.
   const { modelInventory, ...quotaDataOnly } = quotaData || {};
-  if (connection.provider === "antigravity" && Array.isArray(modelInventory)) {
-    try {
-      replaceAntigravityAccountModels(connection.id, quotaDataOnly.tier, modelInventory);
-    } catch (err) {
-      const msg = `[zenith] Failed to store Antigravity model inventory for #${connection.id}: ${err.message}`;
-      if (quiet) logQuiet(msg, "warn");
-      else console.warn(msg);
-    }
-  }
   // updated_at is the age of the last *successful* fetch. A failed sync keeps the
   // previous stamp so a stale account can become due for a probe again.
   // Read the stored row: `connection` may be a snapshot from before the awaits above.

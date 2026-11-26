@@ -8,22 +8,20 @@ import { getRecentUsage, getUsageStats, recordUsage } from "../src/services/usag
 import { isConnectionInCooldown } from "../src/services/auth.js";
 import { renderUsagePage } from "../src/ui/pages/usage.js";
 
-const MODEL_ID = "gemini-3.8-flash-high";
-const PRIMARY_MODEL = `ag/${MODEL_ID}`;
+const MODEL_ID = "meta-llama/Llama-3.3-70B-Instruct-Turbo";
+const PRIMARY_MODEL = `together/${MODEL_ID}`;
 
 function seedTwoAccounts() {
   initDb(":memory:");
   const c1 = addConnection({
-    provider: "antigravity",
+    provider: "together",
     name: "divarizky28@gmail.com",
-    auth_type: "oauth",
-    credentials: { access_token: "tok1", refresh_token: "ref1" },
+    credentials: { api_key: "k1" },
   });
   const c2 = addConnection({
-    provider: "antigravity",
+    provider: "together",
     name: "deepa.rizky@gmail.com",
-    auth_type: "oauth",
-    credentials: { access_token: "tok2", refresh_token: "ref2" },
+    credentials: { api_key: "k2" },
   });
   return { c1, c2 };
 }
@@ -31,22 +29,11 @@ function seedTwoAccounts() {
 function okOpenAI(content = "hello world") {
   return new Response(
     JSON.stringify({
-      response: {
-        candidates: [
-          {
-            content: {
-              role: "model",
-              parts: [{ text: content }],
-            },
-            finishReason: "STOP",
-          },
-        ],
-        usageMetadata: {
-          promptTokenCount: 10,
-          candidatesTokenCount: 5,
-          totalTokenCount: 15,
-        },
-      },
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      model: MODEL_ID,
+      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }
   );
@@ -149,7 +136,7 @@ test("quota failover - account 1 exhausted 429 locks for full duration and immed
 
     // One 429 is not enough to park the account: the lock appears on the second
     // manual attempt, and only then does the lock last the full quota window.
-    const conns = getConnections("antigravity");
+    const conns = getConnections("together");
     const conn1 = conns.find((c) => c.name === "divarizky28@gmail.com");
     assert.strictEqual(getModelLockUntil(conn1.id, MODEL_ID), null, "satu 429 belum mengunci model");
 
@@ -220,14 +207,14 @@ test("auth failover - if refresh token attempt fails with 401/403, router procee
 test("UI attribution - Recent Requests hides the account, usage stats keeps by_account", () => {
   initDb(":memory:");
   const c = addConnection({
-    provider: "antigravity",
+    provider: "together",
     name: "divarizky28@gmail.com",
     credentials: { api_key: "k" },
   });
 
   recordUsage({
     connectionId: c.id,
-    provider: "antigravity",
+    provider: "together",
     model: "gemini-3.8-flash",
     inputTokens: 100,
     outputTokens: 50,

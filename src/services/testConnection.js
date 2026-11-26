@@ -37,7 +37,7 @@ export async function testConnection(providerId, options = {}) {
   }
 
   try {
-    // 2. Provider yang memiliki kuota live (Codex, Claude, GitHub, Kiro, Antigravity, GLM, OpenRouter, dll)
+    // 2. Provider yang memiliki kuota live (Codex, Claude, GitHub, Kiro, GLM, OpenRouter, dll)
     if (hasQuotaFetcher(provider.id) && connection) {
       const quota = await fetchLiveQuota(connection);
       if (quota) {

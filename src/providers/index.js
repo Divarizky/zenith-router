@@ -2,7 +2,6 @@ import claude from "./registry/claude.js";
 import codex from "./registry/codex.js";
 import github from "./registry/github.js";
 import kiro from "./registry/kiro.js";
-import antigravity from "./registry/antigravity.js";
 import glm from "./registry/glm.js";
 import opencode from "./registry/opencode.js";
 import kilocode from "./registry/kilocode.js";
@@ -61,24 +60,6 @@ function modelCapabilityFields(modelId, storedCaps = null, providerTools = undef
 export const CLAUDE_OAUTH_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 /**
- * Antigravity families publish the levels their own variants cover, so a family
- * without an `xhigh` variant never offers xhigh (it would fall back to high).
- * Pi adds `off` itself, so only the named levels are listed here.
- */
-export function antigravityThinkingLevels(family) {
-  const variants = family?.discoveredVariants || family?.variants || {};
-  if (Object.keys(variants).length === 0) return null;
-
-  // Discovery is also the source used by account-scoped dispatch. Validate each
-  // advertised level through the same resolver so /v1/models cannot claim a
-  // tier that routing would fail to resolve.
-  const dispatchFamily = family?.discoveredVariants ? { ...family, variants } : family;
-  return LEVEL_DISPLAY_ORDER.filter(
-    (level) => variants[level] && resolveFamilyRuntime(dispatchFamily, level)?.id === variants[level]
-  );
-}
-
-/**
  * Publish the levels on the entry in two places: `capabilities.thinking_levels`
  * (the documented location) and the top-level `thinking_levels` alias that Pi reads.
  * Both come from the same array, so they cannot drift apart.
@@ -95,60 +76,15 @@ function thinkingLevelFields(providerId, model = null) {
     const levels = codexThinkingLevelsFor(model?.id);
     return levels ? { thinking_levels: levels } : {};
   }
-  if (providerId === "antigravity") {
-    const levels = antigravityThinkingLevels(model);
-    return levels ? { thinking_levels: levels } : {};
-  }
   return {};
 }
-import { getConnections, getAntigravityInventoryRows, listCustomProviders } from "../db/index.js";
-import { buildAntigravityFamilies, isAntigravityDisabledPlaceholder, resolveFamilyRuntime, LEVEL_DISPLAY_ORDER } from "../services/antigravityCatalog.js";
-
-/**
- * Every synced runtime id across active accounts, keyed by runtime id. Families
- * are derived from this so a model only one subscription carries still resolves.
- */
-function antigravityModelRows() {
-  const rows = {};
-  for (const row of getAntigravityInventoryRows()) {
-    if (rows[row.model_id]) continue;
-    rows[row.model_id] = {
-      displayName: row.display_name,
-      supportsImages: row.supports_images === 1 ? true : row.supports_images === 0 ? false : undefined,
-      supportsThinking: row.supports_thinking === 1 ? true : row.supports_thinking === 0 ? false : undefined,
-      maxTokens: row.max_tokens ?? undefined,
-      maxOutputTokens: row.max_output_tokens ?? undefined,
-    };
-  }
-  return rows;
-}
-
-/** Builtin and synced families share this shape, so resolveFamilyRuntime needs no special case. */
-function familyEntry(id, name, source = {}) {
-  return {
-    id,
-    name,
-    family: id,
-    variants: source.variants || {},
-    // Synced families must advertise the same variant set that account-scoped
-    // dispatch uses; builtin variants remain only a fallback until discovery.
-    discoveredVariants: source.discoveredVariants || (source.source === "synced" ? source.variants : undefined),
-    unsuffixed: source.unsuffixed,
-    tiered: source.tiered,
-    supportsImages: source.supportsImages,
-    supportsThinking: source.supportsThinking,
-    maxTokens: source.maxTokens,
-    maxOutputTokens: source.maxOutputTokens,
-    source: source.source || "synced",
-  };
-}
+import { getConnections, listCustomProviders } from "../db/index.js";
 
 const REGISTRY = [
   claude,
   codex,
   github,
   kiro,
-  antigravity,
   glm,
   opencode,
   kilocode,
@@ -276,30 +212,6 @@ export function getProviderModels(p) {
     .filter((m) => !retired.has(m.id))
     .map((m) => withCaps({ id: m.id, name: m.name, source: "builtin" }));
 
-  // Antigravity publishes a per-subscription catalog, so accounts on a higher
-  // plan carry families the builtin list never had (gemini-4-argon, Claude 5.5).
-  // Both sides are families now; the builtin list stays as the fallback for
-  // whatever discovery has not reported yet.
-  if (p.id === "antigravity") {
-    const builtinFamilies = new Map(p.models.map((m) => [m.id, familyEntry(m.id, m.name, { ...m, source: "builtin" })]));
-    for (const [family, discovered] of buildAntigravityFamilies(antigravityModelRows())) {
-      const existing = builtinFamilies.get(family);
-      // A discovered family wins its variants: it is what this account can call.
-      if (existing) {
-        existing.variants = { ...existing.variants, ...discovered.variants };
-        // Levels this account reports, kept apart from builtin variants that it may not carry.
-        existing.discoveredVariants = discovered.variants;
-        existing.unsuffixed = discovered.unsuffixed || existing.unsuffixed;
-        existing.tiered = discovered.tiered || existing.tiered;
-        existing.supportsImages = discovered.supportsImages ?? existing.supportsImages;
-        existing.supportsThinking = discovered.supportsThinking ?? existing.supportsThinking;
-      } else {
-        builtinFamilies.set(family, familyEntry(family, discovered.displayName || family, { ...discovered, source: "synced" }));
-      }
-    }
-    return [...builtinFamilies.values()].map((f) => withCaps(f));
-  }
-
   if (!p.freeModelSync && p.id !== "codex") return staticModels;
 
   const synced = listSyncedModels(p.id).map((m) =>
@@ -310,23 +222,6 @@ export function getProviderModels(p) {
 
   const staticIds = new Set(staticModels.map((m) => m.id));
   return [...staticModels, ...synced.filter((m) => !staticIds.has(m.id))];
-}
-
-/**
- * Runtime id and thinking level a catalog model resolves to for one effort.
- * Only families carry variants; any other id is already a runtime id, so the
- * result is undefined and the caller keeps the id it was given.
- */
-export function resolveProviderRuntime(providerDef, modelId, effort, accountRows = null) {
-  // With an account's own rows, variants come from what that account carries, so
-  // the level falls back within it and never picks an id it cannot serve.
-  const entry = accountRows
-    ? buildAntigravityFamilies(
-        Object.fromEntries([...accountRows].map(([id, row]) => [id, { displayName: row.display_name }]))
-      ).get(modelId)
-    : getProviderModels(providerDef)?.find((m) => m.id === modelId);
-  if (!entry) return undefined;
-  return resolveFamilyRuntime(entry, effort);
 }
 
 /**
@@ -344,7 +239,7 @@ export function resolveModel(modelStr) {
   const sepIdx = slashIdx !== -1 ? slashIdx : colonIdx;
 
   const checkDisabled = (provider, targetModel) => {
-    if (!provider || (provider.id === "antigravity" && isAntigravityDisabledPlaceholder(targetModel))) return null;
+    if (!provider) return null;
     if (provider.id === "antigravity-acp" && !isAntigravityAcpEnabled()) return null;
     return !isModelDisabled(provider.id, targetModel) ? { provider, targetModel, rawModel: modelStr } : null;
   };
@@ -366,9 +261,6 @@ export function resolveModel(modelStr) {
   }
   if (modelStr.startsWith("gpt-") || modelStr.startsWith("o1") || modelStr.startsWith("o3")) {
     return guess(getProvider("codex"), modelStr);
-  }
-  if (modelStr.startsWith("gemini-")) {
-    return guess(getProvider("antigravity"), modelStr);
   }
   if (modelStr.startsWith("glm-") || modelStr.startsWith("codegeex")) {
     return guess(getProvider("glm"), modelStr);

@@ -47,6 +47,7 @@ import {
   getOpencodeScopedPoolIds,
 } from "../../services/proxyPools.js";
 import { escapeHtml } from "../html.js";
+import { renderAgyAccountsCard } from "./agyLogin.js";
 import { getSetting, setSetting, deleteSetting } from "../../services/settings.js";
 import { getProviderIconPath } from "../assets.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
@@ -54,7 +55,6 @@ import {
   isAntigravityAcpEnabled,
   listAntigravityAcpProfiles,
   setAntigravityAcpEnabled,
-  setAntigravityAcpProfiles,
 } from "../../services/antigravityAcp/profiles.js";
 
 const SECTIONS = [
@@ -471,7 +471,6 @@ export function renderProvidersPage(port = 20120, query = {}, lang = DEFAULT_LAN
 const LOGIN_LABELS = {
   claude: "Login dengan Claude",
   codex: "Login dengan ChatGPT",
-  antigravity: "Login dengan Google",
   cline: "Login dengan Cline",
   github: "Login dengan GitHub",
   kilocode: "Login dengan Kilo",
@@ -500,10 +499,9 @@ const MANUAL_TOKEN_LABELS = {
   commandcode: "API Key (user_...)",
 };
 
-const REFRESHABLE = new Set(["claude", "codex", "antigravity", "cline", "kiro"]);
+const REFRESHABLE = new Set(["claude", "codex", "cline", "kiro"]);
 
 const OAUTH_SCOPE_NOTICES = {
-  antigravity: "Login meminta izin <code>cloud-platform</code> penuh ke Google Cloud Platform untuk integrasi Gemini Code Assist.",
   claude: "Login memakai token Anthropic CLI yang memiliki scope <code>user:inference</code> dan <code>org:create_api_key</code>.",
 };
 
@@ -623,62 +621,6 @@ const OAUTH_SCRIPT = `
 })();
 </script>`;
 
-const AGY_LOGIN_SCRIPT = `
-<script>
-(function () {
-  var attemptId = null, popup = null;
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); }
-  function value(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
-  function show(html, error) {
-    var el = document.getElementById('oauth-status');
-    if (!el) return;
-    el.hidden = false;
-    el.className = 'oauth-status' + (error ? ' error' : '');
-    el.innerHTML = html;
-  }
-  function post(url, data) {
-    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.error) j.error = 'Gagal memproses login'; return j; }); });
-  }
-  window.zrAgyLoginStart = function () {
-    window.zrOAuthCancel && window.zrOAuthCancel();
-    window.zrAgyLoginCancel();
-    popup = window.open('about:blank', '_blank');
-    show('<p>Menyiapkan login Agy...</p>');
-    post('/dashboard/providers/antigravity-acp/login/start', {}).then(function (r) {
-      if (r.error) { if (popup) popup.close(); popup = null; return show('Login Agy tidak tersedia.', true); }
-      attemptId = r.attemptId;
-      var link = '<a href="' + esc(r.authorizationUrl) + '" target="_blank" rel="noopener noreferrer">Buka halaman otorisasi Google</a>';
-      if (popup) { popup.opener = null; popup.location.href = r.authorizationUrl; }
-      show('<p>Selesaikan otorisasi di browser. ' + link + '</p>' +
-        '<p class="hint">Setelah Google menampilkan kode, tempel kode mentahnya di bawah. Jangan tempel URL redirect.</p>' +
-        '<div class="field"><input id="agy-login-code" type="password" autocomplete="off" placeholder="Kode otorisasi Agy" /></div>' +
-        '<button type="button" class="btn btn-sm" id="agy-login-submit" onclick="zrAgyLoginSubmit()">Kirim kode</button>' +
-        '<p id="agy-login-error" class="hint" style="color: var(--danger); margin-top: 0.5rem;"></p>');
-    }).catch(function () { if (popup) popup.close(); popup = null; show('Login Agy tidak tersedia.', true); });
-  };
-  window.zrAgyLoginSubmit = function () {
-    if (!attemptId) return;
-    var code = value('agy-login-code');
-    var errorEl = document.getElementById('agy-login-error');
-    var button = document.getElementById('agy-login-submit');
-    if (!code) { if (errorEl) errorEl.textContent = 'Masukkan kode otorisasi Agy.'; return; }
-    if (button) button.disabled = true;
-    post('/dashboard/providers/antigravity-acp/login/submit', { attemptId: attemptId, code: code }).then(function (r) {
-      if (r.status === 'ready') return location.href = '/dashboard/providers/antigravity-acp?notice=agy_login_added';
-      if (errorEl) errorEl.textContent = r.error === 'invalid_authorization_code' ? 'Kode tidak valid. Tempel kode mentah, bukan URL.' : 'Login Agy gagal atau sudah kedaluwarsa.';
-      if (button) button.disabled = false;
-    }).catch(function () { if (errorEl) errorEl.textContent = 'Login Agy gagal atau sudah kedaluwarsa.'; if (button) button.disabled = false; });
-  };
-  window.zrAgyLoginCancel = function () {
-    if (attemptId) post('/dashboard/providers/antigravity-acp/login/cancel', { attemptId: attemptId }).catch(function () {});
-    attemptId = null;
-    if (popup && !popup.closed) popup.close();
-    popup = null;
-  };
-  if (window.__zrSwapCleanups) window.__zrSwapCleanups.push(function () { if (attemptId) window.zrAgyLoginCancel(); });
-})();
-</script>`;
 
 function renderAddAccountModal(p) {
   const id = escapeHtml(p.id);
@@ -721,11 +663,8 @@ function renderAddAccountModal(p) {
     </div>`;
   }
 
-  const agyLogin = p.id === "antigravity"
-    ? `<button type="button" class="btn btn-primary" onclick="zrAgyLoginStart()">Login via Agy</button>`
-    : "";
   const login = getOAuthFlow(p.id)
-    ? `<button type="button" class="btn${p.id === "antigravity" ? "" : " btn-primary"}" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Masuk")}</button>`
+    ? `<button type="button" class="btn btn-primary" onclick="zrOAuthStart('${id}')">${escapeHtml(LOGIN_LABELS[p.id] || "Masuk")}</button>`
     : "";
   const local = LOCAL_IMPORT[p.id];
   const importForm = local
@@ -759,7 +698,6 @@ function renderAddAccountModal(p) {
             : ""
         }
         <div class="oauth-actions">
-          ${agyLogin}
           ${login}
           ${importForm}
         </div>
@@ -787,11 +725,11 @@ function renderAddAccountModal(p) {
           </form>
         </details>
         <div class="modal-actions">
-          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel(); zrAgyLoginCancel()">Tutup</button>
+          <button type="button" class="btn" data-close-modal="add-account-modal" onclick="zrOAuthCancel()">Tutup</button>
         </div>
       </div>
     </div>
-    ${OAUTH_SCRIPT}${agyLogin ? AGY_LOGIN_SCRIPT : ""}`;
+    ${OAUTH_SCRIPT}`;
 }
 
 /**
@@ -2596,36 +2534,7 @@ export function renderProviderDetailPage(port, idOrAlias, query = {}, lang = DEF
       </div>
     </div>
 
-    ${p.id === "antigravity-acp" ? `
-    <div class="card channel-strips-card" id="acp-workers">
-      <div class="hw-screw screw-tl"></div>
-      <div class="hw-screw screw-tr"></div>
-      <div class="hw-screw screw-bl"></div>
-      <div class="hw-screw screw-br"></div>
-      <div class="block-header-strip">
-        <div class="block-header-title"><span>LOCAL ACP WORKERS</span><span class="badge-tag">PREVIEW</span></div>
-        <div class="block-header-sub">Pilih ID worker yang sudah diprovisikan admin lokal. Perintah, environment, cwd, dan credential tidak dapat diubah dari dashboard.</div>
-      </div>
-      <form action="/dashboard/providers/antigravity-acp" method="POST" style="padding: 16px 20px; display: grid; gap: 14px;">
-        <label class="acp-check-label" style="display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;">
-          <input type="checkbox" name="enabled" value="true" class="nb-check" style="width: 18px; height: 18px; min-width: 18px; flex-shrink: 0; margin: 0;" ${acpEnabled ? "checked" : ""} />
-          <span>Aktifkan jalur ACP opsional (default nonaktif)</span>
-        </label>
-        ${[0, 1].map((index) => {
-          const profile = acpProfiles[index];
-          return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;">
-            <input name="worker_id_${index}" value="${escapeHtml(profile?.workerId || "")}" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" placeholder="ID worker tepercaya ${index + 1}" autocomplete="off" class="search-cli-input acp-worker-input" style="border-radius: 0;" />
-            <label class="acp-check-label" style="display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;">
-              <input type="checkbox" name="profile_enabled_${index}" value="true" class="nb-check" style="width: 18px; height: 18px; min-width: 18px; flex-shrink: 0; margin: 0;" ${profile?.enabled ? "checked" : ""} />
-              <span>Pakai</span>
-            </label>
-            <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(profile?.status || "unavailable")}</span>
-          </div>`;
-        }).join("")}
-        <p class="hint">Prioritas mengikuti urutan worker. Failover hanya sebelum prompt pada worker pertama dan tidak pernah berdasarkan kuota.</p>
-        <button type="submit" class="btn-nb" style="width: fit-content; align-self: flex-start;">Simpan profil ACP</button>
-      </form>
-    </div>` : ""}
+    ${p.id === "antigravity-acp" ? renderAgyAccountsCard({ accounts: acpProfiles, enabled: acpEnabled, lang: currentLang, notice: query.acp_notice }) : ""}
 
     <!-- SECTION 2: ACCOUNTS ROSTER (CHANNEL STRIPS) -->
     <div class="card channel-strips-card" id="akun">
@@ -2929,20 +2838,7 @@ export async function handleSetProxyRotation(c) {
 
 export async function handleSaveAntigravityAcp(c) {
   const body = await c.req.parseBody();
-  const profiles = [];
-  for (const index of [0, 1]) {
-    const workerId = String(body[`worker_id_${index}`] || "").trim();
-    if (!workerId) continue;
-    profiles.push({
-      id: `worker-${index + 1}`,
-      workerId,
-      priority: index,
-      enabled: body[`profile_enabled_${index}`] === "true",
-    });
-  }
   const wantsEnabled = body.enabled === "true";
-  if (wantsEnabled && !profiles.some((profile) => profile.enabled)) return c.redirect(`${backTo("antigravity-acp")}?notice=acp_invalid`);
-  if (!await setAntigravityAcpProfiles(profiles)) return c.redirect(`${backTo("antigravity-acp")}?notice=acp_invalid`);
   if (!setAntigravityAcpEnabled(wantsEnabled)) return c.redirect(`${backTo("antigravity-acp")}?notice=acp_invalid`);
   return c.redirect(`${backTo("antigravity-acp")}?notice=acp_saved`);
 }

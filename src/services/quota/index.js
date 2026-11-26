@@ -2,7 +2,6 @@ import { fetchCodexQuota } from "./codex.js";
 import { fetchClaudeQuota } from "./claude.js";
 import { fetchKiroQuota } from "./kiro.js";
 import { fetchXkiroQuota } from "./xkiro.js";
-import { fetchAntigravityQuota } from "./antigravity.js";
 import { fetchGitHubQuota } from "./github.js";
 import { fetchGlmQuota } from "./glm.js";
 import { fetchOpenRouterQuota } from "./openrouter.js";
@@ -14,7 +13,6 @@ const QUOTA_FETCHERS = {
   claude: fetchClaudeQuota,
   kiro: fetchKiroQuota,
   xkiro: fetchXkiroQuota,
-  antigravity: fetchAntigravityQuota,
   github: fetchGitHubQuota,
   glm: fetchGlmQuota,
   openrouter: fetchOpenRouterQuota,

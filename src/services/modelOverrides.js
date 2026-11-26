@@ -182,7 +182,6 @@ const PROVIDER_ALIASES = {
   codex: ["cx"],
   github: ["gh"],
   kiro: ["kr"],
-  antigravity: ["ag"],
   glm: ["glm"],
   opencode: ["oc"],
   kilocode: ["kc"],

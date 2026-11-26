@@ -141,7 +141,7 @@ export function cleanJsonSchema(schema) {
 }
 
 // Claude's tool input_schema rejects anyOf/oneOf in some shapes that Gemini
-// accepts. Antigravity forwards Claude requests in Claude's format, so unions
+// accepts. Cloud Code forwards Claude requests in Claude's format, so unions
 // are flattened here for Claude models only. The description keeps a hint so
 // the model still knows the other accepted shapes.
 function branchLabel(branch) {
@@ -198,7 +198,7 @@ export function flattenToolUnionsForClaude(request) {
   return { ...request, tools };
 }
 
-// Claude (behind Antigravity) turns functionCall/functionResponse into
+// Claude (behind Cloud Code) turns functionCall/functionResponse into
 // tool_use/tool_result and requires a matching id matching ^[a-zA-Z0-9_-]+$.
 function wireToolCallId(id) {
   if (typeof id !== "string" || !id) return undefined;

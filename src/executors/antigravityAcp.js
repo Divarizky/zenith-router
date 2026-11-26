@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 import pkg from "../../package.json" with { type: "json" };
 import { createAntigravityAcpClient } from "../services/antigravityAcp/client.js";
 import { createAntigravityAcpTransport } from "../services/antigravityAcp/transport.js";
+import { parseAntigravityQuotaMessage } from "../services/antigravityAcp/quota.js";
 import { registerExecutor } from "./base.js";
 import {
   snapshotAntigravityAcpCandidates,
   isAntigravityAcpBindingCurrent,
   setAntigravityAcpProfileStatus,
   isAntigravityAcpEnabled,
+  acquireAntigravityAcpAccountUse,
+  markAntigravityAcpAccountLimited,
 } from "../services/antigravityAcp/profiles.js";
 
 const MAX_STREAM_TEXT_BYTES = 1_048_576;
@@ -62,11 +65,13 @@ function errorFrame(code, message) {
   return sseFrame({ error: { message, type: "upstream_error", code } });
 }
 
-function createStreamingResponse({ client, sessionId, body, signal }) {
+function createStreamingResponse({ client, sessionId, body, signal, accountId, release }) {
   const id = `chatcmpl-acp-${randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
   let controller;
   let outputBytes = 0;
+  let quotaPrefixBuffer = "";
+  const quotaPrefix = "Usage Limit Reached";
   let settled = false;
   let consumerCancelled = false;
   let unsubscribe = () => {};
@@ -113,8 +118,21 @@ function createStreamingResponse({ client, sessionId, body, signal }) {
       enqueue(sseFrame({ id, object: "chat.completion.chunk", created, model: body.model, choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] }));
       unsubscribe = typeof client.onUpdate === "function" ? client.onUpdate((params) => {
         if (params?.sessionId !== sessionId || settled || consumerCancelled) return;
-        const text = appendTextFromUpdate(params);
+        let text = appendTextFromUpdate(params);
         if (!text) return;
+        if (quotaPrefixBuffer || quotaPrefix.startsWith(text)) {
+          quotaPrefixBuffer += text;
+          if (quotaPrefix.startsWith(quotaPrefixBuffer)) return;
+          text = quotaPrefixBuffer;
+          quotaPrefixBuffer = "";
+        }
+        const quota = parseAntigravityQuotaMessage(text);
+        if (quota) {
+          markAntigravityAcpAccountLimited(accountId, quota.resetAt);
+          finishError("acp_usage_limit", "Antigravity account usage limit reached");
+          void abortTurn(false);
+          return;
+        }
         outputBytes += Buffer.byteLength(text);
         if (outputBytes > MAX_STREAM_TEXT_BYTES) {
           finishError("acp_output_limit", "ACP response exceeded the supported output limit");
@@ -151,6 +169,7 @@ function createStreamingResponse({ client, sessionId, body, signal }) {
           signal?.removeEventListener("abort", cancelOnAbort);
           unsubscribe?.();
           await closeClient();
+          release?.();
         }
       })();
     },
@@ -159,6 +178,7 @@ function createStreamingResponse({ client, sessionId, body, signal }) {
       signal?.removeEventListener("abort", cancelOnAbort);
       unsubscribe?.();
       await abortTurn(false);
+      release?.();
     },
   });
   return new Response(stream, {
@@ -224,7 +244,7 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
         return openAiError("ACP worker returned an invalid session", "upstream_error", "acp_protocol_error", 502);
       }
       setStatus("ready");
-      ready = { client, sessionId: session.sessionId };
+      ready = { client, sessionId: session.sessionId, accountId: profile.id, release: acquireAntigravityAcpAccountUse(profile.id) };
       keepClient = true;
       break;
     } catch (error) {
@@ -246,11 +266,12 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
   if (!ready) return openAiError("No configured Antigravity ACP worker is currently available", "upstream_error", "acp_workers_unavailable", 503);
   if (signal?.aborted) {
     try { await ready.client.close?.(); } catch {}
+    ready.release();
     return openAiError("Request cancelled", "client_closed", "client_closed_request", 499);
   }
 
   if (body.stream === true) {
-    return createStreamingResponse({ client: ready.client, sessionId: ready.sessionId, body: { ...body, promptText }, signal });
+    return createStreamingResponse({ client: ready.client, sessionId: ready.sessionId, body: { ...body, promptText }, signal, accountId: ready.accountId, release: ready.release });
   }
 
   const output = [];
@@ -271,6 +292,12 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
     if (!["end_turn", "max_tokens", "max_turn_requests", "refusal"].includes(stopReason)) {
       return openAiError("ACP worker returned an invalid turn result", "upstream_error", "acp_protocol_error", 502);
     }
+    const quota = parseAntigravityQuotaMessage(output.join(""));
+    if (quota) {
+      // The prompt was already dispatched: report the limit, never replay on another account.
+      markAntigravityAcpAccountLimited(ready.accountId, quota.resetAt);
+      return openAiError("Antigravity account usage limit reached; no automatic replay was attempted", "rate_limit_error", "acp_usage_limit", 429);
+    }
     return new Response(JSON.stringify({
       id: `chatcmpl-acp-${randomUUID()}`,
       object: "chat.completion",
@@ -285,6 +312,7 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
     signal?.removeEventListener("abort", cancelOnAbort);
     unsubscribe?.();
     try { await ready.client.close?.(); } catch {}
+    ready.release();
   }
 }
 

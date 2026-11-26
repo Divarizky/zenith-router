@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, chmod, writeFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, chmod, writeFile, rm, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -16,6 +16,12 @@ import {
   setAntigravityAcpEnabled,
   setAntigravityAcpProfileStatus,
   setAntigravityAcpProfiles,
+  addAntigravityAcpAccount,
+  removeAntigravityAcpAccount,
+  acquireAntigravityAcpAccountUse,
+  markAntigravityAcpAccountLimited,
+  resetAntigravityAcpRuntimeStateForTests,
+  setAntigravityAcpClockForTests,
 } from "../src/services/antigravityAcp/profiles.js";
 import { executeAntigravityAcp, setAntigravityAcpTransportFactory } from "../src/executors/antigravityAcp.js";
 import { AntigravityAcpTransport } from "../src/services/antigravityAcp/transport.js";
@@ -27,18 +33,27 @@ import { createAntigravityAcpClient } from "../src/services/antigravityAcp/clien
 async function reset(profiles = []) {
   initDb(":memory:");
   setAntigravityAcpWorkerLoaderForTests(async () => [
-    { workerId: "agy-account-1", namespace: "agy-account-1", launcher: "/test/agy-1", workspace: "/test/worker-1" },
-    { workerId: "agy-account-2", namespace: "agy-account-2", launcher: "/test/agy-2", workspace: "/test/worker-2" },
+    { workerId: W1, namespace: W1, launcher: "/test/agy-1", workspace: "/test/worker-1" },
+    { workerId: W2, namespace: W2, launcher: "/test/agy-2", workspace: "/test/worker-2" },
+    { workerId: W3, namespace: W3, launcher: "/test/agy-3", workspace: "/test/worker-3" },
   ]);
+  resetAntigravityAcpRuntimeStateForTests();
+  setAntigravityAcpClockForTests(null);
   if (profiles.length) {
     await setAntigravityAcpProfiles(profiles);
     setAntigravityAcpEnabled(true);
   }
 }
 
+const ID1 = "a".repeat(32);
+const ID2 = "b".repeat(32);
+const W1 = `agy-worker-${ID1}`;
+const W2 = `agy-worker-${ID2}`;
+const ID3 = "c".repeat(32);
+const W3 = `agy-worker-${ID3}`;
 const TWO_PROFILES = [
-  { id: "primary", workerId: "agy-account-1", priority: 0, enabled: true },
-  { id: "secondary", workerId: "agy-account-2", priority: 1, enabled: true },
+  { id: ID1, name: "primary", enabled: true },
+  { id: ID2, name: "secondary", enabled: true },
 ];
 const BODY = { model: "agy-acp/gemini-3.8-flash", messages: [{ role: "user", content: "hello" }] };
 
@@ -119,7 +134,7 @@ test("deployment worker map accepts only canonical isolated launchers and reject
   }
 });
 
-test("missing worker map auto-provisions isolated agy worker and rejects unsafe binaries", async () => {
+test("missing worker map derives one isolated worker per account and rejects unsafe binaries", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-autodiscovery-"));
   const configPath = path.join(dir, "missing.json");
   const binary = path.join(dir, "agy");
@@ -131,16 +146,20 @@ test("missing worker map auto-provisions isolated agy worker and rejects unsafe 
     const provisionRoot = path.join(dir, "provision-root");
     setAntigravityAcpProvisionRootForTests(provisionRoot);
     setAntigravityAcpAutoDiscoveryForTests([binary]);
+    initDb(":memory:");
+    const added = await addAntigravityAcpAccount("one");
+    assert.equal(added.ok, true);
     const [worker] = await getAntigravityAcpWorkers();
-    assert.equal(worker.workerId, "agy-worker-default");
+    assert.equal(worker.workerId, `agy-worker-${added.account.id}`);
     assert.equal(worker.launcher, await realpath(binary));
     assert.deepEqual(worker.launcherArgs, ["acp", "--stdio"]);
     assert.deepEqual(worker.loginLauncherArgs, ["acp", "--login"]);
-    assert.equal(worker.isolatedHome, path.join(provisionRoot, "default", "home"));
+    assert.equal(worker.isolatedHome, path.join(provisionRoot, added.account.id, "home"));
     for (const dirPath of [worker.workspace, worker.isolatedHome]) {
       const info = await import("node:fs/promises").then(({ stat }) => stat(dirPath));
       assert.equal(info.mode & 0o777, 0o700);
     }
+    assert.equal(worker.appData, path.join(provisionRoot, added.account.id, "appdata"));
     await chmod(binary, 0o775);
     assert.deepEqual(await getAntigravityAcpWorkers(), []);
     await chmod(binary, 0o700);
@@ -174,6 +193,8 @@ test("auto-provisioning rejects symlinked provision roots without modifying thei
     await writeFile(binary, "#!/bin/sh\\nexit 0\\n", { mode: 0o700 });
     await chmod(binary, 0o700);
     await mkdir(victim);
+    initDb(":memory:");
+    await setAntigravityAcpProfiles([{ id: ID1, name: "one", enabled: true }]);
     setAntigravityAcpAutoDiscoveryForTests([binary]);
     setAntigravityAcpProvisionRootForTests(provisionRoot);
     await import("node:fs/promises").then(({ symlink }) => symlink(victim, provisionRoot, "dir"));
@@ -191,7 +212,7 @@ test("auto-provisioning rejects symlinked provision roots without modifying thei
 
 test("ACP worker client uses only allowlisted launch data and ACP v1 methods", async () => {
   await reset();
-  setAntigravityAcpWorkerLoaderForTests(async () => [{ workerId: "agy-account-1", namespace: "agy-account-1", launcher: "/test/agy-1", launcherArgs: ["acp", "--stdio"], isolatedHome: "/test/isolated-home", workspace: "/test/worker-1" }]);
+  setAntigravityAcpWorkerLoaderForTests(async () => [{ workerId: W1, namespace: W1, launcher: "/test/agy-1", launcherArgs: ["acp", "--stdio"], isolatedHome: "/test/isolated-home", workspace: "/test/worker-1" }]);
   const calls = [];
   const listeners = new Map();
   const transport = {
@@ -202,12 +223,12 @@ test("ACP worker client uses only allowlisted launch data and ACP v1 methods", a
     off: (name) => listeners.delete(name),
     close: () => calls.push(["close"]),
   };
-  const client = await createAntigravityAcpClient("agy-account-1", (options) => {
+  const client = await createAntigravityAcpClient(W1, (options) => {
     calls.push(["spawn", options]);
     return transport;
   });
   assert.deepEqual(calls[0], ["spawn", {
-    command: "/test/agy-1", args: ["acp", "--stdio"], cwd: "/test/worker-1", env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: "/test/isolated-home" },
+    command: "/test/agy-1", args: ["acp", "--stdio"], cwd: "/test/worker-1", env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: "/test/isolated-home", GEMINI_HOME: "/test/isolated-home/.gemini", AGY_ACP_FORCE_FILE_STORAGE: "1" },
   }]);
   assert.equal(calls[0][1].env.HOME, "/test/isolated-home");
   assert.equal("token" in calls[0][1].env, false);
@@ -235,43 +256,26 @@ test("client abort during bootstrap closes worker transport before any prompt", 
     on() {},
     close() { closed = true; },
   };
-  const client = await createAntigravityAcpClient("agy-account-1", () => transport, { signal: controller.signal });
+  const client = await createAntigravityAcpClient(W1, () => transport, { signal: controller.signal });
   controller.abort();
   assert.equal(closed, true);
   await client.close();
 });
 
-test("ACP dashboard saves only allowlisted worker IDs and never accepts launch config", async () => {
-  await reset();
+test("ACP dashboard handler only toggles enablement and renders the account list", async () => {
+  await reset([TWO_PROFILES[0]]);
   let redirectTarget = "";
   const context = {
-    req: { parseBody: async () => ({
-      enabled: "true",
-      worker_id_0: "not-provisioned",
-      profile_enabled_0: "true",
-    }) },
+    req: { parseBody: async () => ({ enabled: "false", launcher: "/tmp/evil", cwd: "/tmp/evil" }) },
     redirect(url) { redirectTarget = url; return url; },
   };
   await handleSaveAntigravityAcp(context);
-  assert.match(redirectTarget, /notice=acp_invalid/);
-  assert.deepEqual(getAntigravityAcpProfiles(), []);
-
-  context.req.parseBody = async () => ({
-    enabled: "true",
-    worker_id_0: "agy-account-1",
-    profile_enabled_0: "true",
-    launcher: "/tmp/evil",
-    cwd: "/tmp/evil",
-  });
-  await handleSaveAntigravityAcp(context);
   assert.match(redirectTarget, /notice=acp_saved/);
-  assert.deepEqual(getAntigravityAcpProfiles(), [{ id: "worker-1", workerId: "agy-account-1", priority: 0, enabled: true }]);
-  context.req.parseBody = async () => ({ enabled: "true", worker_id_0: "agy-account-1" });
-  await handleSaveAntigravityAcp(context);
-  assert.match(redirectTarget, /notice=acp_invalid/);
-  assert.deepEqual(getAntigravityAcpProfiles(), [{ id: "worker-1", workerId: "agy-account-1", priority: 0, enabled: true }]);
+  assert.equal(isAntigravityAcpEnabled(), false);
+  assert.deepEqual(getAntigravityAcpProfiles(), [TWO_PROFILES[0]]);
   const html = renderProviderDetailPage(3000, "antigravity-acp");
-  assert.match(html, /Local ACP Workers|LOCAL ACP WORKERS/);
+  assert.match(html, /primary/);
+  assert.match(html, /accounts\/add/);
   assert.doesNotMatch(html, /name="launcher"|name="cwd"|name="env"/);
 });
 
@@ -291,23 +295,185 @@ test("two configured ACP profiles have separate safe statuses", async () => {
   assert.equal(getAntigravityAcpProfiles().length, 2);
   assert.equal(getProviderModels(getProvider("antigravity-acp")).length, 1);
   assert.equal(resolveModel("antigravity-acp/gemini-3.8-flash")?.provider.id, "antigravity-acp");
-  assert.equal(setAntigravityAcpProfileStatus("primary", "ready"), true);
-  assert.equal(setAntigravityAcpProfileStatus("secondary", "needs_login"), true);
+  assert.equal(setAntigravityAcpProfileStatus(ID1, "ready"), true);
+  assert.equal(setAntigravityAcpProfileStatus(ID2, "needs_login"), true);
   assert.deepEqual(listAntigravityAcpProfiles().map(({ status }) => status), ["ready", "needs_login"]);
   assert.equal(getAntigravityAcpProfileStatus("missing"), "unavailable");
 });
 
-test("ACP profile configuration rejects duplicate IDs/priorities, unknown workers, and executable fields", async () => {
+test("ACP account list rejects duplicate IDs/names, non-hex IDs, unknown fields and bad names", async () => {
   await reset();
-  const duplicated = [
-    { id: "one", workerId: "same", priority: 0, enabled: true },
-    { id: "two", workerId: "same", priority: 1, enabled: true },
-  ];
-  assert.equal(await setAntigravityAcpProfiles(duplicated), false);
-  assert.equal(await setAntigravityAcpProfiles([TWO_PROFILES[0], { ...TWO_PROFILES[1], priority: 0 }]), false);
-  assert.equal(await setAntigravityAcpProfiles([{ id: "one", workerId: "missing-worker", priority: 0, enabled: true }]), false);
-  assert.equal(await setAntigravityAcpProfiles([{ id: "one", workerId: "agy-account-1", priority: 0, enabled: true, command: "sh" }]), false);
+  const ok = { id: ID1, name: "one", enabled: true };
+  assert.equal(await setAntigravityAcpProfiles([ok, { ...ok }]), false);
+  assert.equal(await setAntigravityAcpProfiles([ok, { id: ID2, name: "ONE", enabled: true }]), false, "names are case-insensitive");
+  assert.equal(await setAntigravityAcpProfiles([{ ...ok, id: "../../etc" }]), false);
+  assert.equal(await setAntigravityAcpProfiles([{ ...ok, id: "A".repeat(32) }]), false);
+  assert.equal(await setAntigravityAcpProfiles([{ ...ok, command: "sh" }]), false);
+  assert.equal(await setAntigravityAcpProfiles([{ ...ok, name: "x".repeat(41) }]), false);
+  assert.equal(await setAntigravityAcpProfiles([{ ...ok, priority: 0 }]), false);
   assert.deepEqual(getAntigravityAcpProfiles(), []);
+  assert.equal(await setAntigravityAcpProfiles([ok, { id: ID2, name: "two", enabled: true }, { id: ID3, name: "three", enabled: false }]), true);
+  assert.equal(getAntigravityAcpProfiles().length, 3);
+});
+
+async function derivedEnv(fn) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "zenith-acp-accounts-"));
+  const binary = path.join(dir, "agy");
+  await writeFile(binary, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  await chmod(binary, 0o700);
+  initDb(":memory:");
+  resetAntigravityAcpRuntimeStateForTests();
+  setAntigravityAcpClockForTests(null);
+  setAntigravityAcpWorkerLoaderForTests(null);
+  setAntigravityAcpWorkerConfigPathForTests(path.join(dir, "missing.json"));
+  setAntigravityAcpAutoDiscoveryForTests([binary]);
+  const root = path.join(dir, "acp");
+  setAntigravityAcpProvisionRootForTests(root);
+  try { await fn({ dir, root }); } finally {
+    setAntigravityAcpAutoDiscoveryForTests(null);
+    setAntigravityAcpProvisionRootForTests(null);
+    setAntigravityAcpWorkerConfigPathForTests(null);
+    setAntigravityAcpClockForTests(null);
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function markLoggedIn(root, id) {
+  const dir = path.join(root, id, "home", ".gemini", "antigravity-acp");
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, "acp_token.json"), "x");
+}
+
+test("more than two accounts can be added; each gets home/appdata/workspace and starts as needs_login", async () => {
+  await derivedEnv(async ({ root }) => {
+    const accounts = [];
+    for (const name of ["a", "b", "c", "d"]) {
+      const result = await addAntigravityAcpAccount(name);
+      assert.equal(result.ok, true);
+      assert.match(result.account.id, /^[0-9a-f]{32}$/);
+      accounts.push(result.account);
+    }
+    assert.equal(getAntigravityAcpProfiles().length, 4);
+    assert.deepEqual(getAntigravityAcpProfiles().map(({ name }) => name), ["a", "b", "c", "d"]);
+    for (const dirName of ["home", "appdata", "workspace"]) {
+      assert.equal((await stat(path.join(root, accounts[3].id, dirName))).isDirectory(), true);
+    }
+    assert.deepEqual(listAntigravityAcpProfiles().map(({ status }) => status), ["needs_login", "needs_login", "needs_login", "needs_login"]);
+    const worker = await getAntigravityAcpWorker(`agy-worker-${accounts[2].id}`);
+    assert.equal(worker.isolatedHome, path.join(root, accounts[2].id, "home"));
+    assert.equal(await getAntigravityAcpWorker("agy-worker-default"), null);
+    assert.equal(await getAntigravityAcpWorker(`agy-worker-${"f".repeat(32)}`), null, "unknown account has no worker");
+  });
+});
+
+test("duplicate (case-insensitive) and invalid names are rejected when adding accounts", async () => {
+  await derivedEnv(async () => {
+    assert.equal((await addAntigravityAcpAccount("Work")).ok, true);
+    assert.equal((await addAntigravityAcpAccount("work")).reason, "duplicate_name");
+    assert.equal((await addAntigravityAcpAccount("")).reason, "invalid_name");
+    assert.equal((await addAntigravityAcpAccount("y".repeat(41))).reason, "invalid_name");
+    assert.equal(getAntigravityAcpProfiles().length, 1);
+  });
+});
+
+test("needs_login accounts are not selected; a logged-in account is", async () => {
+  await derivedEnv(async ({ root }) => {
+    const first = (await addAntigravityAcpAccount("first")).account;
+    const second = (await addAntigravityAcpAccount("second")).account;
+    setAntigravityAcpEnabled(true);
+    await markLoggedIn(root, second.id);
+    const seen = [];
+    const response = await executeAntigravityAcp({ body: BODY, createClient: async (workerId) => { seen.push(workerId); return fakeClient().client; } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, [`agy-worker-${second.id}`]);
+    assert.equal(getAntigravityAcpProfileStatus(first.id), "needs_login");
+    assert.equal(getAntigravityAcpProfileStatus(second.id), "ready");
+  });
+});
+
+test("limited account is skipped for new requests and chosen again after reset", async () => {
+  await derivedEnv(async ({ root }) => {
+    const first = (await addAntigravityAcpAccount("first")).account;
+    const second = (await addAntigravityAcpAccount("second")).account;
+    setAntigravityAcpEnabled(true);
+    await markLoggedIn(root, first.id);
+    await markLoggedIn(root, second.id);
+    let now = 1_000_000;
+    setAntigravityAcpClockForTests(() => now);
+    const resetAt = now + 60_000;
+    assert.equal(markAntigravityAcpAccountLimited(first.id, resetAt), true);
+    assert.equal(getAntigravityAcpProfileStatus(first.id), "limited");
+    const run = async () => {
+      const seen = [];
+      const response = await executeAntigravityAcp({ body: BODY, createClient: async (workerId) => { seen.push(workerId); return fakeClient().client; } });
+      assert.equal(response.status, 200);
+      return seen;
+    };
+    assert.deepEqual(await run(), [`agy-worker-${second.id}`]);
+    now = resetAt + 1;
+    assert.equal(getAntigravityAcpProfileStatus(first.id), "ready");
+    assert.deepEqual(await run(), [`agy-worker-${first.id}`]);
+  });
+});
+
+test("limit without a reset time lasts five hours", async () => {
+  await derivedEnv(async ({ root }) => {
+    const account = (await addAntigravityAcpAccount("only")).account;
+    await markLoggedIn(root, account.id);
+    let now = 5_000;
+    setAntigravityAcpClockForTests(() => now);
+    markAntigravityAcpAccountLimited(account.id, null);
+    now += 5 * 3_600_000 - 1;
+    assert.equal(getAntigravityAcpProfileStatus(account.id), "limited");
+    now += 2;
+    assert.equal(getAntigravityAcpProfileStatus(account.id), "ready");
+  });
+});
+
+test("usage-limit agent text marks the account limited and is never replayed on another account", async () => {
+  await derivedEnv(async ({ root }) => {
+    const first = (await addAntigravityAcpAccount("first")).account;
+    const second = (await addAntigravityAcpAccount("second")).account;
+    setAntigravityAcpEnabled(true);
+    await markLoggedIn(root, first.id);
+    await markLoggedIn(root, second.id);
+    const seen = [];
+    const limitText = "Usage Limit Reached\n\nYou have reached your current quota for this period. Your quota will reset in 2 hours, 30 minutes.";
+    const response = await executeAntigravityAcp({ body: BODY, createClient: async (workerId) => {
+      seen.push(workerId);
+      const { client } = fakeClient();
+      let listener;
+      client.onUpdate = (cb) => { listener = cb; return () => {}; };
+      client.prompt = async ({ sessionId }) => {
+        listener({ sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: limitText } } });
+        return { stopReason: "end_turn" };
+      };
+      return client;
+    } });
+    assert.equal(response.status, 429);
+    assert.deepEqual(seen, [`agy-worker-${first.id}`]);
+    assert.equal(getAntigravityAcpProfileStatus(first.id), "limited");
+    assert.equal(getAntigravityAcpProfileStatus(second.id), "ready");
+  });
+});
+
+test("deleting an account removes token files and its folder; busy accounts are refused", async () => {
+  await derivedEnv(async ({ root }) => {
+    const keep = (await addAntigravityAcpAccount("keep")).account;
+    const gone = (await addAntigravityAcpAccount("gone")).account;
+    await markLoggedIn(root, gone.id);
+    await writeFile(path.join(root, gone.id, "home", ".gemini", "antigravity-acp", "acp_business_token.json"), "y");
+    assert.equal((await removeAntigravityAcpAccount("../" + keep.id)).reason, "invalid_id");
+    assert.equal((await removeAntigravityAcpAccount("d".repeat(32))).reason, "not_found");
+    const release = acquireAntigravityAcpAccountUse(gone.id);
+    assert.equal((await removeAntigravityAcpAccount(gone.id)).reason, "account_busy");
+    assert.equal((await stat(path.join(root, gone.id))).isDirectory(), true);
+    release();
+    assert.deepEqual(await removeAntigravityAcpAccount(gone.id), { ok: true });
+    await assert.rejects(() => stat(path.join(root, gone.id)));
+    assert.deepEqual(getAntigravityAcpProfiles().map(({ id }) => id), [keep.id]);
+    assert.equal((await stat(path.join(root, keep.id))).isDirectory(), true);
+  });
 });
 
 test("ACP requests negotiate exactly v1 and return assistant output from session updates", async () => {
@@ -325,6 +491,29 @@ test("ACP requests negotiate exactly v1 and return assistant output from session
     ["newSession", { cwd: "/srv/zenith/workers/agy-account-1", mcpServers: [] }],
     ["prompt", { sessionId: "session-1", prompt: [{ type: "text", text: "user: hello" }] }],
   ]);
+});
+
+test("ACP stream detects usage-limit messages split across chunks", async () => {
+  await reset([TWO_PROFILES[0]]);
+  const accountId = TWO_PROFILES[0].id;
+  const limitText = "Usage Limit Reached\\n\\nYou have reached your current quota for this period. Your quota will reset in 2 hours, 30 minutes.";
+  const { client } = fakeClient({
+    prompt: async ({ sessionId }) => {
+      const splitAt = 9;
+      for (const text of [limitText.slice(0, splitAt), limitText.slice(splitAt)]) {
+        clientListener({ sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } });
+      }
+      return { stopReason: "end_turn" };
+    },
+  });
+  let clientListener;
+  client.onUpdate = (cb) => { clientListener = cb; return () => {}; };
+  const response = await executeAntigravityAcp({ body: { ...BODY, stream: true }, createClient: async () => client });
+  const raw = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(raw, /acp_usage_limit/);
+  assert.doesNotMatch(raw, /You have reached your current quota/);
+  assert.equal(getAntigravityAcpProfileStatus(accountId), "limited");
 });
 
 test("ACP stream emits text deltas before session/prompt resolves", async () => {
@@ -403,7 +592,7 @@ test("stream errors terminate with an OpenAI error frame and never replay", asyn
   assert.match(terminal, /acp_outcome_unknown/);
   assert.match(terminal, /\[DONE\]/);
   assert.doesNotMatch(terminal, /secret account detail/);
-  assert.deepEqual(seen, ["agy-account-1"]);
+  assert.deepEqual(seen, [W1]);
 });
 
 test("unsupported tools and generation options fail before any worker starts", async () => {
@@ -425,7 +614,7 @@ test("unsupported ACP protocol version fails closed without advancing workers", 
     return fakeClient({ initialize: async () => ({ protocolVersion: 2 }) }).client;
   } });
   assert.equal(response.status, 502);
-  assert.deepEqual(seen, ["agy-account-1"]);
+  assert.deepEqual(seen, [W1]);
   assert.match(await response.text(), /acp_protocol_version/);
 });
 
@@ -459,10 +648,10 @@ test("unknown session bootstrap error fails closed without using message text fo
   const response = await executeAntigravityAcp({ body: BODY, createClient: async (workerId) => { seen.push(workerId); return client; } });
   const text = await response.text();
   assert.equal(response.status, 502);
-  assert.deepEqual(seen, ["agy-account-1"]);
+  assert.deepEqual(seen, [W1]);
   assert.match(text, /acp_session_failed/);
   assert.doesNotMatch(text, /auth required/);
-  assert.equal(getAntigravityAcpProfileStatus("primary"), "unavailable");
+  assert.equal(getAntigravityAcpProfileStatus(ID1), "unavailable");
 });
 
 test("only coded pre-prompt authentication failure advances to another worker", async () => {
@@ -470,15 +659,15 @@ test("only coded pre-prompt authentication failure advances to another worker", 
   const seen = [];
   const response = await executeAntigravityAcp({ body: BODY, createClient: async (namespace) => {
     seen.push(namespace);
-    if (namespace === "agy-account-1") {
+    if (namespace === W1) {
       const { client } = fakeClient({ initialize: async () => { throw Object.assign(new Error("secret detail"), { code: -32000 }); } });
       return client;
     }
     return fakeClient().client;
   } });
   assert.equal(response.status, 200);
-  assert.deepEqual(seen, ["agy-account-1", "agy-account-2"]);
-  assert.equal(getAntigravityAcpProfileStatus("primary"), "needs_login");
+  assert.deepEqual(seen, [W1, W2]);
+  assert.equal(getAntigravityAcpProfileStatus(ID1), "needs_login");
 });
 
 test("real transport error mapping retries only pre-prompt auth and never retries prompt auth", async () => {
@@ -489,14 +678,14 @@ test("real transport error mapping retries only pre-prompt auth and never retrie
     timeoutMs: 500,
     spawnFn: () => {
       started.push(workerId);
-      return protocolFixture({ authAt: workerId === "agy-account-1" ? "initialize" : null });
+      return protocolFixture({ authAt: workerId === W1 ? "initialize" : null });
     },
   }), options);
   const response = await executeAntigravityAcp({ body: BODY, createClient: clientFactory });
   assert.equal(response.status, 200);
-  assert.deepEqual(started, ["agy-account-1", "agy-account-2"]);
+  assert.deepEqual(started, [W1, W2]);
   assert.equal((await response.json()).choices[0].message.content, "fixture answer");
-  assert.equal(getAntigravityAcpProfileStatus("primary"), "needs_login");
+  assert.equal(getAntigravityAcpProfileStatus(ID1), "needs_login");
 
   await reset(TWO_PROFILES);
   started.length = 0;
@@ -511,7 +700,7 @@ test("real transport error mapping retries only pre-prompt auth and never retrie
   const promptError = await executeAntigravityAcp({ body: BODY, createClient: promptErrorFactory });
   const errorText = await promptError.text();
   assert.equal(promptError.status, 502);
-  assert.deepEqual(started, ["agy-account-1"]);
+  assert.deepEqual(started, [W1]);
   assert.match(errorText, /acp_outcome_unknown/);
   assert.doesNotMatch(errorText, /private fixture detail/);
 });
@@ -530,7 +719,7 @@ test("client abort sends ACP v1 session/cancel and does not select another worke
   controller.abort();
   const response = await pending;
   assert.equal(response.status, 499);
-  assert.deepEqual(seen, ["agy-account-1"]);
+  assert.deepEqual(seen, [W1]);
   assert.deepEqual(calls.find(([name]) => name === "cancel"), ["cancel", { sessionId: "session-1" }]);
 });
 
@@ -541,67 +730,8 @@ test("prompt failure is ambiguous and never replays to another worker", async ()
   const response = await executeAntigravityAcp({ body: BODY, createClient: async (namespace) => { seen.push(namespace); return client; } });
   const text = await response.text();
   assert.equal(response.status, 502);
-  assert.deepEqual(seen, ["agy-account-1"]);
+  assert.deepEqual(seen, [W1]);
   assert.match(text, /acp_outcome_unknown/);
   assert.doesNotMatch(text, /private account message/);
   assert.equal(calls.some(([name]) => name === "cancel"), false);
-});
-
-test("stale ACP auth result does not touch a rebound slot, including A-B-A", async () => {
-  for (const aba of [false, true]) {
-    await reset(TWO_PROFILES);
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
-    const pending = executeAntigravityAcp({ body: BODY, createClient: async (workerId) => {
-      if (workerId === "agy-account-1") {
-        return fakeClient({ initialize: async () => { await gate; throw Object.assign(new Error("x"), { code: -32000 }); } }).client;
-      }
-      return fakeClient().client;
-    } });
-    await new Promise((resolve) => setImmediate(resolve));
-    const rebind = (workerId) => setAntigravityAcpProfiles([{ id: "primary", workerId, priority: 0, enabled: true }, TWO_PROFILES[1]].map((p, i) => i && workerId === "agy-account-2" ? { ...p, workerId: "agy-account-1" } : p));
-    assert.equal(await rebind("agy-account-2"), true);
-    assert.equal(setAntigravityAcpProfileStatus("primary", "ready"), true);
-    if (aba) assert.equal(await setAntigravityAcpProfiles(TWO_PROFILES), true);
-    if (aba) assert.equal(setAntigravityAcpProfileStatus("primary", "ready"), true);
-    release();
-    await pending;
-    assert.equal(getAntigravityAcpProfileStatus("primary"), "ready");
-  }
-});
-
-test("fallback rebind: stale secondary is never started and new slot is not marked by old work", async () => {
-  await reset(TWO_PROFILES);
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const started = [];
-  const pending = executeAntigravityAcp({ body: BODY, createClient: async (workerId) => {
-    started.push(workerId);
-    if (workerId === "agy-account-1") return fakeClient({ initialize: async () => { await gate; throw Object.assign(new Error("x"), { code: -32000 }); } }).client;
-    return fakeClient().client;
-  } });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(await setAntigravityAcpProfiles([{ ...TWO_PROFILES[0], workerId: "agy-account-2" }, { ...TWO_PROFILES[1], workerId: "agy-account-1" }]), true);
-  assert.equal(setAntigravityAcpProfileStatus("primary", "ready"), true);
-  release();
-  const response = await pending;
-  assert.equal(response.status, 503);
-  assert.deepEqual(started, ["agy-account-1"]);
-  assert.equal(getAntigravityAcpProfileStatus("primary"), "ready");
-  assert.equal(getAntigravityAcpProfileStatus("secondary"), "unavailable");
-});
-
-test("rebind during session setup does not dispatch the old worker", async () => {
-  await reset(TWO_PROFILES);
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const { client, calls } = fakeClient({ session: async () => { await gate; return { sessionId: "session-1" }; } });
-  const pending = executeAntigravityAcp({ body: BODY, createClient: async () => client });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(await setAntigravityAcpProfiles([{ ...TWO_PROFILES[0], workerId: "agy-account-2" }, { ...TWO_PROFILES[1], workerId: "agy-account-1" }]), true);
-  release();
-  const response = await pending;
-  assert.equal(response.status, 503);
-  assert.equal(calls.some(([name]) => name === "prompt"), false);
-  assert.equal(calls.some(([name]) => name === "close"), true);
 });

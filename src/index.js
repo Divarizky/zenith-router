@@ -74,6 +74,8 @@ import {
   handleAgyLoginSubmit,
   handleAgyLoginStatus,
   handleAgyLoginCancel,
+  handleAgyAccountAdd,
+  handleAgyAccountRemove,
 } from "./ui/pages/agyLogin.js";
 import { renderUsagePage } from "./ui/pages/usage.js";
 import { syncManagedCombos } from "./services/managedCombos.js";
@@ -213,6 +215,8 @@ app.post("/dashboard/oauth/start", handleOAuthStart);
 app.post("/dashboard/oauth/poll", handleOAuthPoll);
 app.post("/dashboard/oauth/manual", handleOAuthManual);
 app.post("/dashboard/oauth/cancel", handleOAuthCancel);
+app.post("/dashboard/providers/antigravity-acp/accounts/add", handleAgyAccountAdd);
+app.post("/dashboard/providers/antigravity-acp/accounts/remove", handleAgyAccountRemove);
 app.post("/dashboard/providers/antigravity-acp/login/start", handleAgyLoginStart);
 app.post("/dashboard/providers/antigravity-acp/login/submit", handleAgyLoginSubmit);
 app.post("/dashboard/providers/antigravity-acp/login/status", handleAgyLoginStatus);

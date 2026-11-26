@@ -321,7 +321,7 @@ test("tokenRefresh - concurrent calls for the same expiring connection share sin
   setCustomTokenRefresher(null);
 });
 
-function freshOAuthConnection(provider = "antigravity") {
+function freshOAuthConnection(provider = "claude") {
   return addConnection({
     provider,
     name: `${provider} OAuth`,
@@ -436,8 +436,8 @@ test("POST /v1/chat/completions - reactive 401 refreshes even after an earlier u
 test("tokenRefresh - a token endpoint that never answers times out and frees the connection", async () => {
   initDb(":memory:");
   const conn = addConnection({
-    provider: "antigravity",
-    name: "Hanging Google",
+    provider: "claude",
+    name: "Hanging Claude",
     auth_type: "oauth",
     credentials: { access_token: "old", refresh_token: "ref_tok", expires_at: Date.now() - 1000 },
   });
@@ -471,7 +471,7 @@ test("tokenRefresh - a token endpoint that never answers times out and frees the
   });
 
   try {
-    await assert.rejects(refreshOAuthToken(conn), /Google refresh timed out after 50ms/);
+    await assert.rejects(refreshOAuthToken(conn), /Claude refresh timed out after 50ms/);
 
     // The timed-out attempt must not stay in flight for the next caller.
     const retried = await refreshOAuthToken(getConnectionById(conn.id));
@@ -486,7 +486,7 @@ test("tokenRefresh - a token endpoint that never answers times out and frees the
 test("tokenRefresh - a successful refresh is logged with its new expiry", async () => {
   initDb(":memory:");
   const conn = addConnection({
-    provider: "antigravity",
+    provider: "claude",
     name: "Logged",
     auth_type: "oauth",
     credentials: { access_token: "old", refresh_token: "ref_tok", expires_at: Date.now() - 1000 },
@@ -500,7 +500,7 @@ test("tokenRefresh - a successful refresh is logged with its new expiry", async 
     assert.ok(
       lines.some(
         (l) =>
-          l.includes(`[zenith] Token antigravity #${conn.id} diperbarui, berlaku sampai `) && /sampai \d{2}:\d{2}$/.test(l)
+          l.includes(`[zenith] Token claude #${conn.id} diperbarui, berlaku sampai `) && /sampai \d{2}:\d{2}$/.test(l)
       ),
       "refresh yang berhasil harus tercatat di Console Log"
     );

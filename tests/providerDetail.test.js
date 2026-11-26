@@ -40,14 +40,14 @@ test("GET /dashboard/providers/:id - selection is behind a toggle button and row
 test("GET /dashboard/providers/:id - model rows show thinking and vision icons from capabilities", async () => {
   initDb(":memory:");
 
-  const html = await (await app.request("/dashboard/providers/antigravity")).text();
+  const html = await (await app.request("/dashboard/providers/codex")).text();
   const icons = (modelId) => {
     const row = html.split("\n").find((line) => line.includes(`/${modelId}</code>`));
     return row || "";
   };
 
-  // gemini-3.8-flash: vision + reasoning.
-  const gemini = icons("gemini-3.8-flash");
+  // gpt-6.1-sol: vision + reasoning.
+  const gemini = icons("gpt-6.1-sol");
   assert.ok(gemini.includes("cap-icons"), "icons are rendered");
   assert.ok(gemini.includes("mendukung thinking"), "brain icon has a thinking tooltip");
   assert.ok(gemini.includes("baca gambar"), "eye icon has a vision tooltip");

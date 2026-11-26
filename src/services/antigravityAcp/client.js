@@ -1,4 +1,4 @@
-import { getAntigravityAcpWorker } from "./workers.js";
+import { getAntigravityAcpWorker, workerRuntimeEnv } from "./workers.js";
 
 const MINIMAL_ENV = Object.freeze(process.platform === "win32"
   ? { PATH: `${process.env.SystemRoot || "C:\\Windows"}\\System32;${process.env.SystemRoot || "C:\\Windows"}`, SYSTEMROOT: process.env.SystemRoot || "C:\\Windows" }
@@ -28,7 +28,7 @@ export async function createAntigravityAcpClient(workerId, createTransport, { si
       cwd: worker.workspace,
       env: {
         ...MINIMAL_ENV,
-        ...(worker.isolatedHome ? { HOME: worker.isolatedHome, ...(process.platform === "win32" ? { USERPROFILE: worker.isolatedHome } : {}) } : {}),
+        ...workerRuntimeEnv(worker),
       },
     });
   } catch {

@@ -11,7 +11,7 @@ const ACCOUNT = "akun-日本-Ж@example.com";
 function seedAccount() {
   initDb(":memory:");
   addConnection({
-    provider: "antigravity",
+    provider: "codex",
     name: ACCOUNT,
     auth_type: "oauth",
     credentials: { access_token: "tok", refresh_token: "ref" },
@@ -39,7 +39,7 @@ test("F-07 header akun: nama non-Latin1 tidak menggagalkan respons non-stream", 
     const res = await app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "ag/gemini-3.8-flash-high", messages: [{ role: "user", content: "hi" }] }),
+      body: JSON.stringify({ model: "cx/gpt-5", messages: [{ role: "user", content: "hi" }] }),
     });
     assert.strictEqual(res.status, 200, "respons harus tetap 200 walau nama akun non-Latin1");
     const header = res.headers.get("X-Zenith-Account");
@@ -58,7 +58,7 @@ test("F-07 header akun: nama non-Latin1 tidak menggagalkan respons stream", asyn
     const res = await app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "ag/gemini-3.8-flash-high", stream: true, messages: [{ role: "user", content: "hi" }] }),
+      body: JSON.stringify({ model: "cx/gpt-5", stream: true, messages: [{ role: "user", content: "hi" }] }),
     });
     assert.strictEqual(res.status, 200, "stream harus tetap 200 walau nama akun non-Latin1");
     const header = res.headers.get("X-Zenith-Account");
@@ -74,7 +74,7 @@ test("F-07 header akun: email ASCII tidak berubah oleh encoding", async () => {
   // Ini menjaga klien yang sudah membaca email mentah dari header.
   initDb(":memory:");
   addConnection({
-    provider: "antigravity",
+    provider: "codex",
     name: "deepa.rizky@gmail.com",
     auth_type: "oauth",
     credentials: { access_token: "tok", refresh_token: "ref" },
@@ -84,7 +84,7 @@ test("F-07 header akun: email ASCII tidak berubah oleh encoding", async () => {
     const res = await app.request("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "ag/gemini-3.8-flash-high", messages: [{ role: "user", content: "hi" }] }),
+      body: JSON.stringify({ model: "cx/gpt-5", messages: [{ role: "user", content: "hi" }] }),
     });
     assert.strictEqual(res.headers.get("X-Zenith-Account"), "deepa.rizky@gmail.com");
   } finally {

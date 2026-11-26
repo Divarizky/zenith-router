@@ -7,9 +7,10 @@ import { initDb } from "../src/db/index.js";
 import { setSetting } from "../src/services/settings.js";
 import { controlPlaneGuard } from "../src/security.js";
 import {
-  getAntigravityAcpConfigGeneration,
+  completeAntigravityAcpLogin,
   getAntigravityAcpProfiles,
-  registerAntigravityAcpWorker,
+  resetAntigravityAcpRuntimeStateForTests,
+  setAntigravityAcpEnabled,
   setAntigravityAcpProfiles,
 } from "../src/services/antigravityAcp/profiles.js";
 import { setAntigravityAcpWorkerLoaderForTests } from "../src/services/antigravityAcp/workers.js";
@@ -26,9 +27,12 @@ import {
 } from "../src/services/antigravityAcp/login.js";
 
 const URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=fake&state=fake";
+const ID = "a".repeat(32);
+const ID_OTHER = "b".repeat(32);
+const ACCOUNT = { id: ID, name: "primary", enabled: true };
 const WORKER = {
-  workerId: "agy-login-worker",
-  namespace: "agy-login-worker",
+  workerId: `agy-worker-${ID}`,
+  namespace: `agy-worker-${ID}`,
   launcher: "/opt/agy/runtime",
   loginLauncher: "/opt/agy/login",
   loginLauncherArgs: ["acp", "--login"],
@@ -61,6 +65,9 @@ function fakeChild({ onCode } = {}) {
 function reset() {
   resetAntigravityAcpLoginForTests();
   initDb(":memory:");
+  resetAntigravityAcpRuntimeStateForTests();
+  // The setter has no await before it writes, so the account exists when reset() returns.
+  void setAntigravityAcpProfiles([ACCOUNT]);
   setAntigravityAcpWorkerLoaderForTests(async () => [WORKER]);
   setAntigravityAcpLoginDependenciesForTests({ timings: { urlWaitMs: 40, ttlMs: 200, exitWaitMs: 40, verifyWaitMs: 40 } });
 }
@@ -79,14 +86,20 @@ test("Agy URL validation accepts only official Google authorization URLs and han
   assert.equal(extractAgyAuthorizationUrlForTests(`prefix ${URL},`), URL);
 });
 
-test("happy path uses the trusted login launcher, verifies ACP v1, and registers the worker", async () => {
+test("happy path uses the trusted login launcher, verifies ACP v1, and marks the account ready", async () => {
   reset();
   let child;
   setAntigravityAcpLoginDependenciesForTests({
     spawn: (command, args, options) => {
       assert.equal(command, WORKER.loginLauncher);
       assert.deepEqual(args, WORKER.loginLauncherArgs);
-      assert.deepEqual(options.env, { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", HOME: WORKER.isolatedHome });
+      assert.deepEqual(options.env, {
+        PATH: "/usr/bin:/bin",
+        LANG: "C.UTF-8",
+        HOME: WORKER.isolatedHome,
+        GEMINI_HOME: `${WORKER.isolatedHome}/.gemini`,
+        AGY_ACP_FORCE_FILE_STORAGE: "1",
+      });
       assert.equal(options.cwd, WORKER.workspace);
       child = fakeChild({ onCode: (_code, process) => queueMicrotask(() => process.emit("exit", 0, null)) });
       queueMicrotask(() => child.stdout.write(`AGY_LOGIN_URL=${URL}\n`));
@@ -99,11 +112,11 @@ test("happy path uses the trusted login launcher, verifies ACP v1, and registers
       async close() {},
     }),
   });
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   const submitted = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code_123" });
-  assert.deepEqual(submitted, { ok: true, status: "ready", added: true });
-  assert.deepEqual(getAntigravityAcpProfiles(), [{ id: "worker-1", workerId: WORKER.workerId, priority: 0, enabled: true }]);
+  assert.deepEqual(submitted, { ok: true, status: "ready" });
+  assert.deepEqual(getAntigravityAcpProfiles(), [ACCOUNT]);
 });
 
 test("wrong session, duplicate submission, and concurrent start fail closed", async () => {
@@ -112,25 +125,25 @@ test("wrong session, duplicate submission, and concurrent start fail closed", as
   setAntigravityAcpLoginDependenciesForTests({
     spawn: () => { child = fakeChild(); queueMicrotask(() => child.stdout.write(`${URL}\n`)); return child; },
   });
-  const started = await startAntigravityAcpLogin("session-a");
-  assert.equal((await startAntigravityAcpLogin("session-a")).code, "login_busy");
+  const started = await startAntigravityAcpLogin("session-a", ID);
+  assert.equal((await startAntigravityAcpLogin("session-a", ID)).code, "login_busy");
   assert.equal((await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-b", code: "raw" })).code, "login_attempt_invalid");
   assert.equal((await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "https://evil.test/code" })).code, "invalid_authorization_code");
   child.kill();
 });
 
-test("process timeout cleans up the child and never registers a profile", async () => {
+test("process timeout cleans up the child and does not mark the account ready", async () => {
   reset();
   let child;
   setAntigravityAcpLoginDependenciesForTests({
     spawn: () => { child = fakeChild(); queueMicrotask(() => child.stdout.write(`${URL}\n`)); return child; },
     timings: { exitWaitMs: 10 },
   });
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   const submitted = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" });
   assert.equal(submitted.code, "login_process_timeout");
   assert.equal(child.exited, true);
-  assert.deepEqual(getAntigravityAcpProfiles(), []);
+  assert.deepEqual(getAntigravityAcpProfiles(), [ACCOUNT]);
 });
 
 test("ACP verification failure is not treated as login success", async () => {
@@ -148,18 +161,19 @@ test("ACP verification failure is not treated as login success", async () => {
       async close() {},
     }),
   });
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   const result = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" });
   assert.equal(result.code, "login_verification_failed");
-  assert.deepEqual(getAntigravityAcpProfiles(), []);
+  assert.deepEqual(getAntigravityAcpProfiles(), [ACCOUNT]);
 });
 
-test("registration preserves an unrelated existing profile and refuses a full list", async () => {
+test("login works for a third account and rejects unknown or malformed account ids", async () => {
   reset();
-  setAntigravityAcpWorkerLoaderForTests(async () => [WORKER, {
-    workerId: "other-worker", namespace: "other-worker", launcher: "/opt/other/runtime", workspace: "/opt/other/workspace",
-  }]);
-  await setAntigravityAcpProfiles([{ id: "existing", workerId: "other-worker", priority: 1, enabled: false }]);
+  const ID_THIRD = "c".repeat(32);
+  const other = (id, name) => ({ id, name, enabled: true });
+  await setAntigravityAcpProfiles([ACCOUNT, other(ID_OTHER, "secondary"), other(ID_THIRD, "tertiary")]);
+  const worker = { ...WORKER, workerId: `agy-worker-${ID_THIRD}`, namespace: `agy-worker-${ID_THIRD}` };
+  setAntigravityAcpWorkerLoaderForTests(async () => [WORKER, worker]);
   setAntigravityAcpLoginDependenciesForTests({
     spawn: () => {
       const child = fakeChild({ onCode: (_code, process) => queueMicrotask(() => process.emit("exit", 0, null)) });
@@ -168,29 +182,26 @@ test("registration preserves an unrelated existing profile and refuses a full li
     },
     createClient: async () => ({ cwd: WORKER.workspace, async initialize() { return { protocolVersion: 1 }; }, async newSession() { return { sessionId: "s" }; }, async close() {} }),
   });
-  const started = await startAntigravityAcpLogin("session-a");
-  assert.equal((await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" })).ok, true);
-  assert.deepEqual(getAntigravityAcpProfiles(), [
-    { id: "existing", workerId: "other-worker", priority: 1, enabled: false },
-    { id: "worker-1", workerId: WORKER.workerId, priority: 0, enabled: true },
-  ]);
+  const started = await startAntigravityAcpLogin("session-a", ID_THIRD);
+  assert.equal(started.ok, true);
+  assert.deepEqual(await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" }), { ok: true, status: "ready" });
 
-  reset();
-  setAntigravityAcpWorkerLoaderForTests(async () => [WORKER, { ...WORKER, workerId: "other-worker", namespace: "other-worker", launcher: "/opt/other/runtime", workspace: "/opt/other/workspace", loginLauncher: undefined }]);
-  await setAntigravityAcpProfiles([
-    { id: "one", workerId: WORKER.workerId, priority: 0, enabled: true },
-    { id: "two", workerId: "other-worker", priority: 1, enabled: true },
-  ]);
-  assert.equal((await startAntigravityAcpLogin("session-a")).code, "profile_slots_full");
+  assert.equal((await startAntigravityAcpLogin("session-a", "d".repeat(32))).code, "login_unavailable");
+  assert.equal((await startAntigravityAcpLogin("session-a", "../etc")).code, "login_unavailable");
+  assert.equal((await startAntigravityAcpLogin("session-a", undefined)).code, "login_unavailable");
 });
 
-test("dashboard exposes Agy as primary and keeps Zenith OAuth as secondary", () => {
+test("dashboard renders a per-account login control on the ACP provider and no Google OAuth login", async () => {
   reset();
-  const html = renderProviderDetailPage(20120, "antigravity");
-  assert.match(html, /Login via Agy/);
-  assert.match(html, /Login dengan Google/);
+  assert.equal(setAntigravityAcpEnabled(true), true);
+  const html = renderProviderDetailPage(20120, "antigravity-acp");
+  assert.match(html, /agy-acp-login/);
   assert.match(html, /antigravity-acp\/login\/start/);
-  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(html, /zrAgyAcpLogin/);
+  assert.match(html, new RegExp(ID));
+  assert.doesNotMatch(html, /Login dengan Google/);
+  assert.doesNotMatch(html, /zrAgyLoginStart/);
+  assert.equal(renderProviderDetailPage(20120, "antigravity"), null);
 });
 
 test("login endpoints inherit dashboard auth and CSRF protection", async () => {
@@ -207,12 +218,12 @@ test("login endpoints inherit dashboard auth and CSRF protection", async () => {
 test("status does not disclose process output", async () => {
   reset();
   setAntigravityAcpLoginDependenciesForTests({ spawn: () => { const child = fakeChild(); queueMicrotask(() => child.stdout.write(`secret@example.test ${URL}\n`)); return child; } });
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   const status = getAntigravityAcpLoginStatus({ attemptId: started.attemptId, binding: "session-a" });
   assert.deepEqual(status, { ok: true, status: "awaiting_code", error: undefined });
 });
 
-test("cancel during verification aborts profile registration and cleans up", async () => {
+test("cancel during verification aborts account completion and cleans up", async () => {
   reset();
   let verifyResolve;
   const verifyEntered = new Promise((resolve) => { verifyResolve = resolve; });
@@ -237,7 +248,7 @@ test("cancel during verification aborts profile registration and cleans up", asy
     },
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
 
   const submitPromise = submitAntigravityAcpLogin({
@@ -256,7 +267,7 @@ test("cancel during verification aborts profile registration and cleans up", asy
   const submitResult = await submitPromise;
   assert.equal(submitResult.ok, false);
   assert.equal(submitResult.code, "login_cancelled");
-  assert.deepEqual(getAntigravityAcpProfiles(), []);
+  assert.deepEqual(getAntigravityAcpProfiles(), [ACCOUNT]);
   assert.equal(getAntigravityAcpLoginStatus({ attemptId: started.attemptId, binding: "session-a" }).status, "cancelled");
 });
 
@@ -280,7 +291,7 @@ test("authorization URL is not truncated when received in fragmented chunks", as
     },
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, fullUrl);
   child.kill();
@@ -307,19 +318,14 @@ test("authorization URL without trailing newline resolves when child stream ends
     },
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, fullUrl);
   child.kill();
 });
 
-test("concurrent admin update during profile registration fails stale registration gracefully", async () => {
+test("account removed during verification fails the login as a configuration change", async () => {
   reset();
-  setAntigravityAcpWorkerLoaderForTests(async () => [
-    WORKER,
-    { workerId: "worker-admin", namespace: "worker-admin", launcher: "/opt/agy/runtime", workspace: "/opt/agy/workspace" },
-  ]);
-
   setAntigravityAcpLoginDependenciesForTests({
     spawn: () => {
       const child = fakeChild({ onCode: (_code, process) => queueMicrotask(() => process.emit("exit", 0, null)) });
@@ -329,62 +335,28 @@ test("concurrent admin update during profile registration fails stale registrati
     createClient: async () => ({
       cwd: WORKER.workspace,
       async initialize() {
-        // Admin updates profiles concurrently during login / verification window
-        await setAntigravityAcpProfiles([{ id: "admin-worker", workerId: "worker-admin", priority: 0, enabled: true }]);
+        // An admin replaces the list while the login is verifying.
+        await setAntigravityAcpProfiles([{ id: ID_OTHER, name: "other", enabled: true }]);
         return { protocolVersion: 1 };
       },
       async newSession() { return { sessionId: "s" }; },
       async close() {},
     }),
   });
-
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
-
-  const submitted = await submitAntigravityAcpLogin({
-    attemptId: started.attemptId,
-    binding: "session-a",
-    code: "raw-code",
-  });
-
+  const submitted = await submitAntigravityAcpLogin({ attemptId: started.attemptId, binding: "session-a", code: "raw-code" });
   assert.equal(submitted.ok, false);
   assert.equal(submitted.code, "login_configuration_changed");
-  // Ensure admin profile was NOT overwritten by stale registration
-  assert.deepEqual(getAntigravityAcpProfiles(), [
-    { id: "admin-worker", workerId: "worker-admin", priority: 0, enabled: true },
-  ]);
+  assert.deepEqual(getAntigravityAcpProfiles(), [{ id: ID_OTHER, name: "other", enabled: true }]);
 });
 
-test("registerAntigravityAcpWorker rejects registration when config generation is stale or updated concurrently", async () => {
+test("completeAntigravityAcpLogin fails closed for an unknown account or a changed worker mapping", async () => {
   reset();
-  setAntigravityAcpWorkerLoaderForTests(async () => [
-    WORKER,
-    { workerId: "worker-admin", namespace: "worker-admin", launcher: "/opt/agy/runtime", workspace: "/opt/agy/workspace" },
-  ]);
-
-  const currentGen = getAntigravityAcpConfigGeneration();
-  const staleResult = await registerAntigravityAcpWorker(WORKER.workerId, {
-    expectedGeneration: currentGen + 99,
-  });
-  assert.deepEqual(staleResult, { ok: false, reason: "stale" });
-
-  let injectedUpdate = false;
-  const adminWorker = { workerId: "worker-admin", namespace: "worker-admin", launcher: "/opt/agy/runtime", workspace: "/opt/agy/workspace" };
-  setAntigravityAcpWorkerLoaderForTests(async () => {
-    if (!injectedUpdate) {
-      injectedUpdate = true;
-      await setAntigravityAcpProfiles([{ id: "admin-worker", workerId: "worker-admin", priority: 0, enabled: true }]);
-    }
-    return [WORKER, adminWorker];
-  });
-
-  const raceResult = await registerAntigravityAcpWorker(WORKER.workerId, {
-    expectedGeneration: currentGen,
-  });
-  assert.deepEqual(raceResult, { ok: false, reason: "stale" });
-  assert.deepEqual(getAntigravityAcpProfiles(), [
-    { id: "admin-worker", workerId: "worker-admin", priority: 0, enabled: true },
-  ]);
+  assert.deepEqual(await completeAntigravityAcpLogin(ID_OTHER), { ok: false, reason: "stale" });
+  assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: { ...WORKER, launcher: "/opt/other/runtime" } }), { ok: false, reason: "stale" });
+  assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: WORKER, shouldCommit: () => false }), { ok: false, reason: "cancelled" });
+  assert.deepEqual(await completeAntigravityAcpLogin(ID, { expectedWorker: WORKER }), { ok: true });
 });
 
 test("cancel during worker resolution in registerAntigravityAcpWorker aborts registration and keeps profiles clean", async () => {
@@ -420,7 +392,7 @@ test("cancel during worker resolution in registerAntigravityAcpWorker aborts reg
     }),
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
 
   const submitPromise = submitAntigravityAcpLogin({
@@ -439,7 +411,7 @@ test("cancel during worker resolution in registerAntigravityAcpWorker aborts reg
   const submitResult = await submitPromise;
   assert.equal(submitResult.ok, false);
   assert.equal(submitResult.code, "login_cancelled");
-  assert.deepEqual(getAntigravityAcpProfiles(), []);
+  assert.deepEqual(getAntigravityAcpProfiles(), [ACCOUNT]);
   assert.equal(getAntigravityAcpLoginStatus({ attemptId: started.attemptId, binding: "session-a" }).status, "cancelled");
 });
 
@@ -456,7 +428,7 @@ test("authorization URL without trailing newline settles and resolves while chil
   });
 
   const startMs = Date.now();
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   const elapsed = Date.now() - startMs;
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, URL);
@@ -484,7 +456,7 @@ test("bare carriage return in or around URL does not prematurely truncate fragme
     },
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, fullUrl);
   child.kill();
@@ -511,7 +483,7 @@ test("URL fragmented across chunks with delay exceeding urlSettleMs is not trunc
     },
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, fullUrl);
   child.kill();
@@ -531,7 +503,7 @@ test("bare carriage return followed by text does not append to URL query value",
     },
   });
 
-  const started = await startAntigravityAcpLogin("session-a");
+  const started = await startAntigravityAcpLogin("session-a", ID);
   assert.equal(started.ok, true);
   assert.equal(started.authorizationUrl, expectedUrl);
   child.kill();

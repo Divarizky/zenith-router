@@ -15,7 +15,7 @@
 
 ---
 
-Zenith Router adalah gateway AI lokal mandiri untuk coding agents (Pi, Cursor, Claude Code, Cline, Roo Code, Aider) dan aplikasi apa pun yang menggunakan protokol OpenAI/Anthropic. Satu endpoint menerima permintaan berformat OpenAI Chat Completions, Anthropic Messages, maupun OpenAI Responses, lalu meneruskannya ke akun provider milik Anda sendiri: langganan Claude Pro/Team, ChatGPT/Codex, GitHub Copilot, Kiro, Antigravity, Cline, API key provider, sesi web DeepSeek, Nous Portal / Hermes, atau provider gratis dengan rotasi akun dan failover otomatis.
+Zenith Router adalah gateway AI lokal mandiri untuk coding agents (Pi, Cursor, Claude Code, Cline, Roo Code, Aider) dan aplikasi apa pun yang menggunakan protokol OpenAI/Anthropic. Satu endpoint menerima permintaan berformat OpenAI Chat Completions, Anthropic Messages, maupun OpenAI Responses, lalu meneruskannya ke akun provider milik Anda sendiri: langganan Claude Pro/Team, ChatGPT/Codex, GitHub Copilot, Kiro, Antigravity (ACP), Cline, API key provider, sesi web DeepSeek, Nous Portal / Hermes, atau provider gratis dengan rotasi akun dan failover otomatis.
 
 Zenith Router berjalan 100% lokal, tanpa akun cloud perantara, tanpa analitik atau telemetry, dan tanpa dependensi runtime berat. Seluruh kredensial tersimpan aman di database SQLite lokal mesin Anda.
 
@@ -43,7 +43,7 @@ Zenith Router berjalan 100% lokal, tanpa akun cloud perantara, tanpa analitik at
              │
              ▼
 [ Upstream AI Providers ] (21 Built-in Providers + Custom BYOP)
-Claude · Codex · Copilot · Kiro · Antigravity · GLM · Nous · OpenRouter · BYOP...
+Claude · Codex · Copilot · Kiro · Antigravity (ACP) · GLM · Nous · OpenRouter · BYOP...
 ```
 
 ---
@@ -58,7 +58,7 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · Nous · OpenRouter �
 - **OpenCode Egress Policy:** Pilih kebijakan proxy `legacy`, `direct`, `prefer`, atau `require`; mode `require` menolak request dengan `503 proxy_required` bila proxy wajib tidak tersedia. Mode hybrid WARP/Proton bersifat opt-in, memakai registry pool eksplisit, dan menyediakan `shadow` pasif sebelum `enforce`. Lihat [panduan OpenCode hybrid egress](docs/opencode-hybrid-egress.md).
 - **Live Quota Scraper (10 Provider):** Memantau sisa kuota, jendela batas pemakaian (5 jam, harian, mingguan), dan waktu reset akun secara akurat tanpa perlu membuka situs provider.
 - **Peningkatan OpenAI Codex & Responses API:** Sinkronisasi model Codex otomatis pasca login OAuth, auto-generate `prompt_cache_key`, pelaporan cached/estimated tokens, dan dukungan tangga level thinking hingga `xhigh` dan `max`.
-- **Tingkat Berpikir Fleksibel (Adaptive & XHigh):** Dukungan level thinking `xhigh` pada Google Antigravity dan tangga thinking penuh pada OpenAI Codex serta Claude via prefix model.
+- **Tingkat Berpikir Fleksibel (Adaptive & XHigh):** Dukungan level thinking tangga thinking penuh pada OpenAI Codex serta Claude via prefix model.
 - **Data Loss Prevention (DLP):** Redaksi dan sensor otomatis kredensial, kunci API, dan token privat sebelum meninggalkan mesin Anda.
 - **Zero-Overhead Token Saver:** Pemadatan prompt otomatis menggunakan algoritma RTK dan mode Caveman opsional untuk menghemat konsumsi token konteks.
 - **Dukungan Multi-Language (ID & EN):** Antarmuka web dashboard mendukung dwi-bahasa (Bahasa Indonesia dan English) dengan tombol switcher cepat di sidebar tanpa reload halaman dan pilihan bahasa permanen di pengaturan.
@@ -74,7 +74,6 @@ Claude · Codex · Copilot · Kiro · Antigravity · GLM · Nous · OpenRouter �
 | `cx` | OpenAI Codex | OAuth / Browser Callback | ✅ | ✅ |
 | `gh` | GitHub Copilot | Device Code / OAuth | ✅ | ✅ |
 | `kr` | Kiro AI | Free tier | ✅ | ✅ |
-| `ag` | Antigravity (Google) | OAuth | ✅ | ✅ |
 | `xkr` | xKiro | API key | ✅ | ✅ |
 | `cl` | Cline | OAuth | — | ✅ |
 | `cmc` | Command Code | OAuth | ✅ | ✅ |
@@ -131,7 +130,7 @@ Setelah terpasang, perintah `zenith` dapat dipanggil dari terminal mana pun untu
 
 1. **Buka Web Dashboard:** Kunjungi `http://127.0.0.1:20120/dashboard` di browser Anda.
 2. **Tambah Akun Provider:** Masuk ke tab **Providers**, pilih provider yang Anda miliki, dan klik **Add Account**:
-   * *OAuth Provider (Claude, Copilot, Antigravity, Nous Research, dll):* Klik tombol login browser atau selesaikan device code (untuk Nous, selesaikan verifikasi di portal Hermes).
+   * *OAuth Provider (Claude, Copilot, Nous Research, dll):* Klik tombol login browser atau selesaikan device code (untuk Nous, selesaikan verifikasi di portal Hermes).
    * *API Key Provider (OpenRouter, NVIDIA, dll):* Masukkan API key Anda.
    * *Free Provider (Kilo Free, OpenCode, OVH):* Langsung aktif dan siap dipakai.
 3. **Buat Gateway API Key:** Buka tab **API Keys**, buat key gateway baru (contoh `zr_live_...`). Key ini digunakan coding agent Anda untuk mengakses Zenith Router.
@@ -180,7 +179,6 @@ Daftar katalog per provider:
 
 * `cc/` (Claude OAuth): `low`, `medium`, `high`, `xhigh`, `max`.
 * `cx/` (Codex): `low`, `medium`, `high`, `xhigh`, `max` untuk model dalam ladder (`gpt-6*`, `gpt-5.6*`), dihitung oleh `codexThinkingLevelsFor` di `src/providers/codexTiers.js`. Model lain, mis. `cx/gpt-5.5`, tidak mengiklankan tier.
-* `ag/` (Antigravity): level berasal dari inventori varian akun; varian bawaan dipakai jika discovery belum melaporkan family tersebut. Family tanpa varian `xhigh` tidak mengiklankan `xhigh`. Routing mengutamakan akun yang melayani level persis sebelum turun ke level lain.
 
 Model tanpa data level tidak menerima field ini. Field `capabilities` lain (`vision`, `reasoning`, `tools`) tidak berubah.
 
@@ -192,7 +190,7 @@ Dispatch Codex tidak memfilter effort per model. Model di luar ladder (mis. `cx/
 
 Yang sudah dibuktikan adalah payload: effort yang dikenal sampai ke `reasoning.effort` di jalur dispatch. Penerimaan upstream belum diuji. Tidak ada request nyata ke upstream, sehingga tidak diketahui apakah upstream menerima tier yang diiklankan atau effort di luar ladder.
 
-### Provider Antigravity & Sinkronisasi Katalog No-Auth
+### Sinkronisasi Katalog No-Auth
 * **Level Thinking XHigh:** Mendukung varian model dengan level thinking `xhigh` (suffix `xhigh` dan label `(XHigh)`).
 * **Prefix Cache Tracer:** Trace diagnostik sidik jari prefix prompt opt-in melalui env `ZENITH_CACHE_TRACE=1`.
 * **Sinkronisasi Katalog No-Auth:** Katalog provider publik (`kilo-free`, `llm7`, `ovhcloud`) disinkronkan secara live; model bawaan yang dihentikan upstream otomatis dipensiunkan (`retired_models`) dengan perlindungan alias bawaan (`builtinAliases`).
@@ -303,7 +301,7 @@ Zenith Router dapat dikonfigurasi melalui environment variables (atau berkas `.e
 | `WARP_POOL_SIGNAL_URL` | `http://127.0.0.1:8405/signal/429` | URL endpoint sinyal 429 fire-and-forget rotasi Cloudflare WARP |
 | `ZENITH_NOUS_CLIENT_ID` | `hermes-cli` | Client ID OAuth device code untuk provider Nous Research |
 | `ZENITH_STREAM_TRACE` | *kosong* | Set `1` untuk mengaktifkan trace diagnostik parsing stream SSE |
-| `ZENITH_CACHE_TRACE` | *kosong* | Set `1` untuk mengaktifkan trace sidik jari prefix prompt Antigravity |
+| `ZENITH_CACHE_TRACE` | *kosong* | Set `1` untuk mengaktifkan trace sidik jari prefix prompt |
 | `ZENITH_OPENCODE_BASE_URL` | *kosong* | URL upstream kustom untuk provider OpenCode |
 | `ZENITH_OPENCODE_BRIDGE_PORT` | *otomatis* | Port listen worker bridge Bun lokal untuk OpenCode |
 

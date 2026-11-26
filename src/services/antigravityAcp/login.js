@@ -4,11 +4,13 @@ import path from "node:path";
 import pkg from "../../../package.json" with { type: "json" };
 import { createAntigravityAcpClient } from "./client.js";
 import { createAntigravityAcpTransport } from "./transport.js";
-import { getAntigravityAcpWorkers } from "./workers.js";
+import { getAntigravityAcpWorker, workerRuntimeEnv } from "./workers.js";
+import { isValidAccountId, workerIdForAccount } from "./accounts.js";
 import {
+  acquireAntigravityAcpAccountUse,
+  completeAntigravityAcpLogin,
   getAntigravityAcpConfigGeneration,
   getAntigravityAcpProfiles,
-  registerAntigravityAcpWorker,
 } from "./profiles.js";
 
 export const AGY_LOGIN_URL_WAIT_MS = 15_000;
@@ -90,14 +92,16 @@ function safeWorkerSnapshot(worker) {
     loginLauncherArgs: worker.loginLauncherArgs || [],
     launcherArgs: worker.launcherArgs || [],
     isolatedHome: worker.isolatedHome,
+    appData: worker.appData,
     workspace: worker.workspace,
   };
 }
 
-async function selectLoginWorker() {
-  const workers = await getAntigravityAcpWorkers();
-  const candidates = workers.filter((worker) => typeof worker.loginLauncher === "string");
-  return candidates.length === 1 ? candidates[0] : null;
+async function selectLoginWorker(accountId) {
+  if (!isValidAccountId(accountId)) return null;
+  if (!getAntigravityAcpProfiles().some((account) => account.id === accountId)) return null;
+  const worker = await getAntigravityAcpWorker(workerIdForAccount(accountId));
+  return worker && typeof worker.loginLauncher === "string" ? worker : null;
 }
 
 function clearTimer(timer) {
@@ -133,6 +137,7 @@ function failRecord(record, code = "login_failed") {
   clearTimer(record.ttlTimer);
   clearTimer(record.exitTimer);
   record.verifyAbortController?.abort();
+  record.releaseUse?.();
   terminateChild(record);
   record.resolveUrl?.(genericFailure(code));
   record.resolveExit?.({ exited: record.exited, code: record.exitCode, signal: record.exitSignal });
@@ -311,16 +316,16 @@ function validateCode(code) {
   return CODE_PATTERN.test(code);
 }
 
-export async function startAntigravityAcpLogin(binding) {
+export async function startAntigravityAcpLogin(binding, accountId) {
   if ([...attempts.values()].some((attempt) => !attempt.terminal) || starting) return genericFailure("login_busy");
   starting = true;
   try {
-    const worker = await selectLoginWorker();
+    const worker = await selectLoginWorker(accountId);
     if (!worker) return genericFailure("login_unavailable");
-    const profiles = getAntigravityAcpProfiles();
-    if (profiles.length >= 2) return genericFailure("profile_slots_full");
     const record = {
       attemptId: randomBytes(24).toString("base64url"),
+      accountId,
+      releaseUse: acquireAntigravityAcpAccountUse(accountId),
       binding,
       worker: safeWorkerSnapshot(worker),
       generation: getAntigravityAcpConfigGeneration(),
@@ -349,10 +354,7 @@ export async function startAntigravityAcpLogin(binding) {
       const env = process.platform === "win32"
         ? { PATH: `${process.env.SystemRoot || "C:\\Windows"}\\System32;${process.env.SystemRoot || "C:\\Windows"}`, SYSTEMROOT: process.env.SystemRoot || "C:\\Windows" }
         : { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" };
-      if (record.worker.isolatedHome) {
-        env.HOME = record.worker.isolatedHome;
-        if (process.platform === "win32") env.USERPROFILE = record.worker.isolatedHome;
-      }
+      Object.assign(env, workerRuntimeEnv(record.worker));
       child = spawnFn(record.worker.loginLauncher, record.worker.loginLauncherArgs || [], {
         cwd: record.worker.workspace,
         env,
@@ -405,22 +407,22 @@ export async function submitAntigravityAcpLogin({ attemptId, binding, code }) {
     return genericFailure("login_verification_failed");
   }
   if (record.terminal) return genericFailure(record.errorCode || "login_cancelled");
-  const registered = await registerAntigravityAcpWorker(record.worker.workerId, {
-    expectedGeneration: record.generation,
+  const registered = await completeAntigravityAcpLogin(record.accountId, {
     expectedWorker: record.worker,
     shouldCommit: () => !record.terminal,
   });
   if (record.terminal) return genericFailure(record.errorCode || "login_cancelled");
   if (!registered.ok) {
-    failRecord(record, registered.reason === "full" ? "profile_slots_full" : "login_configuration_changed");
+    failRecord(record, "login_configuration_changed");
     return genericFailure(record.errorCode);
   }
   record.terminal = true;
+  record.releaseUse?.();
   record.state = "ready";
   record.errorCode = null;
   clearTimer(record.ttlTimer);
   forgetLater(record);
-  return { ok: true, status: "ready", added: registered.added === true };
+  return { ok: true, status: "ready" };
 }
 
 export function getAntigravityAcpLoginStatus({ attemptId, binding }) {

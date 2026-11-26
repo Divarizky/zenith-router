@@ -155,47 +155,6 @@ test("Live Quota - GLM parses coding plan limits and flags exhaustion when 100%"
   setOAuthFetch(null);
 });
 
-test("Live Quota - Antigravity parses per-model remainingFraction buckets", async () => {
-  initDb(":memory:");
-
-  setOAuthFetch(async (url) => {
-    if (url.includes("fetchAvailableModels")) {
-      return new Response(
-        JSON.stringify({
-          allowedTiers: [{ id: "legacy-tier", isDefault: true }],
-          models: {
-            "gemini-3.6-flash-high": {
-              displayName: "Gemini 3.6 Flash High",
-              quotaInfo: { remainingFraction: 0.62, resetTime: 1791000000 },
-            },
-            "internal-model": { isInternal: true, quotaInfo: { remainingFraction: 1 } },
-          },
-        }),
-        { status: 200 }
-      );
-    }
-    return new Response("Not found", { status: 404 });
-  });
-
-  const conn = addConnection({
-    provider: "antigravity",
-    name: "user@gmail.com",
-    auth_type: "oauth",
-    credentials: { access_token: "mock_ag_token" },
-  });
-
-  const quota = await syncProviderQuota(conn);
-  assert.strictEqual(quota.provider, "antigravity");
-  assert.strictEqual(quota.tier, "legacy-tier");
-  assert.deepStrictEqual(Object.keys(quota.quotas), ["gemini-3.6-flash-high"]);
-  assert.strictEqual(quota.quotas["gemini-3.6-flash-high"].used, 380);
-  assert.strictEqual(quota.quotas["gemini-3.6-flash-high"].total, 1000);
-  assert.strictEqual(Math.round(quota.quotas["gemini-3.6-flash-high"].remainingPercentage), 62);
-  assert.strictEqual(quota.is_exhausted, false);
-
-  setOAuthFetch(null);
-});
-
 test("Live Quota - Claude parses 5h and 7d utilization windows", async () => {
   initDb(":memory:");
 
@@ -359,52 +318,6 @@ test("Live Quota - xKiro parses free tokens, plan windows and wallet", async () 
   setOAuthFetch(null);
 });
 
-test("Live Quota - Antigravity filters noise models, dedupes buckets and reads plan name", async () => {
-  initDb(":memory:");
-
-  setOAuthFetch(async (url) => {
-    if (url.includes("fetchAvailableModels")) {
-      const q = { remainingFraction: 0.5, resetTime: "2026-10-15T07:17:49Z" };
-      return new Response(
-        JSON.stringify({
-          models: {
-            tab_flash_lite_preview: { quotaInfo: { remainingFraction: 1 } },
-            "gemini-2.5-flash": { displayName: "Gemini 3.5 Flash Lite", quotaInfo: q },
-            "gemini-3.5-flash-lite": { displayName: "Gemini 3.5 Flash Lite", quotaInfo: q },
-            "gemini-3.6-flash-high": { displayName: "Gemini 3.6 Flash (High)", quotaInfo: q },
-            "gemini-3.6-flash-tiered": { displayName: "gemini-3.6-flash-tiered", quotaInfo: q },
-            "gemini-3.8-flash-tiered": { displayName: "gemini-3.8-flash-tiered", quotaInfo: q },
-            "gemini-pro-agent": { displayName: "Gemini 3.1 Pro (High)", quotaInfo: q },
-            "gemini-3.1-pro-high": { displayName: "Gemini 3.1 Pro (High)", quotaInfo: q },
-          },
-        }),
-        { status: 200 }
-      );
-    }
-    if (url.includes("loadCodeAssist")) {
-      return new Response(JSON.stringify({ currentTier: { name: "Google AI Pro" } }), { status: 200 });
-    }
-    return new Response("Not found", { status: 404 });
-  });
-
-  const conn = addConnection({
-    provider: "antigravity",
-    name: "ag",
-    auth_type: "oauth",
-    credentials: { access_token: "t" },
-  });
-  const quota = await syncProviderQuota(conn);
-  assert.strictEqual(quota.plan, "Google AI Pro");
-  assert.deepStrictEqual(Object.keys(quota.quotas), ["gemini-3.6-flash-high", "gemini-3.8-flash-tiered", "gemini-pro-agent"]);
-  assert.strictEqual(quota.quotas["gemini-3.8-flash-tiered"].displayName, "Gemini 3.8 Flash");
-
-  setOAuthFetch(async () => new Response("denied", { status: 403 }));
-  const denied = await syncProviderQuota(conn);
-  assert.match(denied.error, /menolak token/);
-
-  setOAuthFetch(null);
-});
-
 test("Live Quota - expired OAuth token is refreshed before the quota call", async () => {
   initDb(":memory:");
   const seen = [];
@@ -415,18 +328,14 @@ test("Live Quota - expired OAuth token is refreshed before the quota call", asyn
     seen.push(auth);
     if (auth !== "Bearer fresh_token") return new Response("expired", { status: 401 });
     return new Response(
-      JSON.stringify({
-        models: {
-          "gemini-3-flash-agent": { quotaInfo: { remainingFraction: 0.5, resetTime: "2026-10-10T00:00:00Z" } },
-        },
-      }),
+      JSON.stringify({ five_hour: { utilization: 40, resets_at: "2026-10-10T00:00:00Z" } }),
       { status: 200 }
     );
   });
 
   const conn = addConnection({
-    provider: "antigravity",
-    name: "Expired AG",
+    provider: "claude",
+    name: "Expired Claude",
     auth_type: "oauth",
     credentials: {
       access_token: "stale_token",
@@ -546,56 +455,4 @@ test("Live Quota - Command Code with an empty balance stays usable for free mode
   assert.strictEqual(quota.quotas.credits.usedLabel, "$0.00 left");
 
   setOAuthFetch(null);
-});
-
-test("Live Quota - Antigravity menyimpan inventaris model per akun saat sinkron", async () => {
-  const { initDb, getAntigravityModelInventory, getConnections } = await import("../src/db/index.js");
-  const { syncProviderQuota } = await import("../src/services/quota.js");
-  const { setCustomQuotaFetcher } = await import("../src/services/quota.js");
-  const { fetchAntigravityQuota } = await import("../src/services/quota/antigravity.js");
-
-  initDb(":memory:");
-  const conn = addConnection({ provider: "antigravity", name: "pro", auth_type: "oauth", credentials: { access_token: "t" } });
-  setCustomQuotaFetcher(async (c) => {
-    setOAuthFetch(async () =>
-      new Response(
-        JSON.stringify({
-          models: {
-            "gemini-4-argon-medium": { displayName: "Gemini 4 Argon (Medium)", quotaInfo: { remainingFraction: 1, resetTime: "2026-10-23T13:20:01Z" }, maxTokens: 1048576, supportsImages: true, supportsThinking: true },
-            "legacy-model": { displayName: "Legacy", quotaInfo: { remainingFraction: 0.5 } },
-          },
-          agentModelSorts: [{ groups: [{ modelIds: ["gemini-4-argon-medium"] }] }],
-          allowedTiers: [{ id: "free-tier", isDefault: true }],
-        }),
-        { status: 200 }
-      )
-    );
-    return fetchAntigravityQuota(c);
-  });
-  const quota = await syncProviderQuota(conn);
-  setCustomQuotaFetcher(null);
-
-  assert.ok(!("modelInventory" in quota), "inventaris tidak ikut tersimpan di credentials");
-  const inv = getAntigravityModelInventory();
-  assert.ok(inv.has("gemini-4-argon-medium"), "model rekomendasi masuk inventaris");
-  assert.ok(!inv.has("legacy-model"), "model non-rekomendasi tidak masuk");
-  const entry = inv.get("gemini-4-argon-medium").accounts[0];
-  assert.strictEqual(entry.display_name, "Gemini 4 Argon (Medium)");
-  assert.strictEqual(entry.supports_thinking, 1);
-  assert.strictEqual(entry.max_tokens, 1048576);
-  assert.strictEqual(entry.quota_remaining, 1);
-  assert.strictEqual(entry.current_tier, "free-tier");
-  assert.strictEqual(getConnections("antigravity")[0].credentials.quota.quotas["gemini-4-argon-medium"].remainingPercentage, 100);
-});
-
-test("Live Quota - Antigravity tidak memasukkan model disabled ke inventaris", async () => {
-  const { parseModelInventory } = await import("../src/services/quota/antigravity.js");
-  const inv = parseModelInventory({
-    models: {
-      "gemini-4-argon-disabled": { displayName: "Gemini 4 Argon", disabled: true, tagTitle: "Unavailable" },
-      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", quotaInfo: { remainingFraction: 1 } },
-    },
-    agentModelSorts: [{ groups: [{ modelIds: ["gemini-4-argon-disabled", "gemini-3.8-flash-high"] }] }],
-  });
-  assert.deepStrictEqual(inv.map((m) => m.modelId), ["gemini-3.8-flash-high"]);
 });

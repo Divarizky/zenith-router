@@ -2,6 +2,10 @@
 
 Sinkronisasi katalog kini juga mencakup provider yang tidak punya daftar model gratis. Model bawaan yang sudah tidak ada di katalog provider berhenti ditawarkan, dan model yang muncul kembali otomatis dirutekan lagi.
 
+### Perubahan
+
+- **Provider HTTP/OAuth `antigravity` dihapus**: Antigravity kini hanya lewat ACP (`antigravity-acp`) dengan banyak akun terisolasi (folder per akun, `GEMINI_HOME` sendiri, tanpa batas akun). Login dilakukan per akun via browser, dan akun yang kena "Usage Limit Reached" dilewati sampai reset. Model yang tersedia hanya `agy-acp/gemini-3.8-flash` (text-only).
+
 ### Fitur
 
 - **Pin Akun per Sesi (Session Account Affinity)**:

@@ -268,106 +268,20 @@ test("Cooldown locks - neither kind of lock is ever shortened or widened", () =>
   assert.ok(getModelLockUntil(conn.id, "meta-llama/Llama-3.3-70B-Instruct-Turbo") > Date.now(), "lock aktif tetap utuh");
 });
 
-test("Antigravity inventory - replace per account, union across active accounts", async () => {
-  const { replaceAntigravityAccountModels, getAntigravityModelInventory } = await import("../src/db/index.js");
+test("deleteConnection - membersihkan lock model milik koneksi itu saja", async () => {
+  const { initDb, addConnection, getModelLockUntil, setConnectionCooldown, deleteConnection } = await import("../src/db/index.js");
   initDb(":memory:");
-  const a = addConnection({ provider: "antigravity", name: "a", auth_type: "oauth", credentials: {} });
-  const b = addConnection({ provider: "antigravity", name: "b", auth_type: "oauth", credentials: {} });
-  replaceAntigravityAccountModels(a.id, "free-tier", [
-    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
-    { modelId: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", recommended: true, quotaRemaining: 0.9 },
-    { modelId: "old-model", displayName: "Old", recommended: false, quotaRemaining: 1 },
-  ]);
-  replaceAntigravityAccountModels(b.id, "free-tier", [
-    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 0 },
-    { modelId: "claude-opus-5-5-low", displayName: "Claude Opus 5.5 (Low)", recommended: true, quotaRemaining: 1 },
-  ]);
-  // Sync ulang mengganti penuh: model yang hilang tidak tertinggal.
-  replaceAntigravityAccountModels(a.id, "free-tier", [
-    { modelId: "gemini-4-argon-medium", displayName: "Gemini 4 Argon (Medium)", recommended: true, quotaRemaining: 1 },
-  ]);
-  let inv = getAntigravityModelInventory();
-  assert.ok(!inv.has("claude-sonnet-4-6"), "model yang hilang dari sync ikut hilang");
-  assert.ok(!inv.has("old-model"), "non-recommended tidak masuk inventaris");
-  assert.strictEqual(inv.get("gemini-4-argon-medium").accounts.length, 2);
-  assert.strictEqual(inv.get("claude-opus-5-5-low").accounts[0].connection_id, b.id);
-  // Akun nonaktif tidak ikut.
-  updateConnection(b.id, { is_active: 0 });
-  inv = getAntigravityModelInventory();
-  assert.strictEqual(inv.get("gemini-4-argon-medium").accounts.length, 1);
-});
-
-test("replaceAntigravityAccountModels - quota_reset_at menerima ISO dan epoch ms, menolak nilai tak valid", async () => {
-  const { initDb, addConnection } = await import("../src/db/index.js");
-  const { replaceAntigravityAccountModels, getAntigravityAccountModels } = await import("../src/db/index.js");
-  initDb(":memory:");
-  const c = addConnection({ provider: "antigravity", name: "iso", auth_type: "oauth", credentials: {} });
-  const ms = Date.now() + 3600_000;
-  replaceAntigravityAccountModels(c.id, "free-tier", [
-    { modelId: "iso", recommended: true, quotaRemaining: 0, quotaResetAt: new Date(ms).toISOString() },
-    { modelId: "ms", recommended: true, quotaRemaining: 0, quotaResetAt: ms },
-    { modelId: "junk", recommended: true, quotaRemaining: 0, quotaResetAt: "bukan-tanggal" },
-    { modelId: "kosong", recommended: true, quotaRemaining: 0 },
-  ]);
-  const rows = getAntigravityAccountModels(c.id);
-  assert.strictEqual(rows.get("iso").quota_reset_at, rows.get("ms").quota_reset_at);
-  assert.strictEqual(rows.get("junk").quota_reset_at, null);
-  assert.strictEqual(rows.get("kosong").quota_reset_at, null);
-});
-test("deleteConnection - membersihkan inventaris Antigravity dan lock model milik koneksi itu", async () => {
-  const {
-    initDb,
-    addConnection,
-    replaceAntigravityAccountModels,
-    getAntigravityAccountModels,
-    getModelLockUntil,
-    setConnectionCooldown,
-    deleteConnection,
-  } = await import("../src/db/index.js");
-  initDb(":memory:");
-  const conn = addConnection({ provider: "antigravity", name: "hapus", auth_type: "oauth", credentials: {} });
-  const lain = addConnection({ provider: "antigravity", name: "tetap", auth_type: "oauth", credentials: {} });
-  const rows = [{ modelId: "gemini-4-argon-medium", displayName: "Argon", recommended: true, quotaRemaining: 1 }];
-  replaceAntigravityAccountModels(conn.id, "free-tier", rows);
-  replaceAntigravityAccountModels(lain.id, "free-tier", rows);
+  const conn = addConnection({ provider: "glm", name: "hapus", credentials: { api_key: "x" } });
+  const lain = addConnection({ provider: "glm", name: "tetap", credentials: { api_key: "y" } });
   const until = Date.now() + 60_000;
-  setConnectionCooldown(conn.id, until, "gemini-4-argon-medium");
-  setConnectionCooldown(lain.id, until, "gemini-4-argon-medium");
-  assert.ok(getModelLockUntil(conn.id, "gemini-4-argon-medium") > Date.now(), "prasyarat: lock terpasang");
+  setConnectionCooldown(conn.id, until, "glm-4-flash");
+  setConnectionCooldown(lain.id, until, "glm-4-flash");
+  assert.ok(getModelLockUntil(conn.id, "glm-4-flash") > Date.now(), "prasyarat: lock terpasang");
 
   assert.strictEqual(deleteConnection(conn.id), true);
-  assert.strictEqual(getAntigravityAccountModels(conn.id).size, 0, "inventaris koneksi terhapus");
-  assert.strictEqual(getAntigravityAccountModels(lain.id).size, 1, "inventaris akun lain tidak ikut terhapus");
-  assert.strictEqual(getModelLockUntil(conn.id, "gemini-4-argon-medium"), null, "lock koneksi terhapus");
-  assert.ok(getModelLockUntil(lain.id, "gemini-4-argon-medium") > Date.now(), "lock akun lain tidak ikut terhapus");
+  assert.strictEqual(getModelLockUntil(conn.id, "glm-4-flash"), null, "lock koneksi terhapus");
+  assert.ok(getModelLockUntil(lain.id, "glm-4-flash") > Date.now(), "lock akun lain tidak ikut terhapus");
 });
-
-test("getAntigravityModelsByConnection - hanya koneksi antigravity yang masih aktif", async () => {
-  const {
-    initDb,
-    addConnection,
-    updateConnection,
-    replaceAntigravityAccountModels,
-    getAntigravityModelsByConnection,
-    deleteConnection,
-  } = await import("../src/db/index.js");
-  initDb(":memory:");
-  const aktif = addConnection({ provider: "antigravity", name: "aktif", auth_type: "oauth", credentials: {} });
-  const nonaktif = addConnection({ provider: "antigravity", name: "nonaktif", auth_type: "oauth", credentials: {} });
-  const lain = addConnection({ provider: "cline", name: "cline", auth_type: "oauth", credentials: {} });
-  const rows = [{ modelId: "gemini-4-argon-medium", displayName: "Argon", recommended: true, quotaRemaining: 1 }];
-  for (const c of [aktif, nonaktif, lain]) replaceAntigravityAccountModels(c.id, "free-tier", rows);
-  updateConnection(nonaktif.id, { is_active: 0 });
-
-  const tampil = getAntigravityModelsByConnection();
-  assert.ok(tampil.has(aktif.id), "koneksi aktif ikut");
-  assert.ok(!tampil.has(nonaktif.id), "koneksi nonaktif tidak ikut");
-  assert.ok(!tampil.has(lain.id), "provider lain tidak ikut");
-
-  assert.strictEqual(deleteConnection(aktif.id), true);
-  assert.ok(!getAntigravityModelsByConnection().has(aktif.id), "koneksi terhapus tidak ikut");
-});
-
 
 test("Database - a bound text column never carries a NUL byte into SQLite", async () => {
   const db = initDb(":memory:");
@@ -466,5 +380,38 @@ test("Migration - legacy model lock is capped like new ones", () => {
   } finally {
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) rmSync(tmp + suffix, { force: true });
+  }
+});
+
+test("migrasi - tabel inventaris Antigravity lama dibuang dari database yang sudah ada", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { initDb, getDb, addConnection, getModelLockUntil, setConnectionCooldown } = await import("../src/db/index.js");
+  const dir = mkdtempSync(join(tmpdir(), "zenith-db-migrate-"));
+  const file = join(dir, "legacy.db");
+  try {
+    // Database lama: sudah punya tabel inventaris beserta baris di dalamnya.
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`CREATE TABLE antigravity_account_models (connection_id INTEGER NOT NULL, model_id TEXT NOT NULL, synced_at INTEGER NOT NULL, PRIMARY KEY (connection_id, model_id));
+      CREATE INDEX idx_ag_models_model ON antigravity_account_models (model_id);
+      INSERT INTO antigravity_account_models VALUES (1, 'gemini-x', 1);`);
+    legacy.close();
+
+    initDb(file);
+    const tables = getDb().prepare("SELECT name FROM sqlite_master WHERE name IN ('antigravity_account_models','idx_ag_models_model')").all();
+    assert.deepStrictEqual(tables, [], "tabel dan indeks lama terbuang");
+
+    // Skema yang tersisa tetap berfungsi untuk provider lain.
+    const c = addConnection({ provider: "glm", name: "glm", credentials: { api_key: "x" } });
+    setConnectionCooldown(c.id, Date.now() + 60_000, "glm-4-flash");
+    assert.ok(getModelLockUntil(c.id, "glm-4-flash") > Date.now());
+
+    // Dijalankan ulang pada database yang sudah bersih tidak error.
+    initDb(file);
+  } finally {
+    closeDb();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

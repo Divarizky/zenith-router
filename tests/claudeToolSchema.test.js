@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert";
-import { AntigravityExecutor } from "../src/executors/antigravity.js";
 import { openaiToGeminiRequest, flattenToolUnionsForClaude } from "../src/translator/gemini.js";
 
 const unionTool = {
@@ -69,31 +68,6 @@ test("flattenToolUnionsForClaude - input tidak diubah dan request tanpa tools di
   assert.strictEqual(flattenToolUnionsForClaude(noTools), noTools);
 });
 
-function captureExecutor() {
-  const seen = {};
-  const executor = new AntigravityExecutor({
-    fetchFn: async (url, init = {}) => {
-      seen.body = JSON.parse(init.body);
-      return new Response("{}", { status: 200 });
-    },
-  });
-  return { executor, seen };
-}
-
-test("Antigravity executor - model Claude mendapat schema rata, model Gemini tidak berubah", async () => {
-  const req = openaiToGeminiRequest({ model: "m", messages: [{ role: "user", content: "hi" }], tools: [unionTool] }, "m");
-  const body = JSON.stringify({ project: "p", request: req });
-  const conn = { credentials: { project_id: "p" } };
-
-  const { executor: claudeExec, seen: claudeSeen } = captureExecutor();
-  await claudeExec.execute({ body, targetModel: "claude-sonnet-4-6", connection: conn });
-  assert.ok(!JSON.stringify(claudeSeen.body.request.tools).includes("anyOf"));
-
-  const { executor: geminiExec, seen: geminiSeen } = captureExecutor();
-  await geminiExec.execute({ body, targetModel: "gemini-3.8-flash-high", connection: conn });
-  assert.ok(JSON.stringify(geminiSeen.body.request.tools).includes("anyOf"), "Gemini tetap menerima anyOf");
-});
-
 const toolHistory = {
   model: "m",
   messages: [
@@ -135,24 +109,6 @@ test("Gemini request - karakter id yang tidak sah untuk Claude disanitasi konsis
   const { call, resp } = callAndResponse(openaiToGeminiRequest(body, "m"));
   assert.strictEqual(call.id, "call_1_x");
   assert.strictEqual(resp.id, "call_1_x");
-});
-
-test("Antigravity executor - id tool dikirim ke Claude dan dibuang untuk Gemini", async () => {
-  const req = openaiToGeminiRequest(toolHistory, "m");
-  const body = JSON.stringify({ project: "p", request: req });
-  const conn = { credentials: { project_id: "p" } };
-
-  const { executor: claudeExec, seen: claudeSeen } = captureExecutor();
-  await claudeExec.execute({ body, targetModel: "claude-sonnet-4-6", connection: conn });
-  const claudeParts = callAndResponse(claudeSeen.body.request);
-  assert.strictEqual(claudeParts.call.id, "toolu_01ABC");
-  assert.strictEqual(claudeParts.resp.id, "toolu_01ABC");
-
-  const { executor: geminiExec, seen: geminiSeen } = captureExecutor();
-  await geminiExec.execute({ body, targetModel: "gemini-3.8-flash-high", connection: conn });
-  const geminiParts = callAndResponse(geminiSeen.body.request);
-  assert.ok(!("id" in geminiParts.call));
-  assert.ok(!("id" in geminiParts.resp));
 });
 
 test("Gemini response - id functionCall dari upstream diteruskan ke klien", async () => {

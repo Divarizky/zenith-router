@@ -403,8 +403,8 @@ export function normalizeModelIdentifier(raw) {
   if (!raw || typeof raw !== "string") return "";
   let s = raw.toLowerCase().trim();
 
-  // Strip prefix provider (misal ag/, cc/, antigravity/, openrouter/deepseek/, dll)
-  s = s.replace(/^(?:ag|cc|antigravity|commandcode|openrouter|openai|anthropic|google|deepseek|qwen|zhipu|meta-llama|cohere|mistral|github)\//g, "");
+  // Strip prefix provider (misal ag/, cc/, openrouter/deepseek/, dll)
+  s = s.replace(/^(?:ag|cc|commandcode|openrouter|openai|anthropic|google|deepseek|qwen|zhipu|meta-llama|cohere|mistral|github)\//g, "");
   if (s.includes("/")) {
     const parts = s.split("/");
     s = parts[parts.length - 1];

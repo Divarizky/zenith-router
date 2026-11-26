@@ -360,29 +360,16 @@ test("claude login - callback URL dengan error provider ditampilkan apa adanya",
   assert.strictEqual(getConnections("claude").length, 0);
 });
 
-test("manual completion - pasted callback URL or code#state, state must match", async (t) => {
+test("manual completion - pasted code#state, state must match", async (t) => {
   t.after(reset);
   initDb(":memory:");
   mockFetch({
-    "oauth2.googleapis.com/token": json({ access_token: "ya29", refresh_token: "g-rt", expires_in: 3599 }),
-    "oauth2/v1/userinfo": json({ email: "g@example.com" }),
-    loadCodeAssist: json({ cloudaicompanionProject: "proj-1", allowedTiers: [{ id: "free-tier", isDefault: true }] }),
-    onboardUser: json({ done: true }),
     "anthropic.com/v1/oauth/token": json({ access_token: "a", refresh_token: "r", expires_in: 60 }),
   });
 
-  const ag = await startOAuthFlow({ providerId: "antigravity", origin: ORIGIN });
-  const state = new URL(ag.authUrl).searchParams.get("state");
-  const wrong = await completeManual(ag.flowId, `http://localhost:20120/callback?code=c&state=other`);
-  assert.strictEqual(wrong.ok, false);
-  const ok = await completeManual(ag.flowId, `http://localhost:20120/callback?code=c&state=${state}`);
-  assert.strictEqual(ok.ok, true);
-  const [agConn] = getConnections("antigravity");
-  assert.strictEqual(agConn.credentials.project_id, "proj-1");
-  assert.strictEqual(agConn.name, "g@example.com");
-
   const cc = await startOAuthFlow({ providerId: "claude", origin: ORIGIN });
   const ccState = new URL(cc.authUrl).searchParams.get("state");
+  assert.strictEqual((await completeManual(cc.flowId, `code123#other`)).ok, false);
   assert.strictEqual((await completeManual(cc.flowId, `code123#${ccState}`)).ok, true);
   assert.strictEqual(getConnections("claude").length, 1);
 });

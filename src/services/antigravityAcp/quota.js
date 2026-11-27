@@ -170,7 +170,7 @@ export function parseAntigravityQuotaMessage(text, nowMs = Date.now()) {
 }
 
 export const DEFAULT_QUOTA_TTL_MS = 300_000;
-export const DEFAULT_QUOTA_TIMEOUT_MS = 10_000;
+export const DEFAULT_QUOTA_TIMEOUT_MS = 30_000;
 
 const quotaCache = new Map();
 const inFlightProbes = new Map();
@@ -244,17 +244,19 @@ export async function inspectAntigravityAcpAccountQuota(
       let availableCommands = null;
       if (typeof client.onUpdate === "function") {
         try {
-          client.onUpdate((update) => {
-            if (!update || typeof update !== "object") return;
-            if (update.type === "available_commands_update") {
-              if (Array.isArray(update.availableCommands)) {
-                availableCommands = update.availableCommands.map((c) => (typeof c === "string" ? c : c?.name || ""));
+          client.onUpdate((params) => {
+            const u = params?.update || params;
+            if (!u || typeof u !== "object") return;
+            const kind = u.sessionUpdate || u.type;
+            if (kind === "available_commands_update") {
+              if (Array.isArray(u.availableCommands)) {
+                availableCommands = u.availableCommands.map((c) => (typeof c === "string" ? c : c?.name || ""));
               }
-            } else if (update.type === "agent_message_chunk") {
-              const chunkText = typeof update.content?.text === "string"
-                ? update.content.text
-                : typeof update.text === "string"
-                  ? update.text
+            } else if (kind === "agent_message_chunk") {
+              const chunkText = typeof u.content?.text === "string"
+                ? u.content.text
+                : typeof u.text === "string"
+                  ? u.text
                   : "";
               if (chunkText) {
                 usageText += chunkText;

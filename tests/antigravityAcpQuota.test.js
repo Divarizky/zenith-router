@@ -290,3 +290,65 @@ test("h. inspectAntigravityAcpAccountQuota: marks limited if any window has rema
   assert.equal(getAntigravityAcpCachedQuota("acc-zero")?.status, "limited");
   assert.equal(getAntigravityAcpCachedQuota("acc-zero")?.resetAt, Date.UTC(2026, 10, 27, 14, 0, 0));
 });
+
+test("i. inspectAntigravityAcpAccountQuota: supports real ACP v1 payload shape (params.update.sessionUpdate)", async () => {
+  let promptCalls = [];
+  let updateListener = null;
+
+  const usageOutput = `
+### Quota Limits
+- **Gemini Models**
+  - **Five Hour Limit Remaining:** 90% remaining (resets Nov 27, 2026, 15:00 UTC)
+`;
+
+  const createClient = async () => ({
+    cwd: "/tmp",
+    onUpdate: (listener) => {
+      updateListener = listener;
+    },
+    initialize: async () => ({ protocolVersion: 1 }),
+    newSession: async () => {
+      // simulate ACP v1 available_commands_update shape
+      if (updateListener) {
+        updateListener({
+          sessionId: "session-acp-v1",
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [{ name: "usage" }, { name: "help" }],
+          },
+        });
+      }
+      return {
+        sessionId: "session-acp-v1",
+        _meta: { antigravity: { tier: { name: "ACP v1 Tier" } } },
+      };
+    },
+    prompt: async (args) => {
+      promptCalls.push(args);
+      // simulate ACP v1 agent_message_chunk shape
+      if (updateListener) {
+        updateListener({
+          sessionId: "session-acp-v1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: usageOutput },
+          },
+        });
+      }
+      return { ok: true };
+    },
+    close: async () => {},
+  });
+
+  const res = await inspectAntigravityAcpAccountQuota("acc-acp-v1", { createClient });
+
+  assert.equal(promptCalls.length, 1);
+  assert.equal(promptCalls[0].sessionId, "session-acp-v1");
+  assert.equal(promptCalls[0].prompt[0].text, "/usage");
+
+  assert.equal(res.status, "ready");
+  assert.equal(res.planType, "ACP v1 Tier");
+  assert.equal(res.windows.length, 1);
+  assert.equal(res.windows[0].remainingPercent, 90);
+  assert.equal(res.windows[0].bucket, "Five Hour Limit");
+});

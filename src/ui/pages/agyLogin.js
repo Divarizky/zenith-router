@@ -10,6 +10,7 @@ import {
   removeAntigravityAcpAccount,
   renameAntigravityAcpAccount,
 } from "../../services/antigravityAcp/profiles.js";
+import { inspectAntigravityAcpAccountQuota } from "../../services/antigravityAcp/quota.js";
 import { escapeHtml } from "../html.js";
 import { t } from "../i18n/index.js";
 
@@ -85,7 +86,20 @@ export async function handleAgyAccountRemove(c) {
   return c.redirect(`${BACK}?acp_notice=${code}`);
 }
 
-const NOTICE_CODES = new Set(["added", "relogin", "removed", "renamed", "err_name", "err_busy", "err_generic"]);
+export async function handleAgyAccountCheckQuota(c) {
+  const body = await input(c);
+  const id = typeof body.id === "string" ? body.id : "";
+  if (id) {
+    try {
+      await inspectAntigravityAcpAccountQuota(id, { force: true });
+    } catch (err) {
+      console.error(`[zenith] ACP Quota inspect failed for ${id}:`, err.message);
+    }
+  }
+  return c.redirect(`${BACK}?acp_notice=quota_checked`);
+}
+
+const NOTICE_CODES = new Set(["added", "relogin", "removed", "renamed", "quota_checked", "err_name", "err_busy", "err_generic"]);
 
 const LOGIN_SCRIPT = String.raw`
 <script>
@@ -160,13 +174,17 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
       ? ` (${escapeHtml(account.quota.status)})`
       : "";
     const dataAttrs = `data-open="${escapeHtml(tr("open_login"))}" data-hint="${escapeHtml(tr("login_hint"))}" data-hint-code="${escapeHtml(tr("login_hint_code"))}" data-cancel="${escapeHtml(tr("cancel"))}" data-waiting="${escapeHtml(tr("login_waiting"))}" data-callback-failed="${escapeHtml(tr("callback_failed"))}" data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
-    return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:12px;align-items:center;">
+    return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:12px;align-items:center;">
       <form action="${BACK}/accounts/rename" method="POST" style="margin:0;display:flex;gap:6px;align-items:center;">
         <input type="hidden" name="id" value="${escapeHtml(account.id)}" />
         <input name="name" value="${escapeHtml(account.name)}" maxlength="40" required autocomplete="off" aria-label="${escapeHtml(tr("rename"))}" class="search-cli-input acp-worker-input" style="min-width:0;" />
         <button type="submit" class="btn-nb">${escapeHtml(tr("rename"))}</button>
       </form>
       <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(tr(STATUS_KEYS[status]))}${until}${quotaBadge}</span>
+      <form action="${BACK}/accounts/check-quota" method="POST" style="margin:0;">
+        <input type="hidden" name="id" value="${escapeHtml(account.id)}" />
+        <button type="submit" class="btn-nb" title="Cek Kuota Terkini">&#8635; Quota</button>
+      </form>
       <button type="button" class="btn-nb" ${dataAttrs} onclick="zrAgyAcpLogin('${escapeHtml(account.id)}', this)">${escapeHtml(tr("login"))}</button>
       <form action="${BACK}/accounts/remove" method="POST" onsubmit="return confirm(this.dataset.confirm)" data-confirm="${escapeHtml(tr("remove_confirm"))}" style="margin:0;">
         <input type="hidden" name="id" value="${escapeHtml(account.id)}" />

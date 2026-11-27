@@ -749,14 +749,14 @@ test("prompt failure is ambiguous and never replays to another worker", async ()
   assert.equal(calls.some(([name]) => name === "cancel"), false);
 });
 
-test("model catalog: configOptions has priority, legacy is fallback, nothing invented", async () => {
+test("model catalog: configOptions merges with availableModels variants, legacy is fallback, nothing invented", async () => {
   const { parseSessionModelCatalog } = await import("../src/services/antigravityAcp/catalog.js");
   const both = parseSessionModelCatalog({
     configOptions: [{ id: "m", category: "model", type: "select", options: [{ value: "a", name: "A" }, { group: "g", options: [{ value: "b", name: "B" }] }] }],
-    models: { availableModels: [{ modelId: "legacy" }] },
+    models: { availableModels: [{ modelId: "legacy" }, { modelId: "b" }] },
   });
   assert.equal(both.method, "config_option");
-  assert.deepEqual(both.models.map((m) => m.id), ["a", "b"]);
+  assert.deepEqual(both.models.map((m) => m.id), ["a", "b", "legacy"]);
   const legacy = parseSessionModelCatalog({ models: { availableModels: [{ modelId: "x", name: "X" }, { modelId: "x" }] } });
   assert.deepEqual(legacy, { method: "legacy", configId: null, models: [{ id: "x", name: "X" }] });
   assert.equal(parseSessionModelCatalog({ configOptions: [{ category: "mode", type: "select", id: "q", options: [] }] }), null);
@@ -846,7 +846,7 @@ test("catalog: empty model select is authoritative and clears stale catalog", as
   const { parseSessionModelCatalog, recordAntigravityAcpAccountCatalog, getAntigravityAcpAccountCatalog, resetAntigravityAcpCatalogForTests } = await import("../src/services/antigravityAcp/catalog.js");
   await reset(TWO_PROFILES);
   resetAntigravityAcpCatalogForTests();
-  const empty = parseSessionModelCatalog({ configOptions: [{ id: "m", category: "model", type: "select", options: [] }], models: { availableModels: [{ modelId: "legacy" }] } });
+  const empty = parseSessionModelCatalog({ configOptions: [{ id: "m", category: "model", type: "select", options: [] }] });
   assert.deepEqual(empty, { method: "config_option", configId: "m", models: [] });
   recordAntigravityAcpAccountCatalog(ID1, { models: { availableModels: [{ modelId: "old" }] } });
   assert.ok(getAntigravityAcpAccountCatalog(ID1));
@@ -918,6 +918,29 @@ test("selection isolation: rejected or mismatched set_config_option never prompt
     assert.ok(a.calls.some((x) => x[0] === "close"), name);
     assert.equal(promptsOf(a).length + promptsOf(b).length, res.status === 200 ? 1 : 0, name);
   }
+});
+
+test("thinking variant model selection falls back to thought_level option and base model", async () => {
+  await reset(TWO_PROFILES);
+  const fakeSession = async () => ({
+    sessionId: "session-1",
+    configOptions: [
+      { id: "model", category: "model", type: "select", options: [{ value: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen" }] },
+      { id: "thinking_level", category: "thought_level", type: "select", options: [{ value: "low" }, { value: "high" }] },
+    ],
+    models: {
+      availableModels: [{ modelId: "gemini-4-hydrogen-high" }],
+    },
+  });
+  const c = fakeClient({ session: fakeSession });
+  const res = await executeAntigravityAcp({
+    body: { model: "agy-acp/gemini-4-hydrogen-high", messages: [{ role: "user", content: "hello" }] },
+    createClient: async () => c.client,
+  });
+  assert.equal(res.status, 200);
+  const setOpts = c.calls.filter((x) => x[0] === "setConfigOption").map((x) => x[1]);
+  assert.ok(setOpts.some((o) => o.configId === "model" && o.value === "gemini-4-hydrogen"));
+  assert.ok(setOpts.some((o) => o.configId === "thinking_level" && o.value === "high"));
 });
 
 test("workerRuntimeEnv isolates D-Bus session bus on Linux", () => {

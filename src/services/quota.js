@@ -2,6 +2,8 @@ import { getConnectionById, getConnections, mergeConnectionCredentials } from ".
 import { fetchLiveQuota } from "./quota/index.js";
 import { canRefresh, needsTokenRefresh, refreshOAuthToken } from "./tokenRefresh.js";
 import { logQuiet } from "./logger.js";
+import { listAntigravityAcpProfiles } from "./antigravityAcp/profiles.js";
+import { inspectAntigravityAcpAccountQuota } from "./antigravityAcp/quota.js";
 
 let customQuotaFetcher = null;
 
@@ -195,7 +197,7 @@ async function withFreshToken(connection, force, quiet) {
  */
 export function getAllQuotaStatus() {
   const connections = getConnections();
-  return connections.map((c) => ({
+  const list = connections.map((c) => ({
     id: c.id,
     name: c.name,
     provider: c.provider,
@@ -205,6 +207,29 @@ export function getAllQuotaStatus() {
     quota: c.credentials?.quota || null,
     is_exhausted: isConnectionExhausted(c),
   }));
+
+  try {
+    const acpAccounts = listAntigravityAcpProfiles();
+    for (const account of acpAccounts) {
+      list.push({
+        id: `acp-${account.id}`,
+        name: account.name,
+        provider: "antigravity-acp",
+        auth_type: "oauth",
+        is_active: account.enabled ? 1 : 0,
+        priority: account.priority ?? 0,
+        quota: {
+          type: "reset_time",
+          status: account.status, // "ready" | "limited" | "unavailable"
+          reset_at: account.limitedUntil || account.quota?.resetAt || null,
+          updated_at: account.quota?.checkedAt || Date.now(),
+        },
+        is_exhausted: account.status === "limited",
+      });
+    }
+  } catch {}
+
+  return list;
 }
 
 /**
@@ -216,13 +241,23 @@ export function getAllQuotaStatus() {
  */
 export async function handleSyncQuotaForm(c) {
   const body = await c.req.parseBody();
-  const id = Number(body.id);
-  const connection = getConnections().find((x) => x.id === id);
-  if (connection) {
+  const rawId = String(body.id || "");
+  if (rawId.startsWith("acp-")) {
+    const acpAccountId = rawId.slice(4);
     try {
-      await syncProviderQuota(connection);
+      await inspectAntigravityAcpAccountQuota(acpAccountId, { force: true });
     } catch (err) {
-      console.error(`[zenith] Quota sync failed for connection #${id}:`, err.message);
+      console.error(`[zenith] ACP Quota sync failed for account ${acpAccountId}:`, err.message);
+    }
+  } else {
+    const id = Number(body.id);
+    const connection = getConnections().find((x) => x.id === id);
+    if (connection) {
+      try {
+        await syncProviderQuota(connection);
+      } catch (err) {
+        console.error(`[zenith] Quota sync failed for connection #${id}:`, err.message);
+      }
     }
   }
   return c.redirect("/dashboard/usage?synced=1");

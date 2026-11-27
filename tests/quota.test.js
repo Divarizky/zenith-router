@@ -114,9 +114,30 @@ test("GET /api/quota - returns quota status for all accounts", async () => {
 
   const json = await res.json();
   assert.ok(Array.isArray(json));
-  assert.strictEqual(json.length, 1);
-  assert.strictEqual(json[0].name, "Copilot Work");
-  assert.strictEqual(json[0].quota.remaining, 1500);
+  const githubEntry = json.find((item) => item.provider === "github");
+  assert.ok(githubEntry);
+  assert.strictEqual(githubEntry.name, "Copilot Work");
+  assert.strictEqual(githubEntry.quota.remaining, 1500);
   // Prioritas dipakai klien usage untuk memilih akun seperti router.
-  assert.strictEqual(typeof json[0].priority, "number");
+  assert.strictEqual(typeof githubEntry.priority, "number");
+});
+
+test("quota service - getAllQuotaStatus includes virtual connection for ACP accounts", async () => {
+  initDb(":memory:");
+  const { setAntigravityAcpProfiles } = await import("../src/services/antigravityAcp/profiles.js");
+  const testId = "11112222333344445555666677778888";
+  await setAntigravityAcpProfiles([
+    { id: testId, name: "ACP User", enabled: true },
+  ]);
+
+  const allStatus = getAllQuotaStatus();
+  const acpEntry = allStatus.find((item) => item.id === `acp-${testId}`);
+  assert.ok(acpEntry, "ACP account must be present in getAllQuotaStatus");
+  assert.strictEqual(acpEntry.name, "ACP User");
+  assert.strictEqual(acpEntry.provider, "antigravity-acp");
+  assert.strictEqual(acpEntry.auth_type, "oauth");
+  assert.strictEqual(acpEntry.is_active, 1);
+  assert.ok(acpEntry.quota);
+  assert.strictEqual(acpEntry.quota.type, "reset_time");
+  assert.strictEqual(typeof acpEntry.is_exhausted, "boolean");
 });

@@ -36,31 +36,45 @@ function flattenSelectOptions(options) {
 }
 
 /**
- * Reads the model catalog from a session/new result. configOptions (category "model", type "select")
- * has priority; the legacy models.availableModels shape is only a fallback. Nothing is invented:
- * an unrecognised shape yields null.
+ * Reads the model catalog from a session/new result. Combines models from
+ * configOptions (category "model", type "select") with models.availableModels (if any)
+ * using dedupe.
  */
 export function parseSessionModelCatalog(session) {
   if (!session || typeof session !== "object") return null;
+
+  let configOption = null;
+  const configModels = [];
   if (Array.isArray(session.configOptions)) {
-    const option = session.configOptions.find((o) => o && o.category === "model" && o.type === "select" && cleanText(o.id));
-    if (option) {
-      const models = dedupe(flattenSelectOptions(option.options).map((o) => {
+    configOption = session.configOptions.find((o) => o && o.category === "model" && o.type === "select" && cleanText(o.id));
+    if (configOption) {
+      const extracted = dedupe(flattenSelectOptions(configOption.options).map((o) => {
         const id = cleanText(o?.value);
         return id ? { id, name: cleanText(o.name) || id } : null;
       }).filter(Boolean));
-      // An empty model select is authoritative: never fall back to the legacy shape.
-      return { method: "config_option", configId: option.id, models };
+      configModels.push(...extracted);
     }
   }
+
+  const legacyModels = [];
   const legacy = session.models?.availableModels;
   if (Array.isArray(legacy)) {
-    const models = dedupe(legacy.map((m) => {
+    const extracted = dedupe(legacy.map((m) => {
       const id = cleanText(m?.modelId);
       return id ? { id, name: cleanText(m.name) || id } : null;
     }).filter(Boolean));
-    if (models.length) return { method: "legacy", configId: null, models };
+    legacyModels.push(...extracted);
   }
+
+  if (configOption) {
+    const merged = dedupe([...configModels, ...legacyModels]);
+    return { method: "config_option", configId: configOption.id, models: merged };
+  }
+
+  if (legacyModels.length) {
+    return { method: "legacy", configId: null, models: legacyModels };
+  }
+
   return null;
 }
 

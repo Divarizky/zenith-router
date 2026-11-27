@@ -258,12 +258,49 @@ export async function executeAntigravityAcp({ body, signal, createClient = trans
         setStatus("ready");
         continue;
       }
-      const selected = catalog.method === "config_option"
-        ? (typeof client.setConfigOption === "function" ? client.setConfigOption({ sessionId: session.sessionId, configId: catalog.configId, value: requestedModel }) : null)
-        : (typeof client.setModel === "function" ? client.setModel({ sessionId: session.sessionId, modelId: requestedModel }) : null);
+
+      // Check if requestedModel is directly in configOption select options
+      const configOption = Array.isArray(session.configOptions)
+        ? session.configOptions.find((o) => o?.id === catalog.configId)
+        : null;
+      const flatOptions = configOption ? (Array.isArray(configOption.options) ? configOption.options.flatMap((item) => (item && Array.isArray(item.options) ? item.options : [item])) : []) : [];
+      const isDirectConfigOption = flatOptions.some((o) => o?.value === requestedModel);
+
+      let selected = null;
+      if (catalog.method === "config_option" && isDirectConfigOption && typeof client.setConfigOption === "function") {
+        selected = client.setConfigOption({ sessionId: session.sessionId, configId: catalog.configId, value: requestedModel });
+      } else {
+        // Check if model is a thinking variant (e.g. -low, -medium, -high, -xhigh)
+        const thinkingMatch = requestedModel.match(/^(.*)-(low|medium|high|xhigh)$/i);
+        let handledThinking = false;
+        if (thinkingMatch && Array.isArray(session.configOptions)) {
+          const baseModel = thinkingMatch[1];
+          const thinkingLevel = thinkingMatch[2].toLowerCase();
+          const baseOptionMatch = flatOptions.some((o) => o?.value === baseModel);
+          const thoughtOption = session.configOptions.find(
+            (o) => o && (o.category === "thought_level" || o.id === "thinking_level" || o.category === "thinking_level" || o.id === "thought_level")
+          );
+          if (baseOptionMatch && thoughtOption && typeof client.setConfigOption === "function") {
+            handledThinking = true;
+            selected = (async () => {
+              const res1 = await client.setConfigOption({ sessionId: session.sessionId, configId: catalog.configId, value: baseModel });
+              const res2 = await client.setConfigOption({ sessionId: session.sessionId, configId: thoughtOption.id, value: thinkingLevel });
+              return res2 || res1;
+            })();
+          }
+        }
+        if (!handledThinking) {
+          if (typeof client.setModel === "function") {
+            selected = client.setModel({ sessionId: session.sessionId, modelId: requestedModel });
+          } else if (catalog.method === "config_option" && typeof client.setConfigOption === "function") {
+            selected = client.setConfigOption({ sessionId: session.sessionId, configId: catalog.configId, value: requestedModel });
+          }
+        }
+      }
+
       if (!selected) throw Object.assign(new Error("model selection unsupported"), { code: "ACP_MODEL_SELECT_UNSUPPORTED" });
       const selectResult = await selected;
-      if (catalog.method === "config_option" && Array.isArray(selectResult?.configOptions)) {
+      if (catalog.method === "config_option" && isDirectConfigOption && Array.isArray(selectResult?.configOptions)) {
         const opt = selectResult.configOptions.find((o) => o?.id === catalog.configId);
         if (opt && opt.currentValue !== undefined && opt.currentValue !== requestedModel) {
           throw Object.assign(new Error("model selection not applied"), { code: "ACP_MODEL_SELECT_REJECTED" });

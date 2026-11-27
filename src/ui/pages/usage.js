@@ -19,6 +19,7 @@ export function renderUsagePage(port = 20120, query = {}, lang = DEFAULT_LANGUAG
   // Hide accounts whose provider exposes no quota data. Fetcher-backed accounts stay
   // until they have been synced (so Sync is reachable) or when they report an error.
   const quotas = getAllQuotaStatus().filter((s) => {
+    if (s.provider === "antigravity-acp") return true;
     const q = s.quota;
     if (q && (q.error || quotaRows(q).length > 0)) return true;
     return hasQuotaFetcher(s.provider) && !q?.updated_at;
@@ -1859,7 +1860,15 @@ function quotaRows(q) {
   }
 
   if (rows.length === 0) {
-    if (typeof q.remaining === "number") {
+    if (q.type === "reset_time") {
+      const statusLabel = q.status ? `Status: ${q.status}` : "Active";
+      rows.push({
+        label: "ACP Session Quota",
+        remaining: q.status === "limited" ? 0 : 100,
+        used: statusLabel,
+        reset: q.reset_at || null,
+      });
+    } else if (typeof q.remaining === "number") {
       const suffix = unit && unit !== "unknown" ? " " + unit : "";
       rows.push({ label: "Quota", remaining: null, used: q.remaining.toLocaleString() + suffix + " left", reset: q.reset_time || null });
     }
@@ -1978,7 +1987,7 @@ function renderQuotaCard(s, index = 0) {
       <div class="q-foot">
         <span class="q-updated">${updated}</span>
         <form action="/dashboard/quota/sync" method="POST" style="margin: 0;">
-          <input type="hidden" name="id" value="${Number(s.id) || 0}" />
+          <input type="hidden" name="id" value="${escapeHtml(String(s.id || ''))}" />
           <button type="submit" class="btn-sync-channel">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
             <span>Sync</span>

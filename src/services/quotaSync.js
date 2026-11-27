@@ -2,6 +2,8 @@ import { getConnections } from "../db/index.js";
 import { syncProviderQuota } from "./quota.js";
 import { hasQuotaFetcher } from "./quota/index.js";
 import { logQuiet } from "./logger.js";
+import { listAntigravityAcpProfiles } from "./antigravityAcp/profiles.js";
+import { inspectAntigravityAcpAccountQuota } from "./antigravityAcp/quota.js";
 
 const DEFAULT_INTERVAL_MINUTES = 15;
 
@@ -47,6 +49,22 @@ export async function syncAllQuotas({ minAgeMs = 0, quiet = false } = {}) {
         else console.warn(`[zenith] Quota sync failed for ${c.provider} (#${c.id}): ${err.message}`);
       }
     }
+
+    try {
+      const acpProfiles = listAntigravityAcpProfiles().filter((a) => a.enabled);
+      for (const acp of acpProfiles) {
+        try {
+          const quota = await inspectAntigravityAcpAccountQuota(acp.id, { force: true });
+          results[`acp-${acp.id}`] = { ok: true, quota };
+          synced++;
+        } catch (err) {
+          results[`acp-${acp.id}`] = { ok: false, error: err.message };
+          if (quiet) logQuiet(`[zenith] ACP Quota sync failed for ${acp.name} (#${acp.id}): ${err.message}`, "warn");
+          else console.warn(`[zenith] ACP Quota sync failed for ${acp.name} (#${acp.id}): ${err.message}`);
+        }
+      }
+    } catch {}
+
     if (synced > 0) {
       const msg = `[zenith] Quota sync: ${synced} akun diperbarui`;
       if (quiet) logQuiet(msg);

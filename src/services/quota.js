@@ -211,6 +211,22 @@ export function getAllQuotaStatus() {
   try {
     const acpAccounts = listAntigravityAcpProfiles();
     for (const account of acpAccounts) {
+      const qData = account.quota?.quotas
+        ? {
+            unit: "percent",
+            plan: account.quota.planType || "Antigravity ACP",
+            quotas: account.quota.quotas,
+            status: account.status,
+            reset_at: account.limitedUntil || account.quota?.resetAt || null,
+            updated_at: account.quota?.checkedAt || Date.now(),
+          }
+        : {
+            type: "reset_time",
+            status: account.status, // "ready" | "limited" | "unavailable"
+            reset_at: account.limitedUntil || account.quota?.resetAt || null,
+            updated_at: account.quota?.checkedAt || Date.now(),
+          };
+
       list.push({
         id: `acp-${account.id}`,
         name: account.name,
@@ -218,12 +234,7 @@ export function getAllQuotaStatus() {
         auth_type: "oauth",
         is_active: account.enabled ? 1 : 0,
         priority: account.priority ?? 0,
-        quota: {
-          type: "reset_time",
-          status: account.status, // "ready" | "limited" | "unavailable"
-          reset_at: account.limitedUntil || account.quota?.resetAt || null,
-          updated_at: account.quota?.checkedAt || Date.now(),
-        },
+        quota: qData,
         is_exhausted: account.status === "limited",
       });
     }

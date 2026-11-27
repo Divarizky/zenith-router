@@ -173,6 +173,9 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
     const quotaBadge = account.quota?.status && account.quota.status !== status
       ? ` (${escapeHtml(account.quota.status)})`
       : "";
+    const windowsSummary = Array.isArray(account.quota?.windows) && account.quota.windows.length > 0
+      ? `<span class="pill pill-info" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 700;" title="${escapeHtml(account.quota.windows.map((w) => `${w.label}: ${Math.round(w.remainingPercent)}%`).join(" | "))}">${escapeHtml(account.quota.windows.map((w) => `${w.bucket.replace(/Limit/i, "").trim()}: ${Math.round(w.remainingPercent)}%`).join(" · "))}</span>`
+      : "";
     const dataAttrs = `data-open="${escapeHtml(tr("open_login"))}" data-hint="${escapeHtml(tr("login_hint"))}" data-hint-code="${escapeHtml(tr("login_hint_code"))}" data-cancel="${escapeHtml(tr("cancel"))}" data-waiting="${escapeHtml(tr("login_waiting"))}" data-callback-failed="${escapeHtml(tr("callback_failed"))}" data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
     return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:12px;align-items:center;">
       <form action="${BACK}/accounts/rename" method="POST" style="margin:0;display:flex;gap:6px;align-items:center;">
@@ -180,7 +183,10 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
         <input name="name" value="${escapeHtml(account.name)}" maxlength="40" required autocomplete="off" aria-label="${escapeHtml(tr("rename"))}" class="search-cli-input acp-worker-input" style="min-width:0;" />
         <button type="submit" class="btn-nb">${escapeHtml(tr("rename"))}</button>
       </form>
-      <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(tr(STATUS_KEYS[status]))}${until}${quotaBadge}</span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(tr(STATUS_KEYS[status]))}${until}${quotaBadge}</span>
+        ${windowsSummary}
+      </div>
       <form action="${BACK}/accounts/check-quota" method="POST" style="margin:0;">
         <input type="hidden" name="id" value="${escapeHtml(account.id)}" />
         <button type="submit" class="btn-nb" title="Cek Kuota Terkini">&#8635; Quota</button>

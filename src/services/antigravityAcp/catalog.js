@@ -118,6 +118,17 @@ export function getAntigravityAcpAccountCatalog(accountId) {
   return load().get(accountId) || null;
 }
 
+/** Returns accountIds whose recorded catalog contains modelId. */
+export function getAntigravityAcpAccountsForModel(modelId) {
+  if (!cleanText(modelId)) return [];
+  prune();
+  const out = [];
+  for (const [accountId, entry] of load().entries()) {
+    if (entry.models.some((m) => m.id === modelId)) out.push(accountId);
+  }
+  return out;
+}
+
 /** Union of the catalogs of enabled accounts that are still logged in (checked by the caller-provided filter). */
 export function getAntigravityAcpMergedModels(isAccountUsable = () => true) {
   prune();

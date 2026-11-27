@@ -282,7 +282,10 @@ export function snapshotAntigravityAcpCandidatesForModel(model) {
   });
 }
 
-/** Merged model list across logged-in, enabled accounts; logged-out accounts contribute nothing. */
+/** Merged model list across ready, enabled accounts; non-ready accounts contribute nothing. */
 export function listAntigravityAcpModels() {
-  return getAntigravityAcpMergedModels((id) => !needsLogin(id));
+  return getAntigravityAcpMergedModels((id) => {
+    const status = getAntigravityAcpProfileStatus(id);
+    return status === "ready" || (!isDerivedWorkerMode() && !needsLogin(id) && !isLimited(id) && profileStatuses.get(id) !== "unavailable" && profileStatuses.get(id) !== "needs_login");
+  });
 }

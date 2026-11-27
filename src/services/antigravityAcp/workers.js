@@ -247,3 +247,56 @@ export async function getAntigravityAcpWorker(workerId) {
   const workers = await loadWorkers(only);
   return workers.find((worker) => worker.workerId === workerId) || null;
 }
+
+/**
+ * Verifies worker allowlist membership, binary trustworthiness (not group/other-writable),
+ * and isolated directory existence and 0700 permissions.
+ */
+export async function verifyAntigravityAcpWorkerHealth(workerId) {
+  if (typeof workerId !== "string" || !workerId) {
+    return { ok: false, reason: "invalid_worker_id" };
+  }
+  const accountId = accountIdFromWorkerId(workerId);
+  if (!loaderOverride && !accountId) {
+    return { ok: false, reason: "invalid_worker_id" };
+  }
+  if (accountId) {
+    const paths = accountPaths(accountId);
+    for (const dir of [paths.root, paths.home, paths.run, paths.workspace]) {
+      try {
+        const info = await lstat(dir);
+        if (info.isSymbolicLink() || !info.isDirectory()) {
+          return { ok: false, reason: "invalid_isolated_dir" };
+        }
+        if (process.platform !== "win32" && (info.mode & 0o777) !== 0o700) {
+          return { ok: false, reason: "invalid_isolated_dir" };
+        }
+      } catch {
+        return { ok: false, reason: "invalid_isolated_dir" };
+      }
+    }
+  }
+  const worker = await getAntigravityAcpWorker(workerId);
+  if (!worker) {
+    return { ok: false, reason: "worker_not_found" };
+  }
+  if (!worker.launcher || typeof worker.launcher !== "string") {
+    return { ok: false, reason: "missing_binary" };
+  }
+  try {
+    const resolved = await realpath(worker.launcher);
+    const info = await stat(resolved);
+    if (!info.isFile() || (process.platform !== "win32" && (!(info.mode & 0o111) || !isTrustedWriteMode(info)))) {
+      return { ok: false, reason: "unsafe_binary" };
+    }
+    if (process.platform !== "win32") {
+      const parent = await stat(path.dirname(resolved));
+      if (!parent.isDirectory() || !isTrustedWriteMode(parent)) {
+        return { ok: false, reason: "unsafe_binary" };
+      }
+    }
+  } catch {
+    return { ok: false, reason: "unsafe_binary" };
+  }
+  return { ok: true, worker };
+}

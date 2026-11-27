@@ -5,7 +5,7 @@ import {
 } from "./accounts.js";
 import {
   accountHasLoginFile, getAntigravityAcpWorker, isDerivedWorkerMode, provisionAntigravityAcpAccountDirs, removeAntigravityAcpAccountDirs,
-  registerPendingAntigravityAcpAccount, unregisterPendingAntigravityAcpAccount, isPendingAntigravityAcpAccount,
+  registerPendingAntigravityAcpAccount, unregisterPendingAntigravityAcpAccount, isPendingAntigravityAcpAccount, verifyAntigravityAcpWorkerHealth,
 } from "./workers.js";
 import { DEFAULT_LIMIT_MS } from "./quota.js";
 import { resetAntigravityAcpCatalogForTests, getAntigravityAcpAccountCatalog, invalidateAntigravityAcpAccountCatalog, getAntigravityAcpMergedModels } from "./catalog.js";
@@ -248,6 +248,18 @@ export function getAntigravityAcpProfileStatus(profileId) {
   if (isLimited(profileId)) return "limited";
   if (needsLogin(profileId)) return "needs_login";
   return profileStatuses.get(profileId) || (isDerivedWorkerMode() ? "ready" : "unavailable");
+}
+
+/** Verifies the account's worker health and marks the profile unavailable if unhealthy. */
+export async function syncAntigravityAcpProfileHealth(accountId) {
+  const account = getAccounts().find(({ id }) => id === accountId);
+  if (!account) return { ok: false, reason: "not_found" };
+  const health = await verifyAntigravityAcpWorkerHealth(workerIdForAccount(accountId));
+  if (!health.ok) {
+    setAntigravityAcpProfileStatus(accountId, "unavailable");
+    return { ok: false, status: "unavailable", reason: health.reason };
+  }
+  return { ok: true, status: getAntigravityAcpProfileStatus(accountId), worker: health.worker };
 }
 
 export function listAntigravityAcpProfiles() {

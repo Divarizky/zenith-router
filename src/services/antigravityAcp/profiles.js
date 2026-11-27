@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getSetting, setSetting } from "../settings.js";
+import { getAntigravityAcpCachedQuota } from "./quota.js";
 import {
   ACCOUNTS_SETTING, accountNameKey, getAccounts, nextDefaultAccountName, normalizeAccountName, validateAccounts, workerIdForAccount, isValidAccountId,
 } from "./accounts.js";
@@ -271,6 +272,7 @@ export function listAntigravityAcpProfiles() {
     enabled: account.enabled,
     status: getAntigravityAcpProfileStatus(account.id),
     limitedUntil: getAntigravityAcpAccountLimitedUntil(account.id),
+    quota: getAntigravityAcpCachedQuota(account.id) || null,
   }));
 }
 

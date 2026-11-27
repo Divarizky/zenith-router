@@ -1,3 +1,8 @@
+import { workerIdForAccount } from "./accounts.js";
+import { createAntigravityAcpClient } from "./client.js";
+import { createAntigravityAcpTransport } from "./transport.js";
+import { markAntigravityAcpAccountLimited } from "./profiles.js";
+
 // Port of Troupe's antigravity_quota_message: the agent reports an exhausted quota as plain text.
 const QUOTA_TITLE = "Usage Limit Reached";
 const QUOTA_BODY = "You have reached your current quota for this period.";
@@ -49,4 +54,126 @@ export function parseAntigravityQuotaMessage(text, nowMs = Date.now()) {
     resetAt = absoluteReset(sentence(t.slice(abs + 9)));
   }
   return { resetAt };
+}
+
+export const DEFAULT_QUOTA_TTL_MS = 300_000;
+export const DEFAULT_QUOTA_TIMEOUT_MS = 5_000;
+
+const quotaCache = new Map();
+const inFlightProbes = new Map();
+
+function defaultCreateClient(workerId, options) {
+  return createAntigravityAcpClient(workerId, createAntigravityAcpTransport, options);
+}
+
+function isQuotaLimitError(err) {
+  if (!err) return false;
+  const code = err.code ?? err.rpcCode;
+  const msg = String(err.message || err || "");
+  if (parseAntigravityQuotaMessage(msg)) return true;
+  if (code === -32000 && /quota|limit|rate/i.test(msg)) return true;
+  return false;
+}
+
+export function getAntigravityAcpCachedQuota(accountId, { ttlMs = DEFAULT_QUOTA_TTL_MS, nowMs = Date.now() } = {}) {
+  const entry = quotaCache.get(accountId);
+  if (!entry) return null;
+  if (nowMs - entry.checkedAt >= ttlMs) return null;
+  return entry;
+}
+
+export function clearAntigravityAcpQuotaCacheForTests() {
+  quotaCache.clear();
+  inFlightProbes.clear();
+}
+
+export async function inspectAntigravityAcpAccountQuota(
+  accountId,
+  {
+    createClient = defaultCreateClient,
+    timeoutMs = DEFAULT_QUOTA_TIMEOUT_MS,
+    ttlMs = DEFAULT_QUOTA_TTL_MS,
+    force = false,
+  } = {},
+) {
+  if (!force) {
+    const cached = getAntigravityAcpCachedQuota(accountId, { ttlMs });
+    if (cached) return cached;
+  }
+
+  if (inFlightProbes.has(accountId)) {
+    return inFlightProbes.get(accountId);
+  }
+
+  const probePromise = (async () => {
+    const controller = new AbortController();
+    let client = null;
+    let timedOut = false;
+    let timer = null;
+
+    const timeoutPromise = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort(new Error("timeout"));
+        resolve({ status: "unknown", reason: "timeout", resetAt: null, checkedAt: Date.now() });
+      }, timeoutMs);
+    });
+
+    const runProbe = async () => {
+      const workerId = workerIdForAccount(accountId);
+      client = await createClient(workerId, { signal: controller.signal });
+      if (timedOut || controller.signal.aborted) {
+        return { status: "unknown", reason: "timeout", resetAt: null, checkedAt: Date.now() };
+      }
+
+      await client.initialize({ protocolVersion: 1, clientCapabilities: {} });
+      if (timedOut || controller.signal.aborted) {
+        return { status: "unknown", reason: "timeout", resetAt: null, checkedAt: Date.now() };
+      }
+
+      const session = await client.newSession({ cwd: client.cwd || process.cwd(), mcpServers: [] });
+      if (timedOut || controller.signal.aborted) {
+        return { status: "unknown", reason: "timeout", resetAt: null, checkedAt: Date.now() };
+      }
+
+      const sessionText = typeof session?.message === "string" ? session.message : "";
+      const parsedSession = parseAntigravityQuotaMessage(sessionText);
+      if (parsedSession) {
+        markAntigravityAcpAccountLimited(accountId, parsedSession.resetAt);
+        const result = { status: "limited", resetAt: parsedSession.resetAt, checkedAt: Date.now() };
+        quotaCache.set(accountId, result);
+        return result;
+      }
+
+      const result = { status: "ready", resetAt: null, checkedAt: Date.now() };
+      quotaCache.set(accountId, result);
+      return result;
+    };
+
+    try {
+      return await Promise.race([runProbe(), timeoutPromise]);
+    } catch (err) {
+      if (timedOut || controller.signal.aborted) {
+        return { status: "unknown", reason: "timeout", resetAt: null, checkedAt: Date.now() };
+      }
+      if (isQuotaLimitError(err)) {
+        const parsed = parseAntigravityQuotaMessage(String(err?.message || ""));
+        const resetAt = parsed?.resetAt ?? null;
+        markAntigravityAcpAccountLimited(accountId, resetAt);
+        const result = { status: "limited", resetAt, checkedAt: Date.now() };
+        quotaCache.set(accountId, result);
+        return result;
+      }
+      return { status: "unknown", resetAt: null, checkedAt: Date.now() };
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (client && typeof client.close === "function") {
+        try { await client.close(); } catch {}
+      }
+      inFlightProbes.delete(accountId);
+    }
+  })();
+
+  inFlightProbes.set(accountId, probePromise);
+  return probePromise;
 }

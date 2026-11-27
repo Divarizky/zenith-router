@@ -154,7 +154,11 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
   const loginAttrs = `data-open="${escapeHtml(tr("open_login"))}" data-hint="${escapeHtml(tr("login_hint"))}" data-hint-code="${escapeHtml(tr("login_hint_code"))}" data-cancel="${escapeHtml(tr("cancel"))}" data-waiting="${escapeHtml(tr("login_waiting"))}" data-callback-failed="${escapeHtml(tr("callback_failed"))}" data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
   const rows = accounts.map((account) => {
     const status = STATUS_KEYS[account.status] ? account.status : "unavailable";
-    const until = account.limitedUntil ? ` ${escapeHtml(tr("limited_until"))} ${escapeHtml(new Date(account.limitedUntil).toISOString().slice(0, 16).replace("T", " "))} UTC` : "";
+    const resetAt = account.limitedUntil || account.quota?.resetAt || null;
+    const until = resetAt ? ` ${escapeHtml(tr("limited_until"))} ${escapeHtml(new Date(resetAt).toISOString().slice(0, 16).replace("T", " "))} UTC` : "";
+    const quotaBadge = account.quota?.status && account.quota.status !== status
+      ? ` (${escapeHtml(account.quota.status)})`
+      : "";
     const dataAttrs = `data-open="${escapeHtml(tr("open_login"))}" data-hint="${escapeHtml(tr("login_hint"))}" data-hint-code="${escapeHtml(tr("login_hint_code"))}" data-cancel="${escapeHtml(tr("cancel"))}" data-waiting="${escapeHtml(tr("login_waiting"))}" data-callback-failed="${escapeHtml(tr("callback_failed"))}" data-failed="${escapeHtml(tr("login_failed"))}" data-invalid="${escapeHtml(tr("invalid_code"))}" data-placeholder="${escapeHtml(tr("code_placeholder"))}" data-submit="${escapeHtml(tr("submit_code"))}"`;
     return `<div class="acp-worker-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:12px;align-items:center;">
       <form action="${BACK}/accounts/rename" method="POST" style="margin:0;display:flex;gap:6px;align-items:center;">
@@ -162,7 +166,7 @@ export function renderAgyAccountsCard({ accounts = listAntigravityAcpProfiles(),
         <input name="name" value="${escapeHtml(account.name)}" maxlength="40" required autocomplete="off" aria-label="${escapeHtml(tr("rename"))}" class="search-cli-input acp-worker-input" style="min-width:0;" />
         <button type="submit" class="btn-nb">${escapeHtml(tr("rename"))}</button>
       </form>
-      <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(tr(STATUS_KEYS[status]))}${until}</span>
+      <span class="pill pill-muted" style="border-radius: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; text-transform: uppercase;">${escapeHtml(tr(STATUS_KEYS[status]))}${until}${quotaBadge}</span>
       <button type="button" class="btn-nb" ${dataAttrs} onclick="zrAgyAcpLogin('${escapeHtml(account.id)}', this)">${escapeHtml(tr("login"))}</button>
       <form action="${BACK}/accounts/remove" method="POST" onsubmit="return confirm(this.dataset.confirm)" data-confirm="${escapeHtml(tr("remove_confirm"))}" style="margin:0;">
         <input type="hidden" name="id" value="${escapeHtml(account.id)}" />
